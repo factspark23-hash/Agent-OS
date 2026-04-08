@@ -182,6 +182,81 @@ TOOLS = [
         description="Get Agent-OS server status, uptime, and active sessions.",
         inputSchema={"type": "object", "properties": {}}
     ),
+    Tool(
+        name="browser_type",
+        description="Type text into the currently focused element with human-like delays.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "Text to type"}
+            },
+            "required": ["text"]
+        }
+    ),
+    Tool(
+        name="browser_press",
+        description="Press a keyboard key (Enter, Tab, Escape, Backspace, etc.).",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "key": {"type": "string", "description": "Key to press (e.g., 'Enter', 'Tab', 'Escape')"}
+            },
+            "required": ["key"]
+        }
+    ),
+    Tool(
+        name="browser_hover",
+        description="Hover the mouse over an element.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "selector": {"type": "string", "description": "CSS selector for the element"}
+            },
+            "required": ["selector"]
+        }
+    ),
+    Tool(
+        name="browser_back",
+        description="Go back in browser history.",
+        inputSchema={"type": "object", "properties": {}}
+    ),
+    Tool(
+        name="browser_forward",
+        description="Go forward in browser history.",
+        inputSchema={"type": "object", "properties": {}}
+    ),
+    Tool(
+        name="browser_reload",
+        description="Reload the current page.",
+        inputSchema={"type": "object", "properties": {}}
+    ),
+    Tool(
+        name="browser_get_links",
+        description="Get all links on the current page.",
+        inputSchema={"type": "object", "properties": {}}
+    ),
+    Tool(
+        name="browser_get_images",
+        description="Get all images on the current page with src, alt, width, height.",
+        inputSchema={"type": "object", "properties": {}}
+    ),
+    Tool(
+        name="browser_wait",
+        description="Wait for an element to appear on the page.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "selector": {"type": "string", "description": "CSS selector to wait for"},
+                "timeout": {"type": "integer", "description": "Timeout in milliseconds", "default": 10000}
+            },
+            "required": ["selector"]
+        }
+    ),
+    Tool(
+        name="browser_scan_sensitive",
+        description="Scan the current page for exposed sensitive data (API keys, tokens, emails, IPs).",
+        inputSchema={"type": "object", "properties": {}}
+    ),
 ]
 
 
@@ -241,6 +316,16 @@ async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[TextCon
         "browser_save_credentials": ("save-creds", ["domain", "username", "password"]),
         "browser_auto_login": ("auto-login", ["url", "domain"]),
         "browser_tabs": ("tabs", ["action", "tab_id"]),
+        "browser_type": ("type", ["text"]),
+        "browser_press": ("press", ["key"]),
+        "browser_hover": ("hover", ["selector"]),
+        "browser_back": ("back", []),
+        "browser_forward": ("forward", []),
+        "browser_reload": ("reload", []),
+        "browser_get_links": ("get-links", []),
+        "browser_get_images": ("get-images", []),
+        "browser_wait": ("wait", ["selector", "timeout"]),
+        "browser_scan_sensitive": ("scan-sensitive", []),
     }
 
     if name == "browser_status":

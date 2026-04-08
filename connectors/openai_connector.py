@@ -140,6 +140,81 @@ OPENAI_TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_type",
+            "description": "Type text into the currently focused element.",
+            "parameters": {
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_press",
+            "description": "Press a keyboard key (Enter, Tab, Escape, etc.).",
+            "parameters": {
+                "type": "object",
+                "properties": {"key": {"type": "string"}},
+                "required": ["key"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_hover",
+            "description": "Hover over an element.",
+            "parameters": {
+                "type": "object",
+                "properties": {"selector": {"type": "string"}},
+                "required": ["selector"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_back",
+            "description": "Go back in browser history.",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_forward",
+            "description": "Go forward in browser history.",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_get_links",
+            "description": "Get all links on the current page.",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_wait",
+            "description": "Wait for an element to appear.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "selector": {"type": "string"},
+                    "timeout": {"type": "integer", "default": 10000}
+                },
+                "required": ["selector"]
+            }
+        }
+    },
 ]
 
 # ─── Claude Tool Definitions ─────────────────────────────────
@@ -238,6 +313,60 @@ CLAUDE_TOOLS = [
             "required": ["url"]
         }
     },
+    {
+        "name": "browser_type",
+        "description": "Type text into the focused element with human-like delays.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"text": {"type": "string", "description": "Text to type"}},
+            "required": ["text"]
+        }
+    },
+    {
+        "name": "browser_press",
+        "description": "Press a keyboard key (Enter, Tab, Escape, Backspace, etc.).",
+        "input_schema": {
+            "type": "object",
+            "properties": {"key": {"type": "string", "description": "Key to press"}},
+            "required": ["key"]
+        }
+    },
+    {
+        "name": "browser_hover",
+        "description": "Hover over an element.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"selector": {"type": "string"}},
+            "required": ["selector"]
+        }
+    },
+    {
+        "name": "browser_back",
+        "description": "Go back in browser history.",
+        "input_schema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "browser_forward",
+        "description": "Go forward in browser history.",
+        "input_schema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "browser_get_links",
+        "description": "Get all links on the current page.",
+        "input_schema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "browser_wait",
+        "description": "Wait for an element to appear on the page.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "selector": {"type": "string"},
+                "timeout": {"type": "integer"}
+            },
+            "required": ["selector"]
+        }
+    },
 ]
 
 
@@ -265,6 +394,16 @@ async def call_tool(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]
         "browser_scan_xss": "scan-xss",
         "browser_scan_sqli": "scan-sqli",
         "browser_transcribe": "transcribe",
+        "browser_type": "type",
+        "browser_press": "press",
+        "browser_hover": "hover",
+        "browser_back": "back",
+        "browser_forward": "forward",
+        "browser_reload": "reload",
+        "browser_get_links": "get-links",
+        "browser_get_images": "get-images",
+        "browser_wait": "wait",
+        "browser_scan_sensitive": "scan-sensitive",
     }
 
     command = command_map.get(tool_name)
