@@ -216,6 +216,7 @@ class AgentBrowser:
         self._active_sessions: Dict[str, Dict] = {}
         self._blocked_requests: int = 0
         self._pages: Dict[str, Page] = {}
+        self._console_logs: Dict[str, List[Dict]] = {}  # page_id → list of log entries
         self._cookie_dir = Path(os.path.expanduser("~/.agent-os/cookies"))
         self._download_dir = Path(os.path.expanduser("~/.agent-os/downloads"))
 
@@ -283,8 +284,43 @@ class AgentBrowser:
 
         self.page = await self.context.new_page()
         self._pages["main"] = self.page
+        self._attach_console_listener("main", self.page)
 
         logger.info("Browser started with stealth patches v2.0")
+
+    def _attach_console_listener(self, page_id: str, page: Page):
+        """Attach console and error listeners to a page."""
+        self._console_logs[page_id] = []
+
+        def on_console(msg):
+            entry = {
+                "type": msg.type,               # log, warning, error, info, debug, etc.
+                "text": msg.text,
+                "location": {
+                    "url": msg.location.get("url", ""),
+                    "line": msg.location.get("lineNumber", 0),
+                    "column": msg.location.get("columnNumber", 0),
+                },
+                "timestamp": time.time(),
+            }
+            self._console_logs[page_id].append(entry)
+            # Keep last 200 entries per page to cap memory
+            if len(self._console_logs[page_id]) > 200:
+                self._console_logs[page_id] = self._console_logs[page_id][-200:]
+
+        def on_page_error(error):
+            entry = {
+                "type": "pageerror",
+                "text": str(error),
+                "location": {"url": "", "line": 0, "column": 0},
+                "timestamp": time.time(),
+            }
+            self._console_logs[page_id].append(entry)
+            if len(self._console_logs[page_id]) > 200:
+                self._console_logs[page_id] = self._console_logs[page_id][-200:]
+
+        page.on("console", on_console)
+        page.on("pageerror", on_page_error)
 
     def _load_cookies(self, profile: str) -> Optional[Dict]:
         """Load saved cookies for a profile."""
@@ -883,13 +919,25 @@ class AgentBrowser:
             "note": "To use extensions, restart Agent-OS with: python main.py --headed --extension-path " + str(ext_dir)
         }
 
-    async def get_console_logs(self, page_id: str = "main") -> List[Dict]:
-        """Get browser console logs."""
-        page = self._pages.get(page_id, self.page)
-        logs = await page.evaluate("""() => {
-            return (window.__agent_os_logs || []).slice(-50);
-        }""")
-        return logs
+    async def get_console_logs(self, page_id: str = "main", clear: bool = False) -> Dict[str, Any]:
+        """Get browser console logs captured by Playwright listeners.
+
+        Args:
+            page_id: Which tab to read logs from.
+            clear: If True, flush the log buffer after reading.
+        """
+        logs = self._console_logs.get(page_id, [])
+        # Return last 100 entries, newest first
+        result = logs[-100:]
+        if clear:
+            self._console_logs[page_id] = []
+        return {
+            "status": "success",
+            "page_id": page_id,
+            "logs": result,
+            "count": len(result),
+            "total_captured": len(logs),
+        }
 
     async def intercept_network(self, url_pattern: str, page_id: str = "main") -> Dict[str, Any]:
         """Monitor network requests matching a URL pattern."""
@@ -905,12 +953,78 @@ class AgentBrowser:
         cookies = await self.context.cookies()
         return {"status": "success", "cookies": cookies, "count": len(cookies)}
 
-    async def set_cookie(self, name: str, value: str, domain: str = None, page_id: str = "main") -> Dict[str, Any]:
-        """Set a cookie."""
+    async def set_cookie(
+        self,
+        name: str,
+        value: str,
+        domain: str = None,
+        path: str = "/",
+        secure: bool = None,
+        http_only: bool = False,
+        same_site: str = None,
+        page_id: str = "main",
+    ) -> Dict[str, Any]:
+        """Set a cookie with full Playwright compatibility.
+
+        Args:
+            name: Cookie name.
+            value: Cookie value.
+            domain: Cookie domain. If not set, inferred from current page URL.
+            path: Cookie path (default '/').
+            secure: Require HTTPS. Auto-detected from current page if not set.
+            http_only: Prevent JS access (default False).
+            same_site: 'Strict', 'Lax', or 'None'. None = browser default.
+            page_id: Tab to infer domain from if domain not provided.
+        """
         page = self._pages.get(page_id, self.page)
-        cookie = {"name": name, "value": value, "domain": domain or page.url.split("/")[2]}
-        await self.context.add_cookies([cookie])
-        return {"status": "success", "cookie": cookie}
+
+        # Infer domain from current URL if not provided
+        if not domain:
+            try:
+                parsed = page.url.split("/")
+                if len(parsed) >= 3:
+                    host = parsed[2]
+                    # Strip port if present (e.g., "localhost:8080")
+                    if ":" in host and not host.startswith("["):
+                        host = host.split(":")[0]
+                    # Strip brackets from IPv6
+                    host = host.strip("[]")
+                    if host and host != "about:blank":
+                        domain = host
+            except Exception:
+                pass
+
+        if not domain:
+            return {
+                "status": "error",
+                "error": "Cannot infer cookie domain: current page has no valid URL. Provide 'domain' explicitly.",
+            }
+
+        # Auto-detect secure from URL scheme
+        if secure is None:
+            secure = page.url.startswith("https://")
+
+        # Build cookie dict — Playwright requires name, value, domain, path
+        cookie: Dict[str, Any] = {
+            "name": name,
+            "value": value,
+            "domain": domain,
+            "path": path,
+        }
+
+        if secure:
+            cookie["secure"] = True
+        if http_only:
+            cookie["httpOnly"] = True
+        if same_site and same_site.capitalize() in ("Strict", "Lax", "None"):
+            cookie["sameSite"] = same_site.capitalize()
+
+        try:
+            await self.context.add_cookies([cookie])
+            return {"status": "success", "cookie": cookie}
+        except Exception as e:
+            logger.error(f"set_cookie failed: {e}")
+            return {"status": "error", "error": str(e)}
 
     async def reload(self, page_id: str = "main") -> Dict[str, Any]:
         """Reload the current page."""
@@ -943,6 +1057,7 @@ class AgentBrowser:
         """Create a new tab."""
         page = await self.context.new_page()
         self._pages[tab_id] = page
+        self._attach_console_listener(tab_id, page)
         return tab_id
 
     async def switch_tab(self, tab_id: str) -> Dict[str, Any]:
@@ -957,6 +1072,7 @@ class AgentBrowser:
         if tab_id in self._pages and tab_id != "main":
             await self._pages[tab_id].close()
             del self._pages[tab_id]
+            self._console_logs.pop(tab_id, None)
             return True
         return False
 

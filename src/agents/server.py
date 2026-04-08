@@ -144,9 +144,9 @@ class AgentServer:
             "get-attr": {"params": {"selector": "string", "attribute": "string"}, "description": "Get element attribute value"},
             "viewport": {"params": {"width": "int", "height": "int"}, "description": "Change browser viewport size"},
             "add-extension": {"params": {"extension_path": "string"}, "description": "Load a Chrome extension (headed mode only)"},
-            "console-logs": {"params": {}, "description": "Get browser console logs"},
+            "console-logs": {"params": {"page_id": "string (optional)", "clear": "bool (optional)"}, "description": "Get browser console logs (log, warn, error, pageerror)"},
             "get-cookies": {"params": {}, "description": "Get all cookies"},
-            "set-cookie": {"params": {"name": "string", "value": "string", "domain": "string (optional)"}, "description": "Set a cookie"},
+            "set-cookie": {"params": {"name": "string", "value": "string", "domain": "string (optional, auto-inferred)", "path": "string (default /)", "secure": "bool (auto-detected)", "http_only": "bool", "same_site": "Strict|Lax|None"}, "description": "Set a cookie with full control"},
             "scan-xss": {"params": {"url": "string"}, "description": "Scan URL for XSS vulnerabilities"},
             "scan-sqli": {"params": {"url": "string"}, "description": "Scan URL for SQL injection"},
             "scan-sensitive": {"params": {}, "description": "Scan page for sensitive data exposure"},
@@ -426,8 +426,9 @@ class AgentServer:
         return await self.browser.add_extension(path)
 
     async def _cmd_console_logs(self, data: Dict, session) -> Dict:
-        logs = await self.browser.get_console_logs()
-        return {"status": "success", "logs": logs, "count": len(logs)}
+        page_id = data.get("page_id", "main")
+        clear = data.get("clear", False)
+        return await self.browser.get_console_logs(page_id=page_id, clear=clear)
 
     async def _cmd_get_cookies(self, data: Dict, session) -> Dict:
         return await self.browser.get_cookies()
@@ -435,10 +436,17 @@ class AgentServer:
     async def _cmd_set_cookie(self, data: Dict, session) -> Dict:
         name = data.get("name")
         value = data.get("value")
-        domain = data.get("domain")
         if not name or not value:
             return {"status": "error", "error": "Missing 'name' or 'value'"}
-        return await self.browser.set_cookie(name, value, domain)
+        return await self.browser.set_cookie(
+            name=name,
+            value=value,
+            domain=data.get("domain"),
+            path=data.get("path", "/"),
+            secure=data.get("secure"),
+            http_only=data.get("http_only", False),
+            same_site=data.get("same_site"),
+        )
 
     async def _cmd_scan_xss(self, data: Dict, session) -> Dict:
         from src.tools.scanner import XSSScanner
