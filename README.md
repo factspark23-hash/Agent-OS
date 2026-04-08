@@ -196,6 +196,55 @@ pip install pytest pytest-asyncio
 python -m pytest tests/ -v
 ```
 
+## Connect Qwen AI to Browser (so Qwen can browse the web)
+
+### Step 1: Get Qwen API Key
+Go to https://dashscope.console.aliyun.com/ and get your API key.
+
+### Step 2: Start Agent-OS
+```bash
+python main.py --agent-token "qwen-agent"
+```
+
+### Step 3: Start Qwen Bridge
+```bash
+# In another terminal
+export DASHSCOPE_API_KEY="your-api-key"
+python qwen_bridge.py
+
+# Or with a specific model:
+python qwen_bridge.py --model qwen-max
+```
+
+### Step 4: Chat!
+```
+👤 You: Go to github.com and tell me what's on the homepage
+🔧 Executing: browser_navigate({"url": "https://github.com"})
+🔧 Executing: browser_get_content({})
+🤖 Qwen: GitHub's homepage shows trending repositories, news about AI tools...
+```
+
+### Supported Models
+- `qwen-plus` (default, fast)
+- `qwen-max` (most capable)
+- `qwen-flash` (fastest)
+- `qwen3-coder-plus` (coding focused)
+
+### Alternative: Connect Any OpenAI-Compatible AI
+The bridge uses OpenAI-compatible API format. To connect other AIs:
+
+```bash
+# Claude (via Anthropic's OpenAI-compatible endpoint)
+export DASHSCOPE_API_KEY="sk-ant-..."
+export QWEN_BASE_URL="https://api.anthropic.com/v1"
+python qwen_bridge.py --model claude-sonnet-4-20250514
+
+# Local LLM (via Ollama)
+export DASHSCOPE_API_KEY="ollama"
+export QWEN_BASE_URL="http://localhost:11434/v1"
+python qwen_bridge.py --model llama3
+```
+
 ## Requirements
 
 - Python 3.10+
