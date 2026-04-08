@@ -58,6 +58,59 @@ Agent-OS/
     └── API.md                 # Complete API documentation
 ```
 
+## Connectors (Connect Any AI Agent)
+
+| Connector | Format | Tools | Usage |
+|-----------|--------|-------|-------|
+| **MCP Server** | Model Context Protocol | 15 | Claude, Codex, any MCP client |
+| **OpenAI** | Function Calling | 9 | GPT-4, any OpenAI-compatible API |
+| **Claude** | Tool Use | 10 | Anthropic Claude API |
+| **OpenClaw** | Manifest | 12 | OpenClaw agent framework |
+| **CLI Tool** | Shell script | 14 | Any language via `subprocess` |
+
+### MCP Setup (for Claude Desktop / Codex)
+Add to your MCP config:
+```json
+{
+  "mcpServers": {
+    "agent-os": {
+      "command": "python3",
+      "args": ["/path/to/Agent-OS/connectors/mcp_server.py"],
+      "env": {
+        "AGENT_OS_URL": "http://localhost:8001",
+        "AGENT_OS_TOKEN": "your-token-here"
+      }
+    }
+  }
+}
+```
+
+### OpenAI / Claude API Usage
+```python
+from connectors.openai_connector import get_tools, call_tool
+
+# For OpenAI
+tools = get_tools("openai")  # Pass to OpenAI API
+
+# For Claude
+tools = get_tools("claude")  # Pass to Anthropic API
+
+# Call any tool
+result = await call_tool("browser_navigate", {"url": "https://github.com"})
+```
+
+### CLI Usage (from any language)
+```bash
+# From bash
+./connectors/agent-os-tool.sh navigate "https://github.com"
+
+# From Python
+subprocess.run(["./connectors/agent-os-tool.sh", "scan-xss", "https://target.com"])
+
+# From Node.js
+execSync("./connectors/agent-os-tool.sh click 'button[type=submit]'")
+```
+
 ## Requirements
 
 - Python 3.8+
