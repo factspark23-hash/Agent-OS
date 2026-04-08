@@ -81,8 +81,8 @@ class AgentOS:
         http_port = self.config.get("server.http_port", 8001)
 
         # Register the CLI token
-        if args.agent_token:
-            default_token = args.agent_token
+        if self.args.agent_token:
+            default_token = self.args.agent_token
         else:
             default_token = self.config.generate_agent_token("agent")
         self.config.register_token(default_token, "cli")
