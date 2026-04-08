@@ -1,0 +1,36 @@
+# Docker Compose for Agent-OS
+# Usage:
+#   docker compose up -d                    # Start (background)
+#   docker compose up -d --env-file .env    # With custom token
+#   docker compose logs -f                  # View logs
+#   docker compose down                     # Stop
+
+services:
+  agent-os:
+    build: .
+    container_name: agent-os
+    restart: unless-stopped
+    ports:
+      - "8000:8000"  # WebSocket
+      - "8001:8001"  # HTTP REST API
+    environment:
+      - AGENT_TOKEN=${AGENT_TOKEN:-}  # Set your token, or leave empty for auto-generated
+    volumes:
+      - agent-os-data:/root/.agent-os  # Persist credentials vault
+    # Resource limits (adjust for your server)
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "2.0"
+    # Security: run as non-root
+    # user: "1000:1000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  agent-os-data:
