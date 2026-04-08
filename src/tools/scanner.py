@@ -27,29 +27,25 @@ class Vulnerability:
 class XSSScanner:
     """Cross-Site Scripting (XSS) vulnerability scanner."""
 
-    # XSS test payloads (safe, won't cause damage)
+    # XSS test payloads (safe — won't cause damage or trigger popups on real sites)
     PAYLOADS = [
-        '<script>alert("XSS")</script>',
-        '<img src=x onerror=alert("XSS")>',
-        '"><script>alert("XSS")</script>',
-        "'-alert('XSS')-'",
-        '<svg onload=alert("XSS")>',
-        'javascript:alert("XSS")',
-        '<body onload=alert("XSS")>',
-        '<iframe src="javascript:alert(1)">',
-        '<details open ontoggle=alert("XSS")>',
-        '<marquee onstart=alert("XSS")>',
-        '"><img src=x onerror=alert(document.domain)>',
-        "{{constructor.constructor('alert(1)')()}}",
+        'agentostest123',
+        '"agentostest123',
+        "'agentostest123",
+        '<agentostest123>',
+        '"><agentostest123>',
+        "'-agentostest123-'",
+        '{{agentostest123}}',
+        '${agentostest123}',
+        '#{agentostest123}',
     ]
 
-    # Patterns that indicate XSS reflection
+    # Patterns that indicate XSS reflection (using the marker string)
     REFLECTION_PATTERNS = [
-        r'<script>alert\("XSS"\)</script>',
-        r'onerror=alert\("XSS"\)',
-        r'onload=alert\("XSS"\)',
-        r'alert\(1\)',
-        r'alert\(document\.domain\)',
+        r'<agentostest123>',
+        r'">agentostest123',
+        r"'agentostest123",
+        r'agentostest123',
     ]
 
     def __init__(self, browser):
@@ -61,12 +57,10 @@ class XSSScanner:
         logger.info(f"Starting XSS scan on {url}")
         self.vulnerabilities = []
 
-        # Navigate to target
         result = await self.browser.navigate(url)
         if result.get("status") != "success":
             return {"status": "error", "error": f"Failed to navigate: {result.get('error')}"}
 
-        # Get DOM snapshot to find input fields
         dom = await self.browser.get_dom_snapshot()
         content = await self.browser.get_content()
 
@@ -112,7 +106,7 @@ class XSSScanner:
 
     async def _test_param_reflection(self, url: str, param: str) -> Optional[Vulnerability]:
         """Test if a URL parameter reflects XSS payloads."""
-        for payload in self.PAYLOADS[:5]:  # Test first 5 payloads
+        for payload in self.PAYLOADS[:5]:
             test_url = self._inject_payload_url(url, param, payload)
             await self.browser.navigate(test_url)
             content = await self.browser.get_content()
@@ -138,7 +132,6 @@ class XSSScanner:
             await self.browser.navigate(url)
             await self.browser.fill_form({selector: payload})
 
-            # Try to submit form
             submit_result = await self.browser.click('button[type="submit"]')
             if submit_result.get("status") != "success":
                 await self.browser.click('input[type="submit"]')
@@ -189,9 +182,13 @@ class XSSScanner:
 
 
 class SQLiScanner:
-    """SQL Injection vulnerability scanner."""
+    """SQL Injection vulnerability scanner.
 
-    # SQL injection test payloads
+    Uses only non-destructive payloads. No DROP TABLE, no SLEEP.
+    Error-based detection only — won't modify target data.
+    """
+
+    # Safe SQL injection test payloads (error-based detection only)
     PAYLOADS = [
         "'",
         "''",
@@ -201,8 +198,8 @@ class SQLiScanner:
         "1' ORDER BY 1--",
         "1' ORDER BY 10--",
         "' UNION SELECT NULL--",
-        "1; DROP TABLE test--",
-        "' AND SLEEP(5)--",
+        "1 AND 1=1",
+        "1 AND 1=2",
     ]
 
     # SQL error patterns in responses
@@ -263,7 +260,7 @@ class SQLiScanner:
         return self._format_results()
 
     async def _test_sqli_param(self, url: str, param: str) -> Optional[Vulnerability]:
-        """Test a URL parameter for SQL injection."""
+        """Test a URL parameter for SQL injection (error-based only)."""
         for payload in self.PAYLOADS:
             test_url = self._inject_sqli_url(url, param, payload)
             result = await self.browser.navigate(test_url)
@@ -282,11 +279,6 @@ class SQLiScanner:
                         evidence=f"SQL error detected: {pattern[:60]}",
                         severity="critical"
                     )
-
-            # Check for time-based blind SQLi (if SLEEP payload was used)
-            if "SLEEP" in payload and result.get("status") == "success":
-                # If page loaded after SLEEP, might be vulnerable
-                pass
 
         return None
 
@@ -324,6 +316,7 @@ class SensitiveDataScanner:
     PATTERNS = {
         "AWS Key": r"AKIA[0-9A-Z]{16}",
         "GitHub Token": r"ghp_[a-zA-Z0-9]{36}",
+        "Slack Token": r"xox[bpors]-[0-9a-zA-Z-]+",
         "Generic API Key": r"['\"]?(api[_-]?key|apikey)['\"]?\s*[:=]\s*['\"]?[a-zA-Z0-9]{20,}['\"]?",
         "Private Key": r"-----BEGIN (RSA |EC |DSA )?PRIVATE KEY-----",
         "JWT Token": r"eyJ[a-zA-Z0-9_-]*\.eyJ[a-zA-Z0-9_-]*\.[a-zA-Z0-9_-]*",
@@ -347,7 +340,7 @@ class SensitiveDataScanner:
                     "type": data_type,
                     "count": len(matches),
                     # Don't expose actual values, just first few chars
-                    "samples": [m[:10] + "..." if len(str(m)) > 10 else m for m in matches[:3]]
+                    "samples": [str(m)[:10] + "..." if len(str(m)) > 10 else str(m) for m in matches[:3]]
                 })
 
         return {

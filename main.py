@@ -19,7 +19,6 @@ import psutil
 import os
 from pathlib import Path
 
-# Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.core.config import Config
@@ -27,7 +26,6 @@ from src.core.browser import AgentBrowser
 from src.core.session import SessionManager
 from src.agents.server import AgentServer
 
-# Setup logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
@@ -61,7 +59,7 @@ class AgentOS:
         """Start all components."""
         self._running = True
         logger.info("=" * 60)
-        logger.info("  🤖 Agent-OS — AI Agent Browser v1.0")
+        logger.info("  🤖 Agent-OS — AI Agent Browser v2.1")
         logger.info("=" * 60)
 
         # Start browser
@@ -81,7 +79,13 @@ class AgentOS:
 
         ws_port = self.config.get("server.ws_port", 8000)
         http_port = self.config.get("server.http_port", 8001)
-        default_token = self.args.agent_token or self.config.generate_agent_token("agent")
+
+        # Register the CLI token
+        if args.agent_token:
+            default_token = args.agent_token
+        else:
+            default_token = self.config.generate_agent_token("agent")
+        self.config.register_token(default_token, "cli")
 
         logger.info("")
         logger.info("  ✅ Agent-OS is READY!")
@@ -98,7 +102,6 @@ class AgentOS:
         logger.info("  Press Ctrl+C to stop")
         logger.info("  ─────────────────────────────────────────")
 
-        # Wait for shutdown signal
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
@@ -111,6 +114,10 @@ class AgentOS:
 
         if self._ram_monitor_task:
             self._ram_monitor_task.cancel()
+            try:
+                await self._ram_monitor_task
+            except asyncio.CancelledError:
+                pass
 
         await self.server.stop()
         await self.session_manager.stop()
@@ -119,18 +126,51 @@ class AgentOS:
         logger.info("Agent-OS stopped. Goodbye! 👋")
 
     async def _ram_monitor(self):
-        """Monitor RAM usage and warn if exceeding limits."""
+        """Monitor RAM usage. Enforce cap by closing idle tabs."""
         max_ram = self.config.get("browser.max_ram_mb", 500)
+        last_warning = 0
         while self._running:
             try:
                 process = psutil.Process(os.getpid())
                 ram_mb = process.memory_info().rss / 1024 / 1024
+                now = asyncio.get_event_loop().time()
+
                 if ram_mb > max_ram:
-                    logger.warning(f"⚠️  RAM usage ({ram_mb:.0f}MB) exceeds limit ({max_ram}MB)")
+                    # Only warn every 60s to avoid spam
+                    if now - last_warning > 60:
+                        logger.warning(
+                            f"⚠️  RAM usage ({ram_mb:.0f}MB) exceeds limit ({max_ram}MB). "
+                            f"Closing idle tabs..."
+                        )
+                        last_warning = now
+
+                    # Close non-main tabs to free memory
+                    tabs_closed = 0
+                    for tab_id in list(self.browser._pages.keys()):
+                        if tab_id != "main":
+                            try:
+                                await self.browser.close_tab(tab_id)
+                                tabs_closed += 1
+                            except Exception:
+                                pass
+
+                    if tabs_closed:
+                        logger.info(f"Freed memory by closing {tabs_closed} tab(s)")
+
+                    # If still over limit after closing tabs, warn harder
+                    process = psutil.Process(os.getpid())
+                    ram_mb = process.memory_info().rss / 1024 / 1024
+                    if ram_mb > max_ram * 1.5 and now - last_warning > 60:
+                        logger.error(
+                            f"🚨 RAM critically high ({ram_mb:.0f}MB / {max_ram}MB limit). "
+                            f"Consider restarting Agent-OS."
+                        )
+
                 await asyncio.sleep(10)
             except asyncio.CancelledError:
                 break
-            except Exception:
+            except Exception as e:
+                logger.debug(f"RAM monitor error: {e}")
                 await asyncio.sleep(10)
 
 
@@ -150,7 +190,6 @@ async def main():
     args = parse_args()
     app = AgentOS(args)
 
-    # Handle shutdown signals
     def signal_handler(sig, frame):
         asyncio.create_task(app.stop())
 

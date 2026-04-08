@@ -9,7 +9,6 @@ import random
 import time
 import logging
 import os
-import pickle
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 
@@ -18,16 +17,14 @@ from playwright.async_api import async_playwright, Browser, Page, BrowserContext
 logger = logging.getLogger("agent-os.browser")
 
 # ─── Advanced Anti-Detection JavaScript ───────────────────────
-# Injected into every page to fool bot detection systems
-
 ANTI_DETECTION_JS = """
-// === AGENT-OS STEALTH MODE v2.0 ===
+// === AGENT-OS STEALTH MODE v2.1 ===
 
 // 1. Remove ALL webdriver traces
 Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
 delete navigator.__proto__.webdriver;
 
-// 2. Realistic plugins (Chrome's actual plugin list)
+// 2. Realistic plugins
 Object.defineProperty(navigator, 'plugins', {
     get: () => {
         const plugins = [
@@ -68,14 +65,14 @@ window.navigator.permissions.query = (parameters) => (
         originalQuery(parameters)
 );
 
-// 8. Chrome runtime (must exist for real Chrome)
+// 8. Chrome runtime
 window.chrome = {
     app: {isInstalled: false, InstallState: {INSTALLED: 'installed', DISABLED: 'disabled', NOT_INSTALLED: 'not_installed'}, RunningState: {CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running'}},
     runtime: {
         OnInstalledReason: {CHROME_UPDATE: 'chrome_update', INSTALL: 'install', SHARED_MODULE_UPDATE: 'shared_module_update', UPDATE: 'update'},
         OnRestartRequiredReason: {APP_UPDATE: 'app_update', OS_UPDATE: 'os_update', PERIODIC: 'periodic'},
         PlatformArch: {ARM: 'arm', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64'},
-        PlatformNaclArch: {ARM: 'arm', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64'},
+        PlatformNaClArch: {ARM: 'arm', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64'},
         PlatformOs: {ANDROID: 'android', CROS: 'cros', LINUX: 'linux', MAC: 'mac', OPENBSD: 'openbsd', WIN: 'win'},
         RequestUpdateCheckStatus: {NO_UPDATE: 'no_update', THROTTLED: 'throttled', UPDATE_AVAILABLE: 'update_available'},
         connect: function() {},
@@ -105,47 +102,31 @@ const getParameter = WebGLRenderingContext.prototype.getParameter;
 WebGLRenderingContext.prototype.getParameter = function(param) {
     if (param === 37445) return 'Intel Inc.';
     if (param === 37446) return 'Intel Iris OpenGL Engine';
-    if (param === 35661) return 16;  // MAX_TEXTURE_IMAGE_UNITS
-    if (param === 34076) return 16384;  // MAX_TEXTURE_SIZE
-    if (param === 34921) return 16;  // MAX_VARYING_VECTORS
-    if (param === 36347) return 1024;  // MAX_VERTEX_UNIFORM_VECTORS
-    if (param === 36349) return 1024;  // MAX_FRAGMENT_UNIFORM_VECTORS
-    if (param === 34024) return 16384;  // MAX_RENDERBUFFER_SIZE
-    if (param === 3386) return [16384, 16384];  // MAX_VIEWPORT_DIMS
+    if (param === 35661) return 16;
+    if (param === 34076) return 16384;
+    if (param === 34921) return 16;
+    if (param === 36347) return 1024;
+    if (param === 36349) return 1024;
+    if (param === 34024) return 16384;
+    if (param === 3386) return [16384, 16384];
     return getParameter.call(this, param);
 };
 
-// 10. Canvas fingerprint noise (subtle, not random each time)
+// 10. Canvas fingerprint noise
 const toDataURL = HTMLCanvasElement.prototype.toDataURL;
 HTMLCanvasElement.prototype.toDataURL = function(type) {
     const context = this.getContext('2d');
     if (context && this.width > 0 && this.height > 0) {
-        // Add tiny noise to defeat canvas fingerprinting
         const imageData = context.getImageData(0, 0, this.width, this.height);
         for (let i = 0; i < imageData.data.length; i += 100) {
-            imageData.data[i] = imageData.data[i] ^ 1;  // XOR single bit
+            imageData.data[i] = imageData.data[i] ^ 1;
         }
         context.putImageData(imageData, 0, 0);
     }
     return toDataURL.apply(this, arguments);
 };
 
-// 11. Audio context fingerprint
-const audioContext = window.AudioContext || window.webkitAudioContext;
-if (audioContext) {
-    const origCreateOscillator = audioContext.prototype.createOscillator;
-    audioContext.prototype.createOscillator = function() {
-        const osc = origCreateOscillator.call(this);
-        const origConnect = osc.connect;
-        osc.connect = function(dest) {
-            // Add tiny noise to audio fingerprint
-            return origConnect.call(this, dest);
-        };
-        return osc;
-    };
-}
-
-// 12. Block WebRTC IP leak
+// 11. Block WebRTC IP leak
 const origRTCPeerConnection = window.RTCPeerConnection;
 if (origRTCPeerConnection) {
     window.RTCPeerConnection = function(...args) {
@@ -153,7 +134,6 @@ if (origRTCPeerConnection) {
         const origCreateOffer = pc.createOffer;
         pc.createOffer = function(options) {
             return origCreateOffer.call(pc, options).then(offer => {
-                // Remove local IP from SDP
                 offer.sdp = offer.sdp.replace(/a=candidate:.*typ host.*/g, '');
                 return offer;
             });
@@ -163,15 +143,14 @@ if (origRTCPeerConnection) {
     window.RTCPeerConnection.prototype = origRTCPeerConnection.prototype;
 }
 
-// 13. Notification permission
+// 12. Notification permission
 Object.defineProperty(Notification, 'permission', {get: () => 'default'});
 
-// 14. Media devices (fake realistic list)
+// 13. Media devices (fake realistic list)
 if (navigator.mediaDevices) {
     const origEnumerateDevices = navigator.mediaDevices.enumerateDevices;
     navigator.mediaDevices.enumerateDevices = async function() {
         const devices = await origEnumerateDevices.call(this);
-        // Return realistic device list
         return [
             {deviceId: 'default', kind: 'audioinput', label: 'Default - Microphone', groupId: 'group1'},
             {deviceId: 'default', kind: 'audiooutput', label: 'Default - Speaker', groupId: 'group1'},
@@ -180,7 +159,7 @@ if (navigator.mediaDevices) {
     };
 }
 
-console.log('[Agent-OS] Stealth patches loaded v2.0');
+console.log('[Agent-OS] Stealth patches loaded v2.1');
 """
 
 # Bot detection patterns to block
@@ -203,6 +182,41 @@ FAKE_RESPONSES = {
     "bot-detection": {"human": True, "verified": True, "timestamp": 1700000000},
 }
 
+# Keyboard key mappings for Playwright
+KEY_MAP = {
+    "enter": "Enter", "return": "Enter",
+    "tab": "Tab",
+    "escape": "Escape", "esc": "Escape",
+    "backspace": "Backspace",
+    "delete": "Delete", "del": "Delete",
+    "arrowup": "ArrowUp", "arrowdown": "ArrowDown",
+    "arrowleft": "ArrowLeft", "arrowright": "ArrowRight",
+    "up": "ArrowUp", "down": "ArrowDown",
+    "left": "ArrowLeft", "right": "ArrowRight",
+    "home": "Home", "end": "End",
+    "pageup": "PageUp", "pagedown": "PageDown",
+    "f1": "F1", "f2": "F2", "f3": "F3", "f4": "F4",
+    "f5": "F5", "f6": "F6", "f7": "F7", "f8": "F8",
+    "f9": "F9", "f10": "F10", "f11": "F11", "f12": "F12",
+    "control": "Control", "ctrl": "Control",
+    "shift": "Shift", "alt": "Alt", "meta": "Meta",
+    "space": " ", "spacebar": " ",
+}
+
+# Context menu keyboard shortcuts
+CONTEXT_SHORTCUTS = {
+    "copy": "Control+c",
+    "paste": "Control+v",
+    "cut": "Control+x",
+    "select all": "Control+a",
+    "save": "Control+s",
+    "undo": "Control+z",
+    "redo": "Control+y",
+    "view source": "Control+u",
+    "reload": "F5",
+    "inspect": "F12",
+}
+
 
 class AgentBrowser:
     """Core browser engine with advanced anti-detection for AI agents."""
@@ -218,6 +232,8 @@ class AgentBrowser:
         self._pages: Dict[str, Page] = {}
         self._cookie_dir = Path(os.path.expanduser("~/.agent-os/cookies"))
         self._download_dir = Path(os.path.expanduser("~/.agent-os/downloads"))
+        self._cookie_dirty = False  # Track if cookies need saving
+        self._cookie_save_task = None
 
     async def start(self):
         """Launch the browser with stealth settings."""
@@ -226,31 +242,33 @@ class AgentBrowser:
 
         self.playwright = await async_playwright().start()
 
-        # Use headed or headless based on config
         headless = self.config.get("browser.headless", True)
+
+        launch_args = [
+            "--disable-blink-features=AutomationControlled",
+            "--disable-features=IsolateOrigins,site-per-process",
+            "--disable-infobars",
+            "--disable-background-timer-throttling",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-renderer-backgrounding",
+            "--disable-dev-shm-usage",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-extensions",
+            "--disable-component-extensions-with-background-pages",
+            "--window-size=1920,1080",
+            "--disable-features=TranslateUI",
+            "--disable-ipc-flooding-protection",
+        ]
+        # NOTE: web security flag intentionally NOT included.
+        # Disabling SOP would let any page steal cookies from any origin.
+        # For a credential vault tool, that's unacceptable.
 
         self.browser = await self.playwright.chromium.launch(
             headless=headless,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--disable-features=IsolateOrigins,site-per-process",
-                "--disable-infobars",
-                "--disable-background-timer-throttling",
-                "--disable-backgrounding-occluded-windows",
-                "--disable-renderer-backgrounding",
-                "--disable-dev-shm-usage",
-                "--no-first-run",
-                "--no-default-browser-check",
-                "--disable-extensions",
-                "--disable-component-extensions-with-background-pages",
-                "--window-size=1920,1080",
-                "--disable-web-security",
-                "--disable-features=TranslateUI",
-                "--disable-ipc-flooding-protection",
-            ]
+            args=launch_args,
         )
 
-        # Create context with realistic settings
         storage_state = self._load_cookies("default")
 
         context_options = {
@@ -272,19 +290,17 @@ class AgentBrowser:
 
         self.context = await self.browser.new_context(**context_options)
 
-        # Inject stealth script on every page
         await self.context.add_init_script(ANTI_DETECTION_JS)
-
-        # Set up request interception for bot detection blocking
         await self.context.route("**/*", self._handle_request)
-
-        # Set up download handler
         self.context.on("download", self._handle_download)
 
         self.page = await self.context.new_page()
         self._pages["main"] = self.page
 
-        logger.info("Browser started with stealth patches v2.0")
+        # Start periodic cookie saver (every 60s if dirty)
+        self._cookie_save_task = asyncio.create_task(self._periodic_cookie_save())
+
+        logger.info("Browser started with stealth patches v2.1")
 
     def _load_cookies(self, profile: str) -> Optional[Dict]:
         """Load saved cookies for a profile."""
@@ -304,7 +320,30 @@ class AgentBrowser:
             cookie_file = self._cookie_dir / f"{profile}.json"
             with open(cookie_file, "w") as f:
                 json.dump(state, f)
-            logger.info(f"Cookies saved for profile: {profile}")
+            self._cookie_dirty = False
+            logger.debug(f"Cookies saved for profile: {profile}")
+
+    def _mark_cookies_dirty(self):
+        """Mark cookies as needing save (instead of saving on every nav)."""
+        self._cookie_dirty = True
+
+    async def _periodic_cookie_save(self):
+        """Save cookies every 60s only if dirty."""
+        while True:
+            try:
+                await asyncio.sleep(60)
+                if self._cookie_dirty:
+                    await self._save_cookies("default")
+            except asyncio.CancelledError:
+                # Final save on shutdown
+                if self._cookie_dirty:
+                    try:
+                        await self._save_cookies("default")
+                    except Exception:
+                        pass
+                break
+            except Exception:
+                pass
 
     async def _handle_download(self, download):
         """Handle file downloads."""
@@ -316,7 +355,6 @@ class AgentBrowser:
         """Intercept and block bot detection requests."""
         url = request.url.lower()
 
-        # Check if this is a bot detection request
         for pattern in BOT_DETECTION_URLS:
             if pattern in url:
                 self._blocked_requests += 1
@@ -329,7 +367,6 @@ class AgentBrowser:
                 )
                 return
 
-        # Check for bot detection JavaScript
         if request.resource_type == "script":
             for pattern in ["recaptcha", "captcha", "botdetect", "fingerprint", "kasada", "perimeterx"]:
                 if pattern in url:
@@ -337,24 +374,39 @@ class AgentBrowser:
                     await route.fulfill(status=200, body="")
                     return
 
-        # Allow all other requests
         await route.continue_()
+
+    def _resolve_key(self, key_str: str) -> str:
+        """Resolve a key string to Playwright key format."""
+        key_lower = key_str.lower().strip()
+        return KEY_MAP.get(key_lower, key_str)
+
+    async def _press_key_combo(self, page: Page, combo: str):
+        """Press a key combination like 'Control+c' properly."""
+        parts = combo.split("+")
+        keys = [self._resolve_key(p) for p in parts]
+
+        # Press modifiers in order
+        for k in keys[:-1]:
+            await page.keyboard.down(k)
+        # Press and release the final key
+        await page.keyboard.press(keys[-1])
+        # Release modifiers in reverse
+        for k in reversed(keys[:-1]):
+            await page.keyboard.up(k)
 
     async def navigate(self, url: str, page_id: str = "main", wait_until: str = "domcontentloaded") -> Dict[str, Any]:
         """Navigate to a URL with human-like timing."""
         page = self._pages.get(page_id, self.page)
 
-        # Human-like delay before navigation
         await asyncio.sleep(random.uniform(0.3, 1.2))
 
         try:
             response = await page.goto(url, wait_until=wait_until, timeout=30000)
-
-            # Wait for page to fully load
             await asyncio.sleep(random.uniform(0.5, 1.5))
 
-            # Save cookies after navigation
-            await self._save_cookies("default")
+            # Mark cookies dirty instead of saving immediately
+            self._mark_cookies_dirty()
 
             return {
                 "status": "success",
@@ -394,7 +446,6 @@ class AgentBrowser:
             try:
                 element = await page.query_selector(selector)
                 if not element:
-                    # Try common selectors
                     for alt in [f'input[name="{selector}"]', f'input[placeholder*="{selector}"]',
                                 f'textarea[name="{selector}"]', f'#{selector}']:
                         element = await page.query_selector(alt)
@@ -404,11 +455,8 @@ class AgentBrowser:
                 if element:
                     await element.click()
                     await asyncio.sleep(random.uniform(0.1, 0.3))
-
-                    # Clear existing value
                     await element.fill("")
 
-                    # Type with human-like delays
                     for char in value:
                         await element.type(char, delay=mimicry.typing_delay())
                     filled.append(selector)
@@ -461,9 +509,15 @@ class AgentBrowser:
         return {"status": "success", "typed": len(text)}
 
     async def press_key(self, key: str, page_id: str = "main") -> Dict[str, Any]:
-        """Press a keyboard key (Enter, Tab, Escape, etc.)."""
+        """Press a keyboard key or key combination (Enter, Tab, Control+c, etc.)."""
         page = self._pages.get(page_id, self.page)
-        await page.keyboard.press(key)
+
+        if "+" in key:
+            await self._press_key_combo(page, key)
+        else:
+            resolved = self._resolve_key(key)
+            await page.keyboard.press(resolved)
+
         return {"status": "success", "key": key}
 
     async def evaluate_js(self, script: str, page_id: str = "main") -> Any:
@@ -513,7 +567,6 @@ class AgentBrowser:
 
     async def scroll(self, direction: str = "down", amount: int = 500, page_id: str = "main") -> Dict[str, Any]:
         """Scroll with human-like behavior."""
-        from src.security.human_mimicry import HumanMimicry
         page = self._pages.get(page_id, self.page)
 
         y = amount if direction == "down" else -amount
@@ -614,14 +667,12 @@ class AgentBrowser:
         """Right-click and select a context menu option by text."""
         page = self._pages.get(page_id, self.page)
 
-        # Right-click to open menu
         result = await self.right_click(selector, page_id)
         if result.get("status") != "success":
             return result
 
         await asyncio.sleep(random.uniform(0.3, 0.8))
 
-        # Try to find and click the menu item
         menu_selectors = [
             f'text="{action_text}"',
             f'role=menuitem[name="{action_text}"]',
@@ -637,26 +688,13 @@ class AgentBrowser:
                     await item.click()
                     await asyncio.sleep(random.uniform(0.2, 0.5))
                     return {"status": "success", "action": action_text, "selector": selector}
-            except:
+            except Exception:
                 continue
 
-        # If no menu item found, try keyboard shortcut based on common actions
-        shortcuts = {
-            "copy": "Control+c",
-            "paste": "Control+v",
-            "cut": "Control+x",
-            "select all": "Control+a",
-            "save": "Control+s",
-            "inspect": "F12",
-            "view source": "Control+u",
-            "open in new tab": "Control+click",
-            "reload": "F5",
-        }
-
-        shortcut = shortcuts.get(action_text.lower())
-        if shortcut and "+" in shortcut:
-            keys = shortcut.split("+")
-            await page.keyboard.press("+".join(keys))
+        # Fall back to keyboard shortcut
+        shortcut = CONTEXT_SHORTCUTS.get(action_text.lower())
+        if shortcut:
+            await self._press_key_combo(page, shortcut)
             return {"status": "success", "action": action_text, "method": "keyboard_shortcut"}
 
         return {"status": "error", "error": f"Context menu action '{action_text}' not found"}
@@ -687,25 +725,20 @@ class AgentBrowser:
             tgt_x = target_box["x"] + target_box["width"] / 2
             tgt_y = target_box["y"] + target_box["height"] / 2
 
-            # Move to source with human-like path
             path_to_source = mimicry.mouse_path(src_x, src_y)
             for x, y in path_to_source:
                 await page.mouse.move(x, y)
                 await asyncio.sleep(random.uniform(0.005, 0.015))
 
-            # Mouse down on source
             await page.mouse.down()
             await asyncio.sleep(random.uniform(0.1, 0.3))
 
-            # Drag to target with human-like path
             path_to_target = mimicry.mouse_path(tgt_x, tgt_y)
             for x, y in path_to_target:
                 await page.mouse.move(x, y)
                 await asyncio.sleep(random.uniform(0.008, 0.02))
 
             await asyncio.sleep(random.uniform(0.05, 0.15))
-
-            # Drop
             await page.mouse.up()
             await asyncio.sleep(random.uniform(0.2, 0.5))
 
@@ -738,7 +771,6 @@ class AgentBrowser:
             await page.mouse.move(src_x, src_y)
             await page.mouse.down()
 
-            # Move in steps for smooth drag
             steps = max(5, abs(x_offset) // 10 + abs(y_offset) // 10)
             for i in range(1, steps + 1):
                 t = i / steps
@@ -758,7 +790,7 @@ class AgentBrowser:
             return {"status": "error", "error": str(e)}
 
     async def double_click(self, selector: str, page_id: str = "main") -> Dict[str, Any]:
-        """Double-click an element (e.g., to edit a cell, open a file)."""
+        """Double-click an element."""
         from src.security.human_mimicry import HumanMimicry
         page = self._pages.get(page_id, self.page)
         mimicry = HumanMimicry()
@@ -849,14 +881,7 @@ class AgentBrowser:
             return {"status": "error", "error": str(e)}
 
     async def add_extension(self, extension_path: str) -> Dict[str, Any]:
-        """Load a Chrome extension (CRX unpacked directory). Requires headed mode.
-
-        Usage: First download/extract the extension, then point to its directory.
-        Note: Extensions only work in headed mode (--headed flag).
-        """
-        # Playwright doesn't support dynamic extension loading after launch.
-        # Extensions must be loaded at browser launch via --load-extension flag.
-        # We store the path and advise restart.
+        """Load a Chrome extension (CRX unpacked directory). Requires headed mode."""
         ext_dir = Path(extension_path)
         if not ext_dir.exists():
             return {"status": "error", "error": f"Extension path does not exist: {extension_path}"}
@@ -870,7 +895,7 @@ class AgentBrowser:
                 ext_info = json.load(f)
             ext_name = ext_info.get("name", "Unknown")
             ext_version = ext_info.get("version", "Unknown")
-        except:
+        except Exception:
             ext_name = "Unknown"
             ext_version = "Unknown"
 
@@ -901,7 +926,6 @@ class AgentBrowser:
 
     async def get_cookies(self, page_id: str = "main") -> Dict[str, Any]:
         """Get all cookies for the current page."""
-        page = self._pages.get(page_id, self.page)
         cookies = await self.context.cookies()
         return {"status": "success", "cookies": cookies, "count": len(cookies)}
 
@@ -910,6 +934,7 @@ class AgentBrowser:
         page = self._pages.get(page_id, self.page)
         cookie = {"name": name, "value": value, "domain": domain or page.url.split("/")[2]}
         await self.context.add_cookies([cookie])
+        self._mark_cookies_dirty()
         return {"status": "success", "cookie": cookie}
 
     async def reload(self, page_id: str = "main") -> Dict[str, Any]:
@@ -962,8 +987,14 @@ class AgentBrowser:
 
     async def stop(self):
         """Clean shutdown."""
-        # Save cookies before closing
-        await self._save_cookies("default")
+        # Cancel cookie save task first (triggers final save)
+        if self._cookie_save_task:
+            self._cookie_save_task.cancel()
+            try:
+                await self._cookie_save_task
+            except asyncio.CancelledError:
+                pass
+
         if self.context:
             await self.context.close()
         if self.browser:

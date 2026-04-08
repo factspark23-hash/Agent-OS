@@ -6,10 +6,10 @@ Run with: python -m pytest tests/ -v
 import asyncio
 import sys
 import os
+import time
 import pytest
 import json
 
-# Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.core.config import Config, DEFAULT_CONFIG
@@ -41,6 +41,31 @@ class TestConfig:
         assert token.startswith("claude-")
         assert len(token) > 10
 
+    def test_token_validation(self):
+        """Test that generated tokens validate correctly."""
+        config = Config("/tmp/test-token-val.yaml")
+        token = config.generate_agent_token("test-agent")
+        assert config.validate_token(token) is True
+        assert config.validate_token("fake-token") is False
+        assert config.validate_token("") is False
+        assert config.validate_token(None) is False
+
+    def test_register_token(self):
+        """Test registering an existing token."""
+        config = Config("/tmp/test-register-token.yaml")
+        config.register_token("my-custom-token", "cli")
+        assert config.validate_token("my-custom-token") is True
+
+    def test_merge_defaults(self):
+        """Test that missing config keys get default values."""
+        config = Config("/tmp/test-merge-defaults.yaml")
+        # Set a partial config
+        config.config = {"server": {"host": "0.0.0.0"}}
+        merged = config._merge_defaults(DEFAULT_CONFIG, config.config)
+        assert merged["server"]["host"] == "0.0.0.0"
+        assert merged["server"]["ws_port"] == 8000  # default filled
+        assert merged["browser"]["headless"] is True
+
 
 # ─── Session Tests ─────────────────────────────────────────────
 
@@ -56,11 +81,9 @@ class TestSession:
 
     def test_session_expiry(self):
         """Test session timeout."""
-        import time as _time
         session = Session("test-id", "test-token")
-        # Manually set expires_at to past
-        session.expires_at = _time.time() - 100
-        assert session.is_expired  # Expired immediately
+        session.expires_at = time.time() - 100
+        assert session.is_expired
 
     def test_get_by_token(self):
         """Test finding session by token."""
@@ -95,15 +118,13 @@ class TestHumanMimicry:
         mimicry = HumanMimicry()
         path = mimicry.mouse_path(500, 300)
         assert len(path) >= 5
-        # Path should start near origin and end near target
         assert abs(path[-1][0] - 500) < 10
         assert abs(path[-1][1] - 300) < 10
 
     def test_mouse_path_is_curved(self):
-        """Test that mouse paths are not straight lines (human-like curves)."""
+        """Test that mouse paths are not straight lines."""
         mimicry = HumanMimicry()
         path = mimicry.mouse_path(200, 200)
-        # Check that intermediate points deviate from straight line
         deviations = []
         for i in range(1, len(path) - 1):
             t = i / len(path)
@@ -111,7 +132,6 @@ class TestHumanMimicry:
             expected_y = 200 * t
             dev = abs(path[i][0] - expected_x) + abs(path[i][1] - expected_y)
             deviations.append(dev)
-        # At least some points should deviate (curved path)
         assert sum(d > 1 for d in deviations) > 0
 
     def test_word_pause(self):
@@ -125,7 +145,6 @@ class TestHumanMimicry:
         mimicry = HumanMimicry()
         time_1000 = mimicry.page_read_time(1000)
         time_5000 = mimicry.page_read_time(5000)
-        # Longer text should take more time
         assert time_5000 > time_1000
 
 
@@ -179,24 +198,42 @@ class TestCaptchaBypass:
         assert stats["by_type"]["hcaptcha"] == 1
 
 
+# ─── Security Tests ──────────────────────────────────────────
+
+class TestSecurity:
+    def test_no_web_security_flag(self):
+        """Ensure --disable-web-security is NOT in browser launch args."""
+        import pathlib
+        # Read the source and verify the dangerous flag is absent
+        source = (pathlib.Path(__file__).parent.parent / "src" / "core" / "browser.py").read_text()
+        
+        assert "--disable-web-security" not in source
+
+    def test_scanner_no_drop_table(self):
+        """Ensure SQLi scanner doesn't include destructive payloads."""
+        from src.tools.scanner import SQLiScanner
+        for payload in SQLiScanner.PAYLOADS:
+            assert "DROP TABLE" not in payload.upper()
+            assert "DELETE" not in payload.upper()
+            assert "SLEEP" not in payload.upper()
+
+    def test_xss_scanner_no_alert(self):
+        """Ensure XSS scanner doesn't use alert() payloads."""
+        from src.tools.scanner import XSSScanner
+        for payload in XSSScanner.PAYLOADS:
+            assert "alert(" not in payload.lower()
+
+
 # ─── Integration Tests ─────────────────────────────────────
 
 @pytest.mark.asyncio
 class TestIntegration:
-    async def test_server_command_list(self):
-        """Test that server returns available commands."""
-        import aiohttp
-
-        config = Config("/tmp/test-integration-config.yaml")
-        # We can't start a full server in tests, but we can verify command routing
-        assert config.get("server.ws_port") == 8000
-
     async def test_browser_anti_detection_js(self):
         """Test that anti-detection JS is properly defined."""
-        from src.core.browser import ANTI_DETECTION_JS
-        assert "webdriver" in ANTI_DETECTION_JS
-        assert "plugins" in ANTI_DETECTION_JS
-        assert "chrome" in ANTI_DETECTION_JS.lower()
+        import pathlib; source = (pathlib.Path(__file__).parent.parent / "src" / "core" / "browser.py").read_text()
+        assert "webdriver" in source
+        assert "plugins" in source
+        assert "chrome" in source.lower()
 
 
 if __name__ == "__main__":

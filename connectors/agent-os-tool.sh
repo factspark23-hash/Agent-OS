@@ -73,116 +73,105 @@ if [ -z "$1" ]; then
     echo "Server:"
     echo "  status                      Server status"
     echo "  commands                    List all commands"
-    echo "  debug                       Debug info"
     exit 1
 fi
 
 COMMAND="$1"
 shift
 
+# Use python3 to build JSON safely — prevents shell injection
+build_json() {
+    python3 -c "
+import json, sys
+data = {'token': sys.argv[1], 'command': sys.argv[2]}
+args = sys.argv[3:]
+for i in range(0, len(args), 2):
+    key = args[i]
+    val = args[i+1] if i+1 < len(args) else ''
+    # Try to parse val as JSON (for objects/arrays), otherwise use as string
+    try:
+        data[key] = json.loads(val)
+    except (json.JSONDecodeError, ValueError):
+        data[key] = val
+print(json.dumps(data))
+" "$AGENT_OS_TOKEN" "$COMMAND" "$@"
+}
+
 case "$COMMAND" in
     navigate)
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"navigate\",\"url\":\"$1\"}"
+        DATA=$(build_json url "$1")
         ;;
-    back)
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"back\"}"
-        ;;
-    forward)
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"forward\"}"
-        ;;
-    reload)
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"reload\"}"
-        ;;
-    get-content)
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"get-content\"}"
-        ;;
-    get-dom)
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"get-dom\"}"
-        ;;
-    get-links)
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"get-links\"}"
-        ;;
-    get-images)
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"get-images\"}"
+    back|forward|reload|get-content|get-dom|get-links|get-images)
+        DATA=$(build_json)
         ;;
     screenshot)
         FULL="${1:-false}"
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"screenshot\",\"full_page\":$FULL}"
+        DATA=$(build_json full_page "$FULL")
         ;;
-    click)
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"click\",\"selector\":\"$1\"}"
+    click|hover)
+        DATA=$(build_json selector "$1")
         ;;
     type)
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"type\",\"text\":\"$1\"}"
+        DATA=$(build_json text "$1")
         ;;
     press)
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"press\",\"key\":\"$1\"}"
+        DATA=$(build_json key "$1")
         ;;
     fill-form)
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"fill-form\",\"fields\":$1}"
-        ;;
-    hover)
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"hover\",\"selector\":\"$1\"}"
+        DATA=$(build_json fields "$1")
         ;;
     select)
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"select\",\"selector\":\"$1\",\"value\":\"$2\"}"
+        DATA=$(build_json selector "$1" value "$2")
         ;;
     upload)
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"upload\",\"selector\":\"$1\",\"file_path\":\"$2\"}"
+        DATA=$(build_json selector "$1" file_path "$2")
         ;;
     wait)
         TIMEOUT="${2:-10000}"
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"wait\",\"selector\":\"$1\",\"timeout\":$TIMEOUT}"
+        DATA=$(build_json selector "$1" timeout "$TIMEOUT")
         ;;
     scroll)
         DIR="${1:-down}"
         AMT="${2:-500}"
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"scroll\",\"direction\":\"$DIR\",\"amount\":$AMT}"
+        DATA=$(build_json direction "$DIR" amount "$AMT")
         ;;
     evaluate-js)
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"evaluate-js\",\"script\":\"$1\"}"
+        DATA=$(build_json script "$1")
         ;;
-    scan-xss)
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"scan-xss\",\"url\":\"$1\"}"
-        ;;
-    scan-sqli)
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"scan-sqli\",\"url\":\"$1\"}"
+    scan-xss|scan-sqli)
+        DATA=$(build_json url "$1")
         ;;
     scan-sensitive)
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"scan-sensitive\"}"
+        DATA=$(build_json)
         ;;
     transcribe)
         LANG="${2:-auto}"
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"transcribe\",\"url\":\"$1\",\"language\":\"$LANG\"}"
+        DATA=$(build_json url "$1" language "$LANG")
         ;;
     save-creds)
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"save-creds\",\"domain\":\"$1\",\"username\":\"$2\",\"password\":\"$3\"}"
+        DATA=$(build_json domain "$1" username "$2" password "$3")
         ;;
     auto-login)
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"auto-login\",\"url\":\"$1\",\"domain\":\"$2\"}"
+        DATA=$(build_json url "$1" domain "$2")
         ;;
     fill-job)
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"fill-job\",\"url\":\"$1\",\"profile\":$2}"
+        DATA=$(build_json url "$1" profile "$2")
         ;;
     tabs)
         TAB_ACTION="$1"
         TAB_ID="${2:-}"
         if [ -n "$TAB_ID" ]; then
-            DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"tabs\",\"action\":\"$TAB_ACTION\",\"tab_id\":\"$TAB_ID\"}"
+            DATA=$(build_json action "$TAB_ACTION" tab_id "$TAB_ID")
         else
-            DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"tabs\",\"action\":\"$TAB_ACTION\"}"
+            DATA=$(build_json action "$TAB_ACTION")
         fi
         ;;
     status)
-        curl -s "$AGENT_OS_URL/status" | python3 -m json.tool
+        curl -s -H "Authorization: Bearer $AGENT_OS_TOKEN" "$AGENT_OS_URL/status" | python3 -m json.tool
         exit 0
         ;;
     commands)
         curl -s "$AGENT_OS_URL/commands" | python3 -m json.tool
-        exit 0
-        ;;
-    debug)
-        curl -s "$AGENT_OS_URL/debug" | python3 -m json.tool
         exit 0
         ;;
     *)

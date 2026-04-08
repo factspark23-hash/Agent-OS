@@ -17,3 +17,5 @@ build/
 # IDE
 .vscode/
 .idea/
+__pycache__/
+*.pyc

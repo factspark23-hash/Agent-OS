@@ -6,12 +6,34 @@ import asyncio
 import json
 import logging
 import time
+import ssl
 from typing import Dict, Optional, Any
+from collections import defaultdict
 from aiohttp import web
 
 import websockets
 
 logger = logging.getLogger("agent-os.server")
+
+
+class RateLimiter:
+    """Simple token-bucket rate limiter per IP."""
+
+    def __init__(self, rps: int = 20, burst: int = 40):
+        self.rps = rps
+        self.burst = burst
+        self._buckets: Dict[str, Dict] = defaultdict(lambda: {"tokens": burst, "last": time.time()})
+
+    def allow(self, key: str) -> bool:
+        now = time.time()
+        bucket = self._buckets[key]
+        elapsed = now - bucket["last"]
+        bucket["tokens"] = min(self.burst, bucket["tokens"] + elapsed * self.rps)
+        bucket["last"] = now
+        if bucket["tokens"] >= 1:
+            bucket["tokens"] -= 1
+            return True
+        return False
 
 
 class AgentServer:
@@ -30,6 +52,55 @@ class AgentServer:
         self._http_app = None
         self._http_runner = None
         self._start_time = time.time()
+        self._max_connections = config.get("server.max_connections", 10)
+        self._rate_limiter = RateLimiter(
+            rps=config.get("server.rate_limit_rps", 20),
+            burst=config.get("server.rate_limit_burst", 40),
+        )
+
+    def _get_cors_origins(self):
+        """Get allowed CORS origins from config."""
+        return self.config.get("server.cors_origins", ["http://localhost:*"])
+
+    def _cors_headers(self, request: web.Request) -> dict:
+        """Generate CORS headers based on config."""
+        origin = request.headers.get("Origin", "")
+        allowed = self._get_cors_origins()
+        # Simple wildcard matching
+        for pattern in allowed:
+            if pattern == "*" or origin.startswith(pattern.replace("*", "")):
+                return {
+                    "Access-Control-Allow-Origin": origin,
+                    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                    "Access-Control-Max-Age": "3600",
+                }
+        return {}
+
+    def _check_auth(self, data: Dict) -> bool:
+        """Validate agent token."""
+        token = data.get("token", "")
+        return self.config.validate_token(token)
+
+    def _check_auth_header(self, request: web.Request) -> bool:
+        """Validate auth from Authorization header or query param."""
+        # Check Authorization header
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            token = auth[7:]
+            return self.config.validate_token(token)
+        # Check query param
+        token = request.query.get("token", "")
+        if token:
+            return self.config.validate_token(token)
+        return False
+
+    def _client_ip(self, request: web.Request) -> str:
+        """Get client IP, respecting X-Forwarded-For."""
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        return request.remote or "unknown"
 
     async def start(self):
         """Start both WebSocket and HTTP servers."""
@@ -37,21 +108,43 @@ class AgentServer:
         ws_port = self.config.get("server.ws_port", 8000)
         http_port = self.config.get("server.http_port", 8001)
 
-        # Start WebSocket server
+        # Build SSL context if TLS configured
+        ssl_context = None
+        tls_cert = self.config.get("server.tls_cert", "")
+        tls_key = self.config.get("server.tls_key", "")
+        if tls_cert and tls_key:
+            ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ssl_context.load_cert_chain(tls_cert, tls_key)
+            logger.info("TLS enabled")
+
+        # Start WebSocket server with connection limit
+        ws_kwargs = {
+            "ping_interval": 30,
+            "ping_timeout": 10,
+            "max_size": 10 * 1024 * 1024,  # 10MB max message
+        }
+        if ssl_context:
+            ws_kwargs["ssl"] = ssl_context
+
         self._ws_server = await websockets.serve(
-            self._ws_handler, ws_host, ws_port,
-            ping_interval=30, ping_timeout=10
+            self._ws_handler, ws_host, ws_port, **ws_kwargs
         )
-        logger.info(f"WebSocket server listening on ws://{ws_host}:{ws_port}")
+        protocol = "wss" if ssl_context else "ws"
+        logger.info(f"WebSocket server listening on {protocol}://{ws_host}:{ws_port}")
 
         # Start HTTP server
-        self._http_app = web.Application()
+        self._http_app = web.Application(client_max_size=10 * 1024 * 1024)
         self._setup_routes()
         self._http_runner = web.AppRunner(self._http_app)
         await self._http_runner.setup()
-        site = web.TCPSite(self._http_runner, ws_host, http_port)
+
+        if ssl_context:
+            site = web.TCPSite(self._http_runner, ws_host, http_port, ssl_context=ssl_context)
+        else:
+            site = web.TCPSite(self._http_runner, ws_host, http_port)
         await site.start()
-        logger.info(f"HTTP server listening on http://{ws_host}:{http_port}")
+        protocol = "https" if ssl_context else "http"
+        logger.info(f"HTTP server listening on {protocol}://{ws_host}:{http_port}")
 
     async def stop(self):
         """Stop both servers."""
@@ -67,19 +160,50 @@ class AgentServer:
         self._http_app.router.add_post("/command", self._handle_command)
         self._http_app.router.add_get("/status", self._handle_status)
         self._http_app.router.add_get("/commands", self._handle_commands_list)
-        self._http_app.router.add_get("/debug", self._handle_debug)
-        self._http_app.router.add_get("/screenshot", self._handle_screenshot)
+        self._http_app.router.add_options("/command", self._handle_cors_preflight)
+        self._http_app.router.add_options("/status", self._handle_cors_preflight)
+
+    async def _handle_cors_preflight(self, request: web.Request) -> web.Response:
+        """Handle CORS preflight requests."""
+        return web.Response(headers=self._cors_headers(request))
 
     async def _ws_handler(self, websocket, path):
         """Handle WebSocket connections from agents."""
+        # Connection limit check
+        if len(self._ws_clients) >= self._max_connections:
+            await websocket.send(json.dumps({
+                "status": "error",
+                "error": f"Max connections ({self._max_connections}) reached. Try again later."
+            }))
+            await websocket.close(1013, "Too many connections")
+            return
+
         client_id = f"ws-{id(websocket)}"
         self._ws_clients[client_id] = websocket
-        logger.info(f"Agent connected via WebSocket: {client_id}")
+        logger.info(f"Agent connected via WebSocket: {client_id} ({len(self._ws_clients)}/{self._max_connections})")
 
         try:
             async for message in websocket:
                 try:
                     data = json.loads(message)
+
+                    # Authenticate
+                    if not self._check_auth(data):
+                        await websocket.send(json.dumps({
+                            "status": "error",
+                            "error": "Invalid or missing token"
+                        }))
+                        continue
+
+                    # Rate limit
+                    client_ip = str(id(websocket))
+                    if not self._rate_limiter.allow(client_ip):
+                        await websocket.send(json.dumps({
+                            "status": "error",
+                            "error": "Rate limit exceeded. Slow down."
+                        }))
+                        continue
+
                     result = await self._process_command(data)
                     await websocket.send(json.dumps(result))
                 except json.JSONDecodeError:
@@ -93,26 +217,60 @@ class AgentServer:
 
     async def _handle_command(self, request: web.Request) -> web.Response:
         """Handle HTTP POST /command."""
+        cors = self._cors_headers(request)
+
+        # Rate limit
+        client_ip = self._client_ip(request)
+        if not self._rate_limiter.allow(client_ip):
+            return web.json_response(
+                {"status": "error", "error": "Rate limit exceeded"},
+                status=429,
+                headers=cors,
+            )
+
         try:
             data = await request.json()
-            result = await self._process_command(data)
-            return web.json_response(result)
-        except Exception as e:
-            return web.json_response({"status": "error", "error": str(e)}, status=400)
+        except Exception:
+            return web.json_response(
+                {"status": "error", "error": "Invalid JSON body"},
+                status=400,
+                headers=cors,
+            )
+
+        # Authenticate
+        if not self._check_auth(data):
+            return web.json_response(
+                {"status": "error", "error": "Invalid or missing token"},
+                status=401,
+                headers=cors,
+            )
+
+        result = await self._process_command(data)
+        return web.json_response(result, headers=cors)
 
     async def _handle_status(self, request: web.Request) -> web.Response:
         """Handle HTTP GET /status."""
+        cors = self._cors_headers(request)
+        # Status endpoint requires auth too
+        if not self._check_auth_header(request):
+            return web.json_response(
+                {"status": "error", "error": "Authentication required"},
+                status=401,
+                headers=cors,
+            )
         return web.json_response({
             "status": "running",
             "uptime_seconds": int(time.time() - self._start_time),
             "active_sessions": len(self.session_manager.list_active_sessions()),
             "active_ws_clients": len(self._ws_clients),
             "browser_active": self.browser.browser is not None,
-            "version": "2.0.0"
-        })
+            "version": "2.1.0"
+        }, headers=cors)
 
     async def _handle_commands_list(self, request: web.Request) -> web.Response:
         """Handle HTTP GET /commands — list all available commands."""
+        cors = self._cors_headers(request)
+        # Commands list is public (needed for discovery), but include CORS
         commands = {
             "navigate": {"params": {"url": "string", "page_id": "string (optional)", "wait_until": "string (optional)"}, "description": "Navigate to a URL"},
             "fill-form": {"params": {"fields": {"selector": "value"}}, "description": "Fill form fields with human-like typing"},
@@ -156,25 +314,7 @@ class AgentServer:
             "fill-job": {"params": {"url": "string", "profile": "dict"}, "description": "Auto-fill job application form"},
             "tabs": {"params": {"action": "list|new|close|switch", "tab_id": "string (optional)"}, "description": "Manage browser tabs"},
         }
-        return web.json_response(commands)
-
-    async def _handle_debug(self, request: web.Request) -> web.Response:
-        """Handle HTTP GET /debug."""
-        return web.json_response({
-            "sessions": self.session_manager.list_active_sessions(),
-            "uptime": int(time.time() - self._start_time),
-            "ws_clients": len(self._ws_clients),
-            "blocked_requests": self.browser._blocked_requests,
-            "tabs": list(self.browser._pages.keys()),
-        })
-
-    async def _handle_screenshot(self, request: web.Request) -> web.Response:
-        """Handle HTTP GET /screenshot."""
-        try:
-            b64 = await self.browser.screenshot()
-            return web.Response(body=b64, content_type="text/plain")
-        except Exception as e:
-            return web.json_response({"error": str(e)}, status=500)
+        return web.json_response(commands, headers=cors)
 
     async def _process_command(self, data: Dict) -> Dict[str, Any]:
         """Process any agent command."""
@@ -252,6 +392,8 @@ class AgentServer:
             return {"status": "error", "error": f"Unknown command: {command}. Available: {list(handlers.keys())}"}
 
         return await handler(data, session)
+
+    # ─── Command Handlers ────────────────────────────────────
 
     async def _cmd_navigate(self, data: Dict, session) -> Dict:
         url = data.get("url")

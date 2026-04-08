@@ -12,7 +12,7 @@ A browser automation server built **for AI agents** — not humans. Connects via
 - 🔍 **Bug Bounty Tools** — XSS scanner, SQL injection detector, sensitive data finder
 - 🎬 **Video Transcription** — Local Whisper integration (no cloud APIs)
 - 📝 **Form Automation** — Auto-detect and fill form fields with human-like timing
-- 🔒 **Privacy First** — Sessions auto-wipe, AES-256 credential vault, no telemetry
+- 🔒 **Privacy First** — Sessions auto-wipe, AES-128 credential vault (Fernet), no telemetry
 - 🔌 **Multi-Connector** — MCP Server, OpenAI function calling, OpenClaw manifest, CLI tool
 
 ## Quick Start

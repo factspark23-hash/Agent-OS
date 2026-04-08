@@ -18,18 +18,37 @@ class AuthHandler:
     def __init__(self, config):
         self.config = config
         self.vault_path = Path(os.path.expanduser("~/.agent-os/vault.enc"))
+        # Key stored separately from vault data
         self._key = self._get_or_create_key()
         self._fernet = Fernet(self._key)
 
     def _get_or_create_key(self) -> bytes:
-        """Get or create encryption key for the vault."""
-        key_path = Path(os.path.expanduser("~/.agent-os/.vault_key"))
+        """Get or create encryption key for the vault.
+
+        Key is stored in a separate directory from the vault file
+        to avoid a single-point compromise. On Linux, we use
+        ~/.agent-os/keys/ with 0700 permissions.
+        """
+        # Use separate key directory
+        key_dir = Path(os.path.expanduser("~/.agent-os/keys"))
+        key_dir.mkdir(parents=True, exist_ok=True)
+        key_dir.chmod(0o700)
+
+        key_path = key_dir / "vault.key"
         if key_path.exists():
-            return key_path.read_bytes()
+            key_bytes = key_path.read_bytes()
+            # Validate it's a proper Fernet key
+            try:
+                Fernet(key_bytes)
+                return key_bytes
+            except Exception:
+                logger.warning("Corrupt vault key, regenerating...")
+                key_path.unlink()
+
         key = Fernet.generate_key()
-        key_path.parent.mkdir(parents=True, exist_ok=True)
         key_path.write_bytes(key)
         key_path.chmod(0o600)
+        logger.info("New vault encryption key generated")
         return key
 
     def save_credentials(self, domain: str, credentials: Dict[str, str]):
