@@ -2,6 +2,7 @@
 """
 Agent-OS Connector Tests
 Tests MCP, OpenAI, Claude, OpenClaw, and CLI connectors.
+Enforces that ALL connectors expose the same 25 tools.
 
 Run:
     python -m pytest tests/test_connectors.py -v
@@ -11,7 +12,6 @@ import json
 import sys
 import os
 import subprocess
-import time
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -20,50 +20,117 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 AGENT_OS_URL = "http://localhost:8001"
 AGENT_TOKEN = "test-connector-token"
 
+# Canonical 25 tool names — every connector must match this exactly
+EXPECTED_TOOLS = sorted([
+    "browser_auto_login",
+    "browser_back",
+    "browser_click",
+    "browser_evaluate_js",
+    "browser_fill_form",
+    "browser_forward",
+    "browser_get_content",
+    "browser_get_dom",
+    "browser_get_images",
+    "browser_get_links",
+    "browser_hover",
+    "browser_navigate",
+    "browser_press",
+    "browser_reload",
+    "browser_save_credentials",
+    "browser_scan_sensitive",
+    "browser_scan_sqli",
+    "browser_scan_xss",
+    "browser_screenshot",
+    "browser_scroll",
+    "browser_status",
+    "browser_tabs",
+    "browser_transcribe",
+    "browser_type",
+    "browser_wait",
+])
+
+
+# ─── MCP Connector ────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_mcp_tools():
-    """Test MCP tool definitions load correctly."""
+    """Test MCP has all 25 tools with correct names."""
     from connectors.mcp_server import TOOLS
-    assert len(TOOLS) > 0, f"Expected MCP tools, got {len(TOOLS)}"
-    tool_names = [t.name for t in TOOLS]
-    for expected in ["browser_navigate", "browser_click", "browser_fill_form", "browser_scan_xss"]:
-        assert expected in tool_names, f"MCP tool '{expected}' missing"
+    tool_names = sorted([t.name for t in TOOLS])
+    assert tool_names == EXPECTED_TOOLS, (
+        f"MCP tools mismatch.\n"
+        f"  Missing: {set(EXPECTED_TOOLS) - set(tool_names)}\n"
+        f"  Extra: {set(tool_names) - set(EXPECTED_TOOLS)}"
+    )
 
+
+# ─── OpenAI Connector ─────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_openai_connector():
-    """Test OpenAI function definitions."""
-    from connectors.openai_connector import get_tools
-    tools = get_tools("openai")
-    assert len(tools) > 0, "Expected OpenAI tools"
+    """Test OpenAI connector has all 25 tools in correct format."""
+    from connectors.openai_connector import get_tools, get_all_tool_names
 
-    # Verify format
-    for tool in tools[:3]:
+    # Check tool count
+    tool_names = sorted(get_all_tool_names())
+    assert tool_names == EXPECTED_TOOLS, (
+        f"OpenAI tools mismatch.\n"
+        f"  Missing: {set(EXPECTED_TOOLS) - set(tool_names)}\n"
+        f"  Extra: {set(tool_names) - set(EXPECTED_TOOLS)}"
+    )
+
+    # Verify OpenAI format
+    openai_tools = get_tools("openai")
+    assert len(openai_tools) == 25
+    for tool in openai_tools:
         assert tool.get("type") == "function", f"Tool missing type=function: {tool}"
-        assert "name" in tool.get("function", {}), f"Tool missing function.name: {tool}"
-
-    # Test Claude format
-    claude_tools = get_tools("claude")
-    assert len(claude_tools) > 0, "Expected Claude tools"
-    for tool in claude_tools[:3]:
-        assert "name" in tool, f"Claude tool missing name: {tool}"
-        assert "input_schema" in tool, f"Claude tool missing input_schema: {tool}"
+        func = tool.get("function", {})
+        assert "name" in func, f"Tool missing function.name: {tool}"
+        assert "description" in func, f"Tool missing function.description: {tool}"
+        assert "parameters" in func, f"Tool missing function.parameters: {tool}"
 
 
 @pytest.mark.asyncio
+async def test_claude_connector():
+    """Test Claude connector has all 25 tools in correct format."""
+    from connectors.openai_connector import get_tools
+
+    claude_tools = get_tools("claude")
+    assert len(claude_tools) == 25
+    tool_names = sorted([t["name"] for t in claude_tools])
+    assert tool_names == EXPECTED_TOOLS, (
+        f"Claude tools mismatch.\n"
+        f"  Missing: {set(EXPECTED_TOOLS) - set(tool_names)}\n"
+        f"  Extra: {set(tool_names) - set(EXPECTED_TOOLS)}"
+    )
+
+    # Verify Claude format
+    for tool in claude_tools:
+        assert "name" in tool, f"Claude tool missing name: {tool}"
+        assert "description" in tool, f"Claude tool missing description: {tool}"
+        assert "input_schema" in tool, f"Claude tool missing input_schema: {tool}"
+
+
+# ─── OpenClaw Connector ───────────────────────────────────────
+
+@pytest.mark.asyncio
 async def test_openclaw_connector():
-    """Test OpenClaw connector manifest."""
-    from connectors.openclaw_connector import get_manifest
+    """Test OpenClaw connector has all 25 tools."""
+    from connectors.openclaw_connector import get_manifest, get_tool_names
+
     manifest = get_manifest()
     assert "tools" in manifest, "Manifest missing 'tools' key"
-    assert len(manifest["tools"]) > 0, "Expected tools in manifest"
 
-    expected_tools = ["browser_navigate", "browser_click", "browser_fill_form", "browser_scan_xss"]
-    tool_names = [t["name"] for t in manifest["tools"]]
-    for name in expected_tools:
-        assert name in tool_names, f"OpenClaw tool '{name}' missing from manifest"
+    tool_names = sorted(get_tool_names())
+    assert len(tool_names) == 25, f"Expected 25 tools, got {len(tool_names)}"
+    assert tool_names == EXPECTED_TOOLS, (
+        f"OpenClaw tools mismatch.\n"
+        f"  Missing: {set(EXPECTED_TOOLS) - set(tool_names)}\n"
+        f"  Extra: {set(tool_names) - set(EXPECTED_TOOLS)}"
+    )
 
+
+# ─── CLI Connector ────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_cli_connector():
@@ -72,11 +139,22 @@ async def test_cli_connector():
     assert os.path.exists(script), f"CLI script not found at {script}"
     assert os.access(script, os.X_OK), "CLI script not executable"
 
-    # Test help output
+    # Test help output contains key commands
     result = subprocess.run([script], capture_output=True, text=True, timeout=5)
     assert "Usage:" in result.stdout, "CLI help missing 'Usage:'"
-    assert "navigate" in result.stdout, "CLI help missing 'navigate' command"
 
+    expected_commands = [
+        "navigate", "click", "type", "press", "fill-form", "hover",
+        "scroll", "screenshot", "get-content", "get-dom", "get-links",
+        "get-images", "evaluate-js", "scan-xss", "scan-sqli",
+        "scan-sensitive", "transcribe", "save-creds", "auto-login",
+        "tabs", "back", "forward", "reload", "wait", "status",
+    ]
+    for cmd in expected_commands:
+        assert cmd in result.stdout, f"CLI help missing '{cmd}' command"
+
+
+# ─── MCP Protocol ─────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_mcp_protocol():
@@ -87,10 +165,43 @@ async def test_mcp_protocol():
     assert handle_list_tools is not None, "MCP list_tools handler missing"
     assert handle_call_tool is not None, "MCP call_tool handler missing"
 
-    # Test list tools
+    # Test list tools returns all 25
     tools = await handle_list_tools()
-    assert len(tools) > 0, "MCP list_tools returned empty"
+    tool_names = sorted([t.name for t in tools])
+    assert tool_names == EXPECTED_TOOLS, (
+        f"MCP list_tools mismatch.\n"
+        f"  Missing: {set(EXPECTED_TOOLS) - set(tool_names)}\n"
+        f"  Extra: {set(tool_names) - set(EXPECTED_TOOLS)}"
+    )
 
+
+# ─── Cross-Connector Consistency ──────────────────────────────
+
+def test_all_connectors_match():
+    """Verify all connectors expose the exact same set of tools."""
+    from connectors.mcp_server import TOOLS as mcp_tools
+    from connectors.openai_connector import OPENAI_TOOLS, CLAUDE_TOOLS, get_all_tool_names
+    from connectors.openclaw_connector import get_tool_names
+
+    mcp_names = set(t.name for t in mcp_tools)
+    openai_names = set(get_all_tool_names())
+    claude_names = set(t["name"] for t in CLAUDE_TOOLS)
+    openclaw_names = set(get_tool_names())
+
+    assert mcp_names == openai_names == claude_names == openclaw_names, (
+        f"Connector tool sets don't match!\n"
+        f"  MCP:      {len(mcp_names)} tools\n"
+        f"  OpenAI:   {len(openai_names)} tools\n"
+        f"  Claude:   {len(claude_names)} tools\n"
+        f"  OpenClaw: {len(openclaw_names)} tools\n"
+        f"  MCP only:      {mcp_names - openai_names}\n"
+        f"  OpenAI only:   {openai_names - mcp_names}\n"
+        f"  Claude only:   {claude_names - mcp_names}\n"
+        f"  OpenClaw only: {openclaw_names - mcp_names}"
+    )
+
+
+# ─── Live REST API ────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_live_rest_api():
