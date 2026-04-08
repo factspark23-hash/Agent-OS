@@ -1,34 +1,36 @@
-# 🤖 Agent OS — AI Agent Browser
+# Agent OS — AI Agent Browser
 
-A browser built **exclusively for AI agents** — not humans. Zero CAPTCHAs, zero auth walls, zero external services. Runs on 4GB RAM.
+A browser automation server built **for AI agents** — not humans. Connects via WebSocket/REST API to let any AI agent browse, fill forms, take screenshots, scan for vulnerabilities, and transcribe videos.
+
+**Stack:** Python + Playwright (Chromium) — no Rust, no GPU needed.
 
 ## Features
 
-- 🚫 **CAPTCHA Bypass** — Blocks bot-detection queries at the network level before they trigger
-- 🤖 **Universal Agent Connector** — Any AI (Claude, Qwen, Kimi, Llama) connects via WebSocket/cURL in 1 command
-- 🧠 **Human Mimicry Engine** — Realistic mouse movements, typing rhythms, scroll patterns
-- 🔍 **Bug Bounty Scanner** — XSS, SQL injection, sensitive data detection built-in
-- 🎬 **Video Transcription** — Watch → extract audio → transcribe locally (Whisper.cpp)
-- 📝 **Job Application Automation** — Auto-fill forms, upload resumes, submit applications
-- 🔒 **Privacy First** — Sessions auto-wipe after timeout, no telemetry, no disk traces
-- ⚡ **4GB RAM Safe** — RAM monitor built-in, CPU-only inference, no GPU needed
+- 🛡️ **Anti-Detection** — Blocks common bot detection scripts (reCAPTCHA, hCaptcha, PerimeterX, Cloudflare Turnstile) at the network level
+- 🤖 **Universal Agent Connector** — Any AI connects via WebSocket, REST, MCP, or CLI
+- 🧠 **Human Mimicry** — Bezier mouse curves, realistic typing delays, mistake simulation
+- 🔍 **Bug Bounty Tools** — XSS scanner, SQL injection detector, sensitive data finder
+- 🎬 **Video Transcription** — Local Whisper integration (no cloud APIs)
+- 📝 **Form Automation** — Auto-detect and fill form fields with human-like timing
+- 🔒 **Privacy First** — Sessions auto-wipe, AES-256 credential vault, no telemetry
+- 🔌 **Multi-Connector** — MCP Server, OpenAI function calling, OpenClaw manifest, CLI tool
 
 ## Quick Start
 
 ```bash
-# 1. Install
+# 1. Install Python dependencies
 pip install -r requirements.txt
+
+# 2. Install Playwright browser
 playwright install chromium
 
-# 2. Launch
+# 3. Launch
 python main.py --agent-token "my-agent-123"
 
-# 3. Connect any AI
-curl -X POST http://localhost:8000/command -d '{
-  "token": "my-agent-123",
-  "command": "navigate",
-  "url": "https://github.com/login"
-}'
+# 4. Connect any AI (from another terminal)
+curl -X POST http://localhost:8001/command \
+  -H "Content-Type: application/json" \
+  -d '{"token":"my-agent-123","command":"navigate","url":"https://github.com/login"}'
 ```
 
 ## Architecture
@@ -38,20 +40,24 @@ Agent-OS/
 ├── main.py                    # Entry point & CLI
 ├── src/
 │   ├── core/
-│   │   ├── browser.py         # Browser engine with anti-detection
-│   │   ├── config.py          # Configuration management
-│   │   └── session.py         # Session management & sandboxing
+│   │   ├── browser.py         # Playwright browser with anti-detection
+│   │   ├── config.py          # YAML configuration management
+│   │   └── session.py         # Session lifecycle & auto-wipe
 │   ├── agents/
-│   │   ├── server.py          # WebSocket/REST agent server
-│   │   └── connectors/        # Pre-built connectors for Claude/Qwen/Kimi
+│   │   └── server.py          # WebSocket + REST API server
 │   ├── security/
-│   │   ├── captcha_bypass.py  # Query-level CAPTCHA prevention
-│   │   ├── human_mimicry.py   # Human behavior simulation
-│   │   └── auth_handler.py    # Auto-login & session injection
+│   │   ├── captcha_bypass.py  # Bot detection URL blocking
+│   │   ├── human_mimicry.py   # Bezier mouse curves, typing simulation
+│   │   └── auth_handler.py    # Encrypted credential vault & auto-login
 │   └── tools/
-│       ├── scanner.py         # Bug bounty scanner (XSS/SQLi)
-│       ├── transcriber.py     # Video transcription
-│       └── form_filler.py     # Job application automation
+│       ├── scanner.py         # XSS, SQLi, sensitive data scanners
+│       ├── transcriber.py     # Video/audio transcription (Whisper)
+│       └── form_filler.py     # Smart form field detection & filling
+├── connectors/
+│   ├── mcp_server.py          # MCP protocol (Claude Desktop / Codex)
+│   ├── openai_connector.py    # OpenAI / Claude function calling
+│   ├── openclaw_connector.py  # OpenClaw agent integration
+│   └── agent-os-tool.sh       # CLI tool (any language via subprocess)
 ├── tests/
 │   └── test_all.py            # Full test suite
 └── docs/
@@ -69,7 +75,6 @@ Agent-OS/
 | **CLI Tool** | Shell script | 14 | Any language via `subprocess` |
 
 ### MCP Setup (for Claude Desktop / Codex)
-Add to your MCP config:
 ```json
 {
   "mcpServers": {
@@ -111,12 +116,100 @@ subprocess.run(["./connectors/agent-os-tool.sh", "scan-xss", "https://target.com
 execSync("./connectors/agent-os-tool.sh click 'button[type=submit]'")
 ```
 
+## API Commands
+
+| Command | Parameters | Description |
+|---------|-----------|-------------|
+| `navigate` | `url` | Navigate to a URL |
+| `fill-form` | `fields` (dict) | Fill form fields with human typing |
+| `click` | `selector` | Click element (CSS selector) |
+| `screenshot` | — | Take base64 PNG screenshot |
+| `get-content` | — | Get HTML + text content |
+| `get-dom` | — | Get structured DOM snapshot |
+| `scroll` | `direction`, `amount` | Scroll the page |
+| `evaluate-js` | `script` | Execute JavaScript |
+| `scan-xss` | `url` | Scan for XSS vulnerabilities |
+| `scan-sqli` | `url` | Scan for SQL injection |
+| `transcribe` | `url`, `language` | Transcribe video/audio |
+| `save-creds` | `domain`, `username`, `password` | Save encrypted credentials |
+| `auto-login` | `url`, `domain` | Login with saved credentials |
+| `tabs` | `action`, `tab_id` | Manage browser tabs |
+
+## How Anti-Detection Works
+
+Agent-OS intercepts requests at the network level:
+
+1. **Request Blocking** — URLs matching bot detection patterns (recaptcha, hcaptcha, perimeterx, cloudflare-challenge) are intercepted and return fake "human verified" responses
+2. **Script Blocking** — Bot detection JavaScript is removed before execution
+3. **DOM Patching** — `navigator.webdriver`, plugins, hardware info are spoofed
+4. **Human Mimicry** — Mouse movements use Bezier curves, typing has realistic delays
+
+### What's Blocked
+- Google reCAPTCHA v2/v3
+- hCaptcha
+- Cloudflare Turnstile
+- PerimeterX
+- DataDome
+- Imperva/Incapsula
+- Akamai Bot Manager
+- Kasada
+
+### Honest Limitations
+- Advanced TLS fingerprinting can still detect Playwright
+- Some sophisticated bot protection (like BotD fingerprinting) may still detect automation
+- Anti-detection effectiveness varies by site — test on your specific targets
+
+## Configuration
+
+Default config at `~/.agent-os/config.yaml`:
+
+```yaml
+server:
+  host: 127.0.0.1
+  ws_port: 8000
+  http_port: 8001
+  max_connections: 10
+
+browser:
+  headless: true
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36"
+  viewport: {width: 1920, height: 1080}
+  max_ram_mb: 500
+  page_timeout_ms: 30000
+
+session:
+  timeout_minutes: 15
+  auto_wipe: true
+  max_concurrent: 3
+
+security:
+  captcha_bypass: true
+  human_mimicry: true
+  block_bot_queries: true
+  session_encryption: true
+```
+
+## Running Tests
+
+```bash
+pip install pytest pytest-asyncio
+python -m pytest tests/ -v
+```
+
 ## Requirements
 
-- Python 3.8+
-- 4GB RAM minimum
+- Python 3.10+
+- ~500MB RAM (idle), ~800MB under load
 - No GPU required
-- No external API keys needed
+- No external API keys needed (unless using transcription, which needs yt-dlp + whisper)
+
+## Privacy & Security
+
+- **Session Data**: Auto-wiped after timeout (default 15 min)
+- **Credentials**: Encrypted with Fernet (AES-128-CBC), stored at `~/.agent-os/vault.enc`
+- **No Telemetry**: Zero data collection
+- **Local Only**: All processing on-device
+- **Token Auth**: All commands require a valid agent token
 
 ## License
 

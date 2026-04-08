@@ -5,6 +5,7 @@ This is the core anti-detection technology.
 """
 import re
 import json
+import random
 import logging
 from typing import Dict, List, Optional, Set
 from dataclasses import dataclass, field
@@ -247,6 +248,3 @@ class CaptchaBypass:
     def get_blocklist_update(self) -> List[str]:
         """Return current detection patterns for external updates."""
         return self.DETECTION_PATTERNS.copy()
-
-
-import random
