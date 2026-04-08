@@ -18,11 +18,12 @@ A browser automation server built **for AI agents** — not humans. Connects via
 ## Quick Start
 
 ```bash
-# 1. Install Python dependencies
-pip install -r requirements.txt
+# 1. Run the setup script (creates venv, installs everything, runs tests)
+chmod +x setup.sh
+./setup.sh
 
-# 2. Install Playwright browser
-playwright install chromium
+# 2. Activate the virtual environment
+source venv/bin/activate
 
 # 3. Launch
 python main.py --agent-token "my-agent-123"
@@ -31,6 +32,26 @@ python main.py --agent-token "my-agent-123"
 curl -X POST http://localhost:8001/command \
   -H "Content-Type: application/json" \
   -d '{"token":"my-agent-123","command":"navigate","url":"https://github.com/login"}'
+```
+
+### Manual Install (if setup.sh doesn't work)
+
+```bash
+# 1. Create & activate virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# 2. Install Python dependencies
+pip install -r requirements.txt
+
+# 3. Install Playwright browser + system deps
+sudo apt install -y libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+  libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 \
+  libcairo2 libasound2
+python -m playwright install chromium
+
+# 4. Verify
+python -m pytest tests/ -v
 ```
 
 ## Architecture
