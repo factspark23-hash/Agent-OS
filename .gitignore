@@ -5,6 +5,15 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+
+# Agent-OS runtime
 .agent-os/
+~/.agent-os/
+
+# Security files
 *.enc
 .vault_key
+
+# IDE
+.vscode/
+.idea/
