@@ -69,8 +69,9 @@ echo ""
 echo "🔍 Checking system dependencies for Chromium..."
 
 MISSING_DEPS=""
+# Check both regular and t64 variants (Debian 12+ renames)
 for lib in libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2; do
-    if ! dpkg -l "$lib" 2>/dev/null | grep -q "^ii"; then
+    if ! dpkg -l "$lib" 2>/dev/null | grep -q "^ii" && ! dpkg -l "${lib}t64" 2>/dev/null | grep -q "^ii"; then
         MISSING_DEPS="$MISSING_DEPS $lib"
     fi
 done
@@ -96,7 +97,6 @@ if [ "${USE_VENV:-1}" = "1" ]; then
     pip install --upgrade pip -q
     pip install -r "$(dirname "$0")/requirements.txt" -q
 else
-    pip3 install --break-system-packages --upgrade pip -q
     pip3 install --break-system-packages -r "$(dirname "$0")/requirements.txt" -q
 fi
 echo "✅ Python dependencies installed"
