@@ -582,6 +582,336 @@ class AgentBrowser:
         await asyncio.sleep(random.uniform(0.5, 1.5))
         return {"status": "success", "url": page.url, "title": await page.title()}
 
+    async def right_click(self, selector: str, page_id: str = "main") -> Dict[str, Any]:
+        """Right-click an element (opens context menu)."""
+        from src.security.human_mimicry import HumanMimicry
+        page = self._pages.get(page_id, self.page)
+        mimicry = HumanMimicry()
+
+        try:
+            element = await page.query_selector(selector)
+            if not element:
+                return {"status": "error", "error": f"Element not found: {selector}"}
+
+            box = await element.bounding_box()
+            if box:
+                target_x = box["x"] + box["width"] / 2
+                target_y = box["y"] + box["height"] / 2
+                path = mimicry.mouse_path(target_x, target_y)
+                for x, y in path:
+                    await page.mouse.move(x, y)
+                    await asyncio.sleep(random.uniform(0.005, 0.02))
+
+            await asyncio.sleep(random.uniform(0.05, 0.15))
+            await element.click(button="right")
+            await asyncio.sleep(random.uniform(0.2, 0.5))
+
+            return {"status": "success", "selector": selector, "action": "right_click"}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def context_action(self, selector: str, action_text: str, page_id: str = "main") -> Dict[str, Any]:
+        """Right-click and select a context menu option by text."""
+        page = self._pages.get(page_id, self.page)
+
+        # Right-click to open menu
+        result = await self.right_click(selector, page_id)
+        if result.get("status") != "success":
+            return result
+
+        await asyncio.sleep(random.uniform(0.3, 0.8))
+
+        # Try to find and click the menu item
+        menu_selectors = [
+            f'text="{action_text}"',
+            f'role=menuitem[name="{action_text}"]',
+            f'[role="menuitem"]:has-text("{action_text}")',
+            f'li:has-text("{action_text}")',
+            f'div:has-text("{action_text}")',
+        ]
+
+        for sel in menu_selectors:
+            try:
+                item = await page.query_selector(sel)
+                if item:
+                    await item.click()
+                    await asyncio.sleep(random.uniform(0.2, 0.5))
+                    return {"status": "success", "action": action_text, "selector": selector}
+            except:
+                continue
+
+        # If no menu item found, try keyboard shortcut based on common actions
+        shortcuts = {
+            "copy": "Control+c",
+            "paste": "Control+v",
+            "cut": "Control+x",
+            "select all": "Control+a",
+            "save": "Control+s",
+            "inspect": "F12",
+            "view source": "Control+u",
+            "open in new tab": "Control+click",
+            "reload": "F5",
+        }
+
+        shortcut = shortcuts.get(action_text.lower())
+        if shortcut and "+" in shortcut:
+            keys = shortcut.split("+")
+            await page.keyboard.press("+".join(keys))
+            return {"status": "success", "action": action_text, "method": "keyboard_shortcut"}
+
+        return {"status": "error", "error": f"Context menu action '{action_text}' not found"}
+
+    async def drag_and_drop(self, source_selector: str, target_selector: str, page_id: str = "main") -> Dict[str, Any]:
+        """Drag an element and drop it on another element."""
+        from src.security.human_mimicry import HumanMimicry
+        page = self._pages.get(page_id, self.page)
+        mimicry = HumanMimicry()
+
+        try:
+            source = await page.query_selector(source_selector)
+            target = await page.query_selector(target_selector)
+
+            if not source:
+                return {"status": "error", "error": f"Source element not found: {source_selector}"}
+            if not target:
+                return {"status": "error", "error": f"Target element not found: {target_selector}"}
+
+            source_box = await source.bounding_box()
+            target_box = await target.bounding_box()
+
+            if not source_box or not target_box:
+                return {"status": "error", "error": "Could not get element positions"}
+
+            src_x = source_box["x"] + source_box["width"] / 2
+            src_y = source_box["y"] + source_box["height"] / 2
+            tgt_x = target_box["x"] + target_box["width"] / 2
+            tgt_y = target_box["y"] + target_box["height"] / 2
+
+            # Move to source with human-like path
+            path_to_source = mimicry.mouse_path(src_x, src_y)
+            for x, y in path_to_source:
+                await page.mouse.move(x, y)
+                await asyncio.sleep(random.uniform(0.005, 0.015))
+
+            # Mouse down on source
+            await page.mouse.down()
+            await asyncio.sleep(random.uniform(0.1, 0.3))
+
+            # Drag to target with human-like path
+            path_to_target = mimicry.mouse_path(tgt_x, tgt_y)
+            for x, y in path_to_target:
+                await page.mouse.move(x, y)
+                await asyncio.sleep(random.uniform(0.008, 0.02))
+
+            await asyncio.sleep(random.uniform(0.05, 0.15))
+
+            # Drop
+            await page.mouse.up()
+            await asyncio.sleep(random.uniform(0.2, 0.5))
+
+            return {
+                "status": "success",
+                "source": source_selector,
+                "target": target_selector,
+                "from": (round(src_x, 1), round(src_y, 1)),
+                "to": (round(tgt_x, 1), round(tgt_y, 1)),
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def drag_by_offset(self, selector: str, x_offset: int, y_offset: int, page_id: str = "main") -> Dict[str, Any]:
+        """Drag an element by a pixel offset."""
+        page = self._pages.get(page_id, self.page)
+
+        try:
+            element = await page.query_selector(selector)
+            if not element:
+                return {"status": "error", "error": f"Element not found: {selector}"}
+
+            box = await element.bounding_box()
+            if not box:
+                return {"status": "error", "error": "Could not get element position"}
+
+            src_x = box["x"] + box["width"] / 2
+            src_y = box["y"] + box["height"] / 2
+
+            await page.mouse.move(src_x, src_y)
+            await page.mouse.down()
+
+            # Move in steps for smooth drag
+            steps = max(5, abs(x_offset) // 10 + abs(y_offset) // 10)
+            for i in range(1, steps + 1):
+                t = i / steps
+                x = src_x + x_offset * t + random.gauss(0, 2)
+                y = src_y + y_offset * t + random.gauss(0, 2)
+                await page.mouse.move(x, y)
+                await asyncio.sleep(random.uniform(0.005, 0.015))
+
+            await page.mouse.up()
+
+            return {
+                "status": "success",
+                "selector": selector,
+                "offset": (x_offset, y_offset),
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def double_click(self, selector: str, page_id: str = "main") -> Dict[str, Any]:
+        """Double-click an element (e.g., to edit a cell, open a file)."""
+        from src.security.human_mimicry import HumanMimicry
+        page = self._pages.get(page_id, self.page)
+        mimicry = HumanMimicry()
+
+        try:
+            element = await page.query_selector(selector)
+            if not element:
+                return {"status": "error", "error": f"Element not found: {selector}"}
+
+            box = await element.bounding_box()
+            if box:
+                target_x = box["x"] + box["width"] / 2
+                target_y = box["y"] + box["height"] / 2
+                path = mimicry.mouse_path(target_x, target_y)
+                for x, y in path:
+                    await page.mouse.move(x, y)
+                    await asyncio.sleep(random.uniform(0.005, 0.02))
+
+            await element.dblclick()
+            await asyncio.sleep(random.uniform(0.2, 0.5))
+
+            return {"status": "success", "selector": selector, "action": "double_click"}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def clear_input(self, selector: str, page_id: str = "main") -> Dict[str, Any]:
+        """Clear an input field."""
+        page = self._pages.get(page_id, self.page)
+        try:
+            element = await page.query_selector(selector)
+            if not element:
+                return {"status": "error", "error": f"Element not found: {selector}"}
+            await element.click()
+            await asyncio.sleep(0.1)
+            await page.keyboard.press("Control+a")
+            await asyncio.sleep(0.05)
+            await page.keyboard.press("Backspace")
+            return {"status": "success", "selector": selector, "action": "cleared"}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def set_checkbox(self, selector: str, checked: bool, page_id: str = "main") -> Dict[str, Any]:
+        """Set a checkbox to checked or unchecked."""
+        page = self._pages.get(page_id, self.page)
+        try:
+            element = await page.query_selector(selector)
+            if not element:
+                return {"status": "error", "error": f"Element not found: {selector}"}
+            is_checked = await element.is_checked()
+            if is_checked != checked:
+                await element.click()
+                await asyncio.sleep(random.uniform(0.1, 0.3))
+            return {"status": "success", "selector": selector, "checked": checked}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def get_element_text(self, selector: str, page_id: str = "main") -> Dict[str, Any]:
+        """Get text content of a specific element."""
+        page = self._pages.get(page_id, self.page)
+        try:
+            element = await page.query_selector(selector)
+            if not element:
+                return {"status": "error", "error": f"Element not found: {selector}"}
+            text = await element.inner_text()
+            return {"status": "success", "selector": selector, "text": text}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def get_element_attribute(self, selector: str, attribute: str, page_id: str = "main") -> Dict[str, Any]:
+        """Get an attribute value from an element."""
+        page = self._pages.get(page_id, self.page)
+        try:
+            element = await page.query_selector(selector)
+            if not element:
+                return {"status": "error", "error": f"Element not found: {selector}"}
+            value = await element.get_attribute(attribute)
+            return {"status": "success", "selector": selector, "attribute": attribute, "value": value}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def set_viewport(self, width: int, height: int, page_id: str = "main") -> Dict[str, Any]:
+        """Change the browser viewport size."""
+        page = self._pages.get(page_id, self.page)
+        try:
+            await page.set_viewport_size({"width": width, "height": height})
+            return {"status": "success", "viewport": {"width": width, "height": height}}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def add_extension(self, extension_path: str) -> Dict[str, Any]:
+        """Load a Chrome extension (CRX unpacked directory). Requires headed mode.
+
+        Usage: First download/extract the extension, then point to its directory.
+        Note: Extensions only work in headed mode (--headed flag).
+        """
+        # Playwright doesn't support dynamic extension loading after launch.
+        # Extensions must be loaded at browser launch via --load-extension flag.
+        # We store the path and advise restart.
+        ext_dir = Path(extension_path)
+        if not ext_dir.exists():
+            return {"status": "error", "error": f"Extension path does not exist: {extension_path}"}
+
+        manifest = ext_dir / "manifest.json"
+        if not manifest.exists():
+            return {"status": "error", "error": f"No manifest.json found in {extension_path}"}
+
+        try:
+            with open(manifest, "r") as f:
+                ext_info = json.load(f)
+            ext_name = ext_info.get("name", "Unknown")
+            ext_version = ext_info.get("version", "Unknown")
+        except:
+            ext_name = "Unknown"
+            ext_version = "Unknown"
+
+        return {
+            "status": "info",
+            "message": f"Extension '{ext_name}' v{ext_version} detected. Extensions require headed mode and browser restart.",
+            "extension": ext_name,
+            "version": ext_version,
+            "path": str(ext_dir),
+            "note": "To use extensions, restart Agent-OS with: python main.py --headed --extension-path " + str(ext_dir)
+        }
+
+    async def get_console_logs(self, page_id: str = "main") -> List[Dict]:
+        """Get browser console logs."""
+        page = self._pages.get(page_id, self.page)
+        logs = await page.evaluate("""() => {
+            return (window.__agent_os_logs || []).slice(-50);
+        }""")
+        return logs
+
+    async def intercept_network(self, url_pattern: str, page_id: str = "main") -> Dict[str, Any]:
+        """Monitor network requests matching a URL pattern."""
+        page = self._pages.get(page_id, self.page)
+        requests = await page.evaluate("""(pattern) => {
+            return (window.__agent_os_network || []).filter(r => r.url.includes(pattern));
+        }""", url_pattern)
+        return {"status": "success", "pattern": url_pattern, "requests": requests}
+
+    async def get_cookies(self, page_id: str = "main") -> Dict[str, Any]:
+        """Get all cookies for the current page."""
+        page = self._pages.get(page_id, self.page)
+        cookies = await self.context.cookies()
+        return {"status": "success", "cookies": cookies, "count": len(cookies)}
+
+    async def set_cookie(self, name: str, value: str, domain: str = None, page_id: str = "main") -> Dict[str, Any]:
+        """Set a cookie."""
+        page = self._pages.get(page_id, self.page)
+        cookie = {"name": name, "value": value, "domain": domain or page.url.split("/")[2]}
+        await self.context.add_cookies([cookie])
+        return {"status": "success", "cookie": cookie}
+
     async def reload(self, page_id: str = "main") -> Dict[str, Any]:
         """Reload the current page."""
         page = self._pages.get(page_id, self.page)

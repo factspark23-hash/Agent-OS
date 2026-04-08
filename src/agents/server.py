@@ -133,6 +133,20 @@ class AgentServer:
             "reload": {"params": {}, "description": "Reload the current page"},
             "get-links": {"params": {}, "description": "Get all links on the current page"},
             "get-images": {"params": {}, "description": "Get all images on the current page"},
+            "right-click": {"params": {"selector": "string"}, "description": "Right-click an element (opens context menu)"},
+            "context-action": {"params": {"selector": "string", "action_text": "string"}, "description": "Right-click and select context menu option (copy, paste, inspect, etc.)"},
+            "drag-drop": {"params": {"source": "string", "target": "string"}, "description": "Drag one element and drop on another"},
+            "drag-offset": {"params": {"selector": "string", "x": "int", "y": "int"}, "description": "Drag element by pixel offset"},
+            "double-click": {"params": {"selector": "string"}, "description": "Double-click an element"},
+            "clear-input": {"params": {"selector": "string"}, "description": "Clear an input field"},
+            "checkbox": {"params": {"selector": "string", "checked": "bool"}, "description": "Set checkbox state"},
+            "get-text": {"params": {"selector": "string"}, "description": "Get text content of an element"},
+            "get-attr": {"params": {"selector": "string", "attribute": "string"}, "description": "Get element attribute value"},
+            "viewport": {"params": {"width": "int", "height": "int"}, "description": "Change browser viewport size"},
+            "add-extension": {"params": {"extension_path": "string"}, "description": "Load a Chrome extension (headed mode only)"},
+            "console-logs": {"params": {}, "description": "Get browser console logs"},
+            "get-cookies": {"params": {}, "description": "Get all cookies"},
+            "set-cookie": {"params": {"name": "string", "value": "string", "domain": "string (optional)"}, "description": "Set a cookie"},
             "scan-xss": {"params": {"url": "string"}, "description": "Scan URL for XSS vulnerabilities"},
             "scan-sqli": {"params": {"url": "string"}, "description": "Scan URL for SQL injection"},
             "scan-sensitive": {"params": {}, "description": "Scan page for sensitive data exposure"},
@@ -209,6 +223,20 @@ class AgentServer:
             "reload": self._cmd_reload,
             "get-links": self._cmd_get_links,
             "get-images": self._cmd_get_images,
+            "right-click": self._cmd_right_click,
+            "context-action": self._cmd_context_action,
+            "drag-drop": self._cmd_drag_drop,
+            "drag-offset": self._cmd_drag_offset,
+            "double-click": self._cmd_double_click,
+            "clear-input": self._cmd_clear_input,
+            "checkbox": self._cmd_checkbox,
+            "get-text": self._cmd_get_text,
+            "get-attr": self._cmd_get_attr,
+            "viewport": self._cmd_viewport,
+            "add-extension": self._cmd_add_extension,
+            "console-logs": self._cmd_console_logs,
+            "get-cookies": self._cmd_get_cookies,
+            "set-cookie": self._cmd_set_cookie,
             "scan-xss": self._cmd_scan_xss,
             "scan-sqli": self._cmd_scan_sqli,
             "scan-sensitive": self._cmd_scan_sensitive,
@@ -325,6 +353,92 @@ class AgentServer:
     async def _cmd_get_images(self, data: Dict, session) -> Dict:
         images = await self.browser.get_all_images()
         return {"status": "success", "images": images, "count": len(images)}
+
+    async def _cmd_right_click(self, data: Dict, session) -> Dict:
+        selector = data.get("selector")
+        if not selector:
+            return {"status": "error", "error": "Missing 'selector'"}
+        return await self.browser.right_click(selector)
+
+    async def _cmd_context_action(self, data: Dict, session) -> Dict:
+        selector = data.get("selector")
+        action_text = data.get("action_text")
+        if not selector or not action_text:
+            return {"status": "error", "error": "Missing 'selector' or 'action_text'"}
+        return await self.browser.context_action(selector, action_text)
+
+    async def _cmd_drag_drop(self, data: Dict, session) -> Dict:
+        source = data.get("source")
+        target = data.get("target")
+        if not source or not target:
+            return {"status": "error", "error": "Missing 'source' or 'target'"}
+        return await self.browser.drag_and_drop(source, target)
+
+    async def _cmd_drag_offset(self, data: Dict, session) -> Dict:
+        selector = data.get("selector")
+        x = data.get("x", 0)
+        y = data.get("y", 0)
+        if not selector:
+            return {"status": "error", "error": "Missing 'selector'"}
+        return await self.browser.drag_by_offset(selector, x, y)
+
+    async def _cmd_double_click(self, data: Dict, session) -> Dict:
+        selector = data.get("selector")
+        if not selector:
+            return {"status": "error", "error": "Missing 'selector'"}
+        return await self.browser.double_click(selector)
+
+    async def _cmd_clear_input(self, data: Dict, session) -> Dict:
+        selector = data.get("selector")
+        if not selector:
+            return {"status": "error", "error": "Missing 'selector'"}
+        return await self.browser.clear_input(selector)
+
+    async def _cmd_checkbox(self, data: Dict, session) -> Dict:
+        selector = data.get("selector")
+        checked = data.get("checked", True)
+        if not selector:
+            return {"status": "error", "error": "Missing 'selector'"}
+        return await self.browser.set_checkbox(selector, checked)
+
+    async def _cmd_get_text(self, data: Dict, session) -> Dict:
+        selector = data.get("selector")
+        if not selector:
+            return {"status": "error", "error": "Missing 'selector'"}
+        return await self.browser.get_element_text(selector)
+
+    async def _cmd_get_attr(self, data: Dict, session) -> Dict:
+        selector = data.get("selector")
+        attribute = data.get("attribute")
+        if not selector or not attribute:
+            return {"status": "error", "error": "Missing 'selector' or 'attribute'"}
+        return await self.browser.get_element_attribute(selector, attribute)
+
+    async def _cmd_viewport(self, data: Dict, session) -> Dict:
+        width = data.get("width", 1920)
+        height = data.get("height", 1080)
+        return await self.browser.set_viewport(width, height)
+
+    async def _cmd_add_extension(self, data: Dict, session) -> Dict:
+        path = data.get("extension_path")
+        if not path:
+            return {"status": "error", "error": "Missing 'extension_path'"}
+        return await self.browser.add_extension(path)
+
+    async def _cmd_console_logs(self, data: Dict, session) -> Dict:
+        logs = await self.browser.get_console_logs()
+        return {"status": "success", "logs": logs, "count": len(logs)}
+
+    async def _cmd_get_cookies(self, data: Dict, session) -> Dict:
+        return await self.browser.get_cookies()
+
+    async def _cmd_set_cookie(self, data: Dict, session) -> Dict:
+        name = data.get("name")
+        value = data.get("value")
+        domain = data.get("domain")
+        if not name or not value:
+            return {"status": "error", "error": "Missing 'name' or 'value'"}
+        return await self.browser.set_cookie(name, value, domain)
 
     async def _cmd_scan_xss(self, data: Dict, session) -> Dict:
         from src.tools.scanner import XSSScanner
