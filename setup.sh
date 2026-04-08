@@ -28,27 +28,41 @@ if [ ! -d "$VENV_DIR" ]; then
     if ! python3 -m venv --help > /dev/null 2>&1; then
         echo "⚠️  python3-venv not found. Attempting to install..."
         if command -v apt-get > /dev/null 2>&1; then
-            sudo apt-get update -qq && sudo apt-get install -y -qq "python${PYTHON_VERSION}-venv" 2>/dev/null || {
-                echo "❌ Could not install python3-venv. Install it manually:"
-                echo "   sudo apt install python${PYTHON_VERSION}-venv"
-                exit 1
-            }
+            sudo apt-get update -qq && sudo apt-get install -y -qq "python${PYTHON_VERSION}-venv" 2>/dev/null || VENV_FAILED=1
         else
-            echo "❌ Cannot install python3-venv automatically."
-            echo "   Install it manually for your distro, then re-run this script."
-            exit 1
+            VENV_FAILED=1
         fi
     fi
 
-    python3 -m venv "$VENV_DIR"
-    echo "✅ Virtual environment created"
+    # Try creating venv
+    if [ "${VENV_FAILED:-0}" = "0" ]; then
+        python3 -m venv "$VENV_DIR" 2>/dev/null || VENV_FAILED=1
+    fi
+
+    if [ "${VENV_FAILED:-0}" = "1" ]; then
+        echo "⚠️  Could not create virtual environment."
+        echo "   Falling back to system-wide install (--break-system-packages)"
+        USE_VENV=0
+    else
+        echo "✅ Virtual environment created"
+        USE_VENV=1
+    fi
 else
     echo "✅ Virtual environment already exists"
+    USE_VENV=1
 fi
 
-# Activate venv
-source "$VENV_DIR/bin/activate"
-echo "✅ Using Python: $(which python) ($($VENV_DIR/bin/python -c 'import sys; print(sys.version)'))"
+# Activate venv or use system python
+if [ "${USE_VENV:-1}" = "1" ]; then
+    source "$VENV_DIR/bin/activate"
+    PIP_CMD="pip"
+    PYTHON_CMD="python"
+    echo "✅ Using virtual environment: $(which python)"
+else
+    PIP_CMD="pip3 install --break-system-packages"
+    PYTHON_CMD="python3"
+    echo "✅ Using system Python: $(which python3)"
+fi
 
 # ─── System Dependencies (for Playwright Chromium) ───────────
 echo ""
@@ -78,21 +92,26 @@ fi
 # ─── Python Dependencies ─────────────────────────────────────
 echo ""
 echo "📦 Installing Python dependencies..."
-pip install --upgrade pip -q
-pip install -r "$(dirname "$0")/requirements.txt" -q
+if [ "${USE_VENV:-1}" = "1" ]; then
+    pip install --upgrade pip -q
+    pip install -r "$(dirname "$0")/requirements.txt" -q
+else
+    pip3 install --break-system-packages --upgrade pip -q
+    pip3 install --break-system-packages -r "$(dirname "$0")/requirements.txt" -q
+fi
 echo "✅ Python dependencies installed"
 
 # ─── Playwright Chromium ─────────────────────────────────────
 echo ""
 echo "🌐 Installing Playwright Chromium..."
-python -m playwright install chromium
+$PYTHON_CMD -m playwright install chromium
 echo "✅ Chromium installed"
 
 # ─── Verify Installation ─────────────────────────────────────
 echo ""
 echo "🔍 Verifying installation..."
 
-python3 -c "
+$PYTHON_CMD -c "
 import sys
 errors = []
 
@@ -116,7 +135,7 @@ print('✅ All imports successful')
 "
 
 # Verify Playwright browser
-python3 -c "
+$PYTHON_CMD -c "
 from playwright.sync_api import sync_playwright
 p = sync_playwright().start()
 browser = p.chromium.launch(headless=True)
@@ -128,7 +147,7 @@ print('✅ Playwright Chromium launches correctly')
 # Run tests
 echo ""
 echo "🧪 Running test suite..."
-python -m pytest "$(dirname "$0")/tests/" -v --tb=short 2>&1 || {
+$PYTHON_CMD -m pytest "$(dirname "$0")/tests/" -v --tb=short 2>&1 || {
     echo ""
     echo "⚠️  Some tests failed. Check output above."
 }
@@ -136,9 +155,14 @@ python -m pytest "$(dirname "$0")/tests/" -v --tb=short 2>&1 || {
 echo ""
 echo "🎉 Setup complete!"
 echo ""
-echo "Quick start:"
-echo "  source venv/bin/activate"
-echo "  python main.py --agent-token 'my-agent'"
+if [ "${USE_VENV:-1}" = "1" ]; then
+    echo "Quick start:"
+    echo "  source venv/bin/activate"
+    echo "  python main.py --agent-token 'my-agent'"
+else
+    echo "Quick start:"
+    echo "  python3 main.py --agent-token 'my-agent'"
+fi
 echo ""
 echo "Test with curl:"
 echo "  curl -X POST http://localhost:8001/command \\"
