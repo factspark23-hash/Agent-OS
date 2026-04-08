@@ -11,7 +11,7 @@ from typing import Optional, Dict, Any
 
 DEFAULT_CONFIG = {
     "server": {
-        "host": "127.0.0.1",
+        "host": "0.0.0.0",
         "ws_port": 8000,
         "http_port": 8001,
         "max_connections": 10,

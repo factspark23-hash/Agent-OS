@@ -6,6 +6,10 @@ __pycache__/
 dist/
 build/
 
+# Virtual environment
+venv/
+.venv/
+
 # Agent-OS runtime
 .agent-os/
 ~/.agent-os/
@@ -17,5 +21,8 @@ build/
 # IDE
 .vscode/
 .idea/
-__pycache__/
-*.pyc
+
+# Environment
+.env
+.env.*
+!.env.example

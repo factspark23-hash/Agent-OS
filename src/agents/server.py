@@ -104,7 +104,7 @@ class AgentServer:
 
     async def start(self):
         """Start both WebSocket and HTTP servers."""
-        ws_host = self.config.get("server.host", "127.0.0.1")
+        ws_host = self.config.get("server.host", "0.0.0.0")
         ws_port = self.config.get("server.ws_port", 8000)
         http_port = self.config.get("server.http_port", 8001)
 
@@ -251,13 +251,7 @@ class AgentServer:
     async def _handle_status(self, request: web.Request) -> web.Response:
         """Handle HTTP GET /status."""
         cors = self._cors_headers(request)
-        # Status endpoint requires auth too
-        if not self._check_auth_header(request):
-            return web.json_response(
-                {"status": "error", "error": "Authentication required"},
-                status=401,
-                headers=cors,
-            )
+        # Status endpoint is public (needed for Docker healthcheck and monitoring)
         return web.json_response({
             "status": "running",
             "uptime_seconds": int(time.time() - self._start_time),
@@ -405,8 +399,12 @@ class AgentServer:
 
     async def _cmd_fill_form(self, data: Dict, session) -> Dict:
         fields = data.get("fields", {})
+        # Accept both dict {"selector": "value"} and list [{"selector": "x", "value": "y"}]
+        if isinstance(fields, list):
+            fields_dict = {item.get("selector", ""): item.get("value", "") for item in fields if isinstance(item, dict)}
+            fields = fields_dict
         if not fields:
-            return {"status": "error", "error": "Missing 'fields' dictionary"}
+            return {"status": "error", "error": "Missing 'fields' dictionary or list"}
         return await self.browser.fill_form(fields)
 
     async def _cmd_click(self, data: Dict, session) -> Dict:
@@ -544,9 +542,7 @@ class AgentServer:
         return await self.browser.set_checkbox(selector, checked)
 
     async def _cmd_get_text(self, data: Dict, session) -> Dict:
-        selector = data.get("selector")
-        if not selector:
-            return {"status": "error", "error": "Missing 'selector'"}
+        selector = data.get("selector", "body")
         return await self.browser.get_element_text(selector)
 
     async def _cmd_get_attr(self, data: Dict, session) -> Dict:

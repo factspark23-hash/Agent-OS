@@ -320,9 +320,9 @@ class SensitiveDataScanner:
         "Generic API Key": r"['\"]?(api[_-]?key|apikey)['\"]?\s*[:=]\s*['\"]?[a-zA-Z0-9]{20,}['\"]?",
         "Private Key": r"-----BEGIN (RSA |EC |DSA )?PRIVATE KEY-----",
         "JWT Token": r"eyJ[a-zA-Z0-9_-]*\.eyJ[a-zA-Z0-9_-]*\.[a-zA-Z0-9_-]*",
-        "Password in URL": r"://[^:]+:[^@]+@",
+        "Password in URL": r"https?://[^:]+:[^@\s]+@",
         "Email Address": r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
-        "IP Address": r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b",
+        "IP Address": r"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b",
         "Internal IP": r"\b(10|172\.(1[6-9]|2\d|3[01])|192\.168)\.\d{1,3}\.\d{1,3}\b",
     }
 
