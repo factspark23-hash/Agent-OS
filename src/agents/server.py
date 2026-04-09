@@ -32,10 +32,13 @@ class AgentServer:
         self._http_runner = None
         self._start_time = time.time()
 
-        # Smart Wait + Auto Heal + Auto Retry engines (lazy init)
+        # Smart Wait + Auto Heal + Auto Retry + Recording engines (lazy init)
         self._smart_wait = None
         self._auto_heal = None
         self._auto_retry = None
+        self._recorder = None
+        self._replay = None
+        self._analyzer = None
 
     async def start(self):
         """Start both WebSocket and HTTP servers."""
@@ -252,6 +255,28 @@ class AgentServer:
             "retry-circuit-breakers": {"params": {}, "description": "Get state of all circuit breakers"},
             "retry-reset-circuit": {"params": {"operation": "string"}, "description": "Force-reset a specific circuit breaker"},
             "retry-reset-all-circuits": {"params": {}, "description": "Force-reset all circuit breakers"},
+
+            # Session Recording & Replay
+            "record-start": {"params": {"name": "string (optional)", "screenshot_interval_ms": "int (default 2000)", "screenshot_on_event": "bool (default true)", "capture_network": "bool (default true)", "capture_console": "bool (default true)", "capture_dom": "bool (default true)", "capture_scroll": "bool (default true)", "capture_cookies": "bool (default true)", "tags": "list[string] (optional)", "page_id": "string (optional)"}, "description": "Start recording session — captures commands, network, DOM, console, screenshots, cookies, scroll"},
+            "record-stop": {"params": {"save": "bool (default true)"}, "description": "Stop recording and save to disk"},
+            "record-pause": {"params": {}, "description": "Pause recording"},
+            "record-resume": {"params": {}, "description": "Resume recording"},
+            "record-annotate": {"params": {"text": "string", "category": "string (optional)", "page_id": "string (optional)"}, "description": "Add human annotation to recording"},
+            "record-status": {"params": {}, "description": "Get current recording status"},
+            "record-list": {"params": {}, "description": "List all saved recordings"},
+            "record-delete": {"params": {"recording_id": "string"}, "description": "Delete a saved recording"},
+            "replay-load": {"params": {"recording_id": "string"}, "description": "Load a recording for replay"},
+            "replay-play": {"params": {"speed": "float (default 1.0, range 0.1-10)", "from_event": "int (optional)", "to_event": "int (optional)", "skip_types": "list[string] (optional)", "verify_screenshots": "bool (optional)"}, "description": "Play loaded recording with speed control"},
+            "replay-stop": {"params": {}, "description": "Stop playback"},
+            "replay-pause": {"params": {}, "description": "Pause playback"},
+            "replay-resume": {"params": {}, "description": "Resume playback"},
+            "replay-step": {"params": {}, "description": "Execute one event and pause (step debugging)"},
+            "replay-jump": {"params": {"event_index": "int (optional)", "elapsed_ms": "float (optional)"}, "description": "Jump to specific event index or elapsed time"},
+            "replay-position": {"params": {}, "description": "Get current playback position and progress"},
+            "replay-events": {"params": {"offset": "int (default 0)", "limit": "int (default 50)", "event_type": "string (optional)"}, "description": "Get event list for inspection"},
+            "replay-export-workflow": {"params": {"include_navigations": "bool (default true)"}, "description": "Export recording as reusable workflow JSON"},
+            "analyze": {"params": {"recording_id": "string"}, "description": "Analyze recording: performance, errors, navigation flow, command stats"},
+            "analyze-search": {"params": {"recording_id": "string", "event_type": "string (optional)", "query": "string (optional)", "from_ms": "float (optional)", "to_ms": "float (optional)", "limit": "int (default 100)"}, "description": "Search events in recording by type, text, time range"},
         }
         return web.json_response(commands)
 
@@ -328,6 +353,24 @@ class AgentServer:
             from src.tools.auto_retry import AutoRetry
             self._auto_retry = AutoRetry(self.browser, smart_wait=self._get_smart_wait(), auto_heal=self._get_auto_heal())
         return self._auto_retry
+
+    def _get_recorder(self):
+        if self._recorder is None:
+            from src.tools.session_recording import SessionRecorder
+            self._recorder = SessionRecorder(self.browser)
+        return self._recorder
+
+    def _get_replay(self):
+        if self._replay is None:
+            from src.tools.session_recording import SessionReplay
+            self._replay = SessionReplay(self.browser)
+        return self._replay
+
+    def _get_analyzer(self):
+        if self._analyzer is None:
+            from src.tools.session_recording import SessionAnalyzer
+            self._analyzer = SessionAnalyzer()
+        return self._analyzer
 
     async def _process_command(self, data: Dict) -> Dict[str, Any]:
         """Process any agent command."""
@@ -478,6 +521,28 @@ class AgentServer:
             "retry-circuit-breakers": self._cmd_retry_circuit_breakers,
             "retry-reset-circuit": self._cmd_retry_reset_circuit,
             "retry-reset-all-circuits": self._cmd_retry_reset_all_circuits,
+
+            # Session Recording & Replay
+            "record-start": self._cmd_record_start,
+            "record-stop": self._cmd_record_stop,
+            "record-pause": self._cmd_record_pause,
+            "record-resume": self._cmd_record_resume,
+            "record-annotate": self._cmd_record_annotate,
+            "record-status": self._cmd_record_status,
+            "record-list": self._cmd_record_list,
+            "record-delete": self._cmd_record_delete,
+            "replay-load": self._cmd_replay_load,
+            "replay-play": self._cmd_replay_play,
+            "replay-stop": self._cmd_replay_stop,
+            "replay-pause": self._cmd_replay_pause,
+            "replay-resume": self._cmd_replay_resume,
+            "replay-step": self._cmd_replay_step,
+            "replay-jump": self._cmd_replay_jump,
+            "replay-position": self._cmd_replay_position,
+            "replay-events": self._cmd_replay_events,
+            "replay-export-workflow": self._cmd_replay_export_workflow,
+            "analyze": self._cmd_analyze,
+            "analyze-search": self._cmd_analyze_search,
         }
 
         handler = handlers.get(command)
@@ -1281,3 +1346,168 @@ class AgentServer:
         """Reset all circuit breakers."""
         retry = self._get_auto_retry()
         return retry.reset_all_circuit_breakers()
+
+    # ─── Session Recording Commands ─────────────────────────
+
+    async def _cmd_record_start(self, data: Dict, session) -> Dict:
+        """Start recording a session."""
+        recorder = self._get_recorder()
+        return await recorder.start(
+            name=data.get("name"),
+            screenshot_interval_ms=data.get("screenshot_interval_ms", 2000),
+            screenshot_on_event=data.get("screenshot_on_event", True),
+            capture_network=data.get("capture_network", True),
+            capture_console=data.get("capture_console", True),
+            capture_dom=data.get("capture_dom", True),
+            capture_scroll=data.get("capture_scroll", True),
+            capture_cookies=data.get("capture_cookies", True),
+            tags=data.get("tags"),
+            page_id=data.get("page_id", "main"),
+        )
+
+    async def _cmd_record_stop(self, data: Dict, session) -> Dict:
+        """Stop recording and save."""
+        recorder = self._get_recorder()
+        return await recorder.stop(save=data.get("save", True))
+
+    async def _cmd_record_pause(self, data: Dict, session) -> Dict:
+        """Pause recording."""
+        recorder = self._get_recorder()
+        return await recorder.pause()
+
+    async def _cmd_record_resume(self, data: Dict, session) -> Dict:
+        """Resume recording."""
+        recorder = self._get_recorder()
+        return await recorder.resume()
+
+    async def _cmd_record_annotate(self, data: Dict, session) -> Dict:
+        """Add annotation to recording."""
+        text = data.get("text")
+        if not text:
+            return {"status": "error", "error": "Missing 'text'"}
+        recorder = self._get_recorder()
+        return await recorder.annotate(text=text, category=data.get("category", "note"), page_id=data.get("page_id", "main"))
+
+    async def _cmd_record_status(self, data: Dict, session) -> Dict:
+        """Get current recording status."""
+        recorder = self._get_recorder()
+        if not recorder.is_recording():
+            return {"status": "not_recording"}
+        rec = recorder.get_recording()
+        return {
+            "status": "recording",
+            "recording_id": rec.recording_id if rec else None,
+            "name": rec.name if rec else None,
+            "event_count": len(rec.events) if rec else 0,
+            "duration_ms": round((time.time() - recorder._start_time) * 1000) if recorder._start_time else 0,
+        }
+
+    async def _cmd_record_list(self, data: Dict, session) -> Dict:
+        """List all saved recordings."""
+        from src.tools.session_recording import SessionRecorder
+        recordings = SessionRecorder.list_recordings()
+        return {"status": "success", "recordings": recordings, "count": len(recordings)}
+
+    async def _cmd_record_delete(self, data: Dict, session) -> Dict:
+        """Delete a saved recording."""
+        recording_id = data.get("recording_id")
+        if not recording_id:
+            return {"status": "error", "error": "Missing 'recording_id'"}
+        from src.tools.session_recording import SessionRecorder
+        deleted = SessionRecorder.delete_recording(recording_id)
+        return {"status": "success" if deleted else "error", "deleted": deleted, "recording_id": recording_id}
+
+    # ─── Session Replay Commands ────────────────────────────
+
+    async def _cmd_replay_load(self, data: Dict, session) -> Dict:
+        """Load a recording for replay."""
+        recording_id = data.get("recording_id")
+        if not recording_id:
+            return {"status": "error", "error": "Missing 'recording_id'"}
+        replay = self._get_replay()
+        return await replay.load(recording_id)
+
+    async def _cmd_replay_play(self, data: Dict, session) -> Dict:
+        """Play a loaded recording."""
+        replay = self._get_replay()
+        return await replay.play(
+            speed=data.get("speed", 1.0),
+            from_event=data.get("from_event", 0),
+            to_event=data.get("to_event"),
+            skip_types=data.get("skip_types"),
+            verify_screenshots=data.get("verify_screenshots", False),
+        )
+
+    async def _cmd_replay_stop(self, data: Dict, session) -> Dict:
+        """Stop playback."""
+        replay = self._get_replay()
+        return await replay.stop()
+
+    async def _cmd_replay_pause(self, data: Dict, session) -> Dict:
+        """Pause playback."""
+        replay = self._get_replay()
+        return await replay.pause()
+
+    async def _cmd_replay_resume(self, data: Dict, session) -> Dict:
+        """Resume playback."""
+        replay = self._get_replay()
+        return await replay.resume()
+
+    async def _cmd_replay_step(self, data: Dict, session) -> Dict:
+        """Execute one event and pause."""
+        replay = self._get_replay()
+        return await replay.step()
+
+    async def _cmd_replay_jump(self, data: Dict, session) -> Dict:
+        """Jump to a specific event or time."""
+        replay = self._get_replay()
+        return await replay.jump_to(
+            event_index=data.get("event_index"),
+            elapsed_ms=data.get("elapsed_ms"),
+        )
+
+    async def _cmd_replay_position(self, data: Dict, session) -> Dict:
+        """Get current playback position."""
+        replay = self._get_replay()
+        return replay.get_position()
+
+    async def _cmd_replay_events(self, data: Dict, session) -> Dict:
+        """Get event list for inspection."""
+        replay = self._get_replay()
+        return replay.get_event_list(
+            offset=data.get("offset", 0),
+            limit=data.get("limit", 50),
+            event_type=data.get("event_type"),
+        )
+
+    async def _cmd_replay_export_workflow(self, data: Dict, session) -> Dict:
+        """Export recording as workflow JSON."""
+        replay = self._get_replay()
+        return await replay.export_as_workflow(
+            include_navigations=data.get("include_navigations", True),
+        )
+
+    # ─── Session Analysis Commands ──────────────────────────
+
+    async def _cmd_analyze(self, data: Dict, session) -> Dict:
+        """Analyze a recording for performance, errors, and insights."""
+        recording_id = data.get("recording_id")
+        if not recording_id:
+            return {"status": "error", "error": "Missing 'recording_id'"}
+        analyzer = self._get_analyzer()
+        return analyzer.analyze(recording_id)
+
+    async def _cmd_analyze_search(self, data: Dict, session) -> Dict:
+        """Search events in a recording."""
+        recording_id = data.get("recording_id")
+        if not recording_id:
+            return {"status": "error", "error": "Missing 'recording_id'"}
+        analyzer = self._get_analyzer()
+        return analyzer.search(
+            recording_id=recording_id,
+            event_type=data.get("event_type"),
+            query=data.get("query"),
+            from_ms=data.get("from_ms"),
+            to_ms=data.get("to_ms"),
+            limit=data.get("limit", 100),
+        )

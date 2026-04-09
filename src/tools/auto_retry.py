@@ -448,7 +448,7 @@ class RetryBudget:
         return {
             "used": len(self._attempts),
             "max": self.max_retries,
-            "remaining": self.max_retries - len(self.attempts),
+            "remaining": self.max_retries - len(self._attempts),
             "window_seconds": self.window_seconds,
             "utilization_pct": round(len(self._attempts) / self.max_retries * 100, 1),
         }
@@ -456,12 +456,6 @@ class RetryBudget:
     def _cleanup(self):
         cutoff = time.time() - self.window_seconds
         self._attempts = [t for t in self._attempts if t > cutoff]
-
-    # Fix property reference
-    @property
-    def attempts(self):
-        self._cleanup()
-        return self._attempts
 
 
 # ─── Request Deduplication ──────────────────────────────────
@@ -963,7 +957,7 @@ class AutoRetry:
             "healthy": healthy,
             "open_circuits": open_circuits,
             "budget_ok": budget_ok,
-            "budget_remaining": self._budget.max_retries - len(self._budget.attempts),
+            "budget_remaining": self._budget.max_retries - len(self._budget._attempts),
         }
 
     # ─── Internal Helpers ───────────────────────────────────
