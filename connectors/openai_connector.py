@@ -203,6 +203,129 @@ _TOOL_DEFS = [
         "params": {},
         "required": [],
     },
+    {
+        "name": "browser_smart_find",
+        "description": "Find an element by visible text or description. No CSS selector needed.",
+        "params": {
+            "description": {"type": "string", "description": "What to find — e.g. 'Sign In', 'email', 'Submit button'"},
+            "tag": {"type": "string", "description": "Optional tag filter: button, input, a, etc."},
+            "timeout": {"type": "integer", "description": "Max wait time in ms"},
+        },
+        "required": ["description"],
+    },
+    {
+        "name": "browser_smart_click",
+        "description": "Click an element by its visible text. No CSS selector needed.",
+        "params": {
+            "text": {"type": "string", "description": "Visible text of the element to click"},
+            "tag": {"type": "string", "description": "Optional tag filter"},
+            "timeout": {"type": "integer", "description": "Max wait time in ms"},
+        },
+        "required": ["text"],
+    },
+    {
+        "name": "browser_smart_fill",
+        "description": "Find an input field by its label/placeholder text and fill it.",
+        "params": {
+            "label": {"type": "string", "description": "Label or placeholder text of the input field"},
+            "value": {"type": "string", "description": "Value to fill in"},
+            "timeout": {"type": "integer", "description": "Max wait time in ms"},
+        },
+        "required": ["label", "value"],
+    },
+    {
+        "name": "browser_workflow",
+        "description": "Execute a multi-step browser workflow. Supports variables, retries, error handling.",
+        "params": {
+            "steps": {"type": "array", "description": "Array of step objects, each with 'command' + params"},
+            "variables": {"type": "object", "description": "Template variables for {{var}} substitution"},
+            "on_error": {"type": "string", "description": "Error handling: abort, skip, or retry"},
+            "retry_count": {"type": "integer", "description": "Retries per step on failure"},
+            "step_delay_ms": {"type": "integer", "description": "Delay between steps in ms"},
+        },
+        "required": ["steps"],
+    },
+    {
+        "name": "browser_network_start",
+        "description": "Start capturing all network requests. Filter by URL pattern, method, or resource type.",
+        "params": {
+            "url_pattern": {"type": "string", "description": "Only capture URLs matching this regex"},
+            "resource_types": {"type": "array", "description": "Filter: document, script, xhr, fetch, image"},
+            "methods": {"type": "array", "description": "Filter: GET, POST, PUT, DELETE"},
+            "capture_body": {"type": "boolean", "description": "Capture response bodies"},
+        },
+        "required": [],
+    },
+    {
+        "name": "browser_network_get",
+        "description": "Get captured network requests with optional filters.",
+        "params": {
+            "url_pattern": {"type": "string", "description": "Filter URLs by regex"},
+            "resource_type": {"type": "string", "description": "Filter by type"},
+            "method": {"type": "string", "description": "Filter by HTTP method"},
+            "status_code": {"type": "integer", "description": "Filter by status code"},
+            "api_only": {"type": "boolean", "description": "Only return API calls"},
+            "limit": {"type": "integer"},
+            "offset": {"type": "integer"},
+        },
+        "required": [],
+    },
+    {
+        "name": "browser_network_apis",
+        "description": "Discover all API endpoints from captured network traffic.",
+        "params": {},
+        "required": [],
+    },
+    {
+        "name": "browser_page_summary",
+        "description": "Analyze page: title, headings, content, forms, links, tech stack, readability.",
+        "params": {},
+        "required": [],
+    },
+    {
+        "name": "browser_page_tables",
+        "description": "Extract all HTML tables as structured data.",
+        "params": {},
+        "required": [],
+    },
+    {
+        "name": "browser_page_seo",
+        "description": "Basic SEO audit: title, meta, H1, alt text, canonical, Open Graph. Returns score.",
+        "params": {},
+        "required": [],
+    },
+    {
+        "name": "browser_emulate_device",
+        "description": "Emulate a mobile/tablet/desktop device.",
+        "params": {
+            "device": {"type": "string", "description": "Preset: iphone_14, galaxy_s23, ipad, pixel_8, desktop_1080"},
+        },
+        "required": ["device"],
+    },
+    {
+        "name": "browser_set_proxy",
+        "description": "Set proxy for the browser. HTTP, HTTPS, SOCKS5.",
+        "params": {
+            "proxy_url": {"type": "string", "description": "Proxy URL: http://user:pass@host:port or socks5://host:port"},
+        },
+        "required": ["proxy_url"],
+    },
+    {
+        "name": "browser_save_session",
+        "description": "Save full browser state: cookies, localStorage, tabs.",
+        "params": {
+            "name": {"type": "string", "description": "Session name"},
+        },
+        "required": [],
+    },
+    {
+        "name": "browser_restore_session",
+        "description": "Restore a previously saved browser session.",
+        "params": {
+            "name": {"type": "string", "description": "Session name to restore"},
+        },
+        "required": [],
+    },
 ]
 
 # Command map: tool name → (API command name, param keys)
@@ -232,6 +355,20 @@ _COMMAND_MAP = {
     "browser_get_images": ("get-images", []),
     "browser_wait": ("wait", ["selector", "timeout"]),
     "browser_scan_sensitive": ("scan-sensitive", []),
+    "browser_smart_find": ("smart-find", ["description", "tag", "timeout"]),
+    "browser_smart_click": ("smart-click", ["text", "tag", "timeout"]),
+    "browser_smart_fill": ("smart-fill", ["label", "value", "timeout"]),
+    "browser_workflow": ("workflow", ["steps", "variables", "on_error", "retry_count", "step_delay_ms"]),
+    "browser_network_start": ("network-start", ["url_pattern", "resource_types", "methods", "capture_body"]),
+    "browser_network_get": ("network-get", ["url_pattern", "resource_type", "method", "status_code", "api_only", "limit", "offset"]),
+    "browser_network_apis": ("network-apis", []),
+    "browser_page_summary": ("page-summary", []),
+    "browser_page_tables": ("page-tables", []),
+    "browser_page_seo": ("page-seo", []),
+    "browser_emulate_device": ("emulate-device", ["device"]),
+    "browser_set_proxy": ("set-proxy", ["proxy_url"]),
+    "browser_save_session": ("save-session", ["name"]),
+    "browser_restore_session": ("restore-session", ["name"]),
 }
 
 

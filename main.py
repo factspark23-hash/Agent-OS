@@ -56,6 +56,10 @@ class AgentOS:
             self.config.set("server.http_port", args.port + 1)
         if args.max_ram:
             self.config.set("browser.max_ram_mb", args.max_ram)
+        if args.proxy:
+            self.config.set("browser.proxy", args.proxy)
+        if args.device:
+            self.config.set("browser.device", args.device)
 
     async def start(self):
         """Start all components."""
@@ -143,6 +147,8 @@ def parse_args():
     parser.add_argument("--port", type=int, help="WebSocket server port (HTTP = port+1)")
     parser.add_argument("--max-ram", type=int, help="Max RAM in MB")
     parser.add_argument("--config", type=str, help="Config file path")
+    parser.add_argument("--proxy", type=str, help="Proxy URL (http://user:pass@host:port)")
+    parser.add_argument("--device", type=str, help="Device preset (iphone_14, galaxy_s23, ipad, etc.)")
     return parser.parse_args()
 
 

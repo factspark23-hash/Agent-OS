@@ -257,6 +257,165 @@ TOOLS = [
         description="Scan the current page for exposed sensitive data (API keys, tokens, emails, IPs).",
         inputSchema={"type": "object", "properties": {}}
     ),
+
+    # Smart Element Finder
+    Tool(
+        name="browser_smart_find",
+        description="Find an element by visible text or description. No CSS selector needed — works like a human looking at the page.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "description": {"type": "string", "description": "What to find — e.g. 'Sign In', 'email', 'Submit button'"},
+                "tag": {"type": "string", "description": "Optional tag filter: 'button', 'input', 'a', etc."},
+                "timeout": {"type": "integer", "description": "Max wait time in ms", "default": 5000}
+            },
+            "required": ["description"]
+        }
+    ),
+    Tool(
+        name="browser_smart_click",
+        description="Click an element by its visible text. Finds the element automatically — no CSS selector needed.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "Visible text of the element to click"},
+                "tag": {"type": "string", "description": "Optional tag filter"},
+                "timeout": {"type": "integer", "description": "Max wait time in ms", "default": 5000}
+            },
+            "required": ["text"]
+        }
+    ),
+    Tool(
+        name="browser_smart_fill",
+        description="Find an input field by its label/placeholder text and fill it with a value.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "label": {"type": "string", "description": "Label or placeholder text of the input field"},
+                "value": {"type": "string", "description": "Value to fill in"},
+                "timeout": {"type": "integer", "description": "Max wait time in ms", "default": 5000}
+            },
+            "required": ["label", "value"]
+        }
+    ),
+
+    # Workflow Engine
+    Tool(
+        name="browser_workflow",
+        description="Execute a multi-step browser workflow in a single command. Supports variables, conditionals, retries.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "steps": {"type": "array", "description": "Array of step objects, each with 'command' + params"},
+                "variables": {"type": "object", "description": "Template variables for {{var}} substitution"},
+                "on_error": {"type": "string", "enum": ["abort", "skip", "retry"], "default": "abort"},
+                "retry_count": {"type": "integer", "description": "Retries per step on failure", "default": 0},
+                "step_delay_ms": {"type": "integer", "description": "Delay between steps in ms", "default": 0}
+            },
+            "required": ["steps"]
+        }
+    ),
+
+    # Network Capture
+    Tool(
+        name="browser_network_start",
+        description="Start capturing all network requests on the current page. Filter by URL pattern, method, or resource type.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "url_pattern": {"type": "string", "description": "Only capture URLs matching this regex"},
+                "resource_types": {"type": "array", "items": {"type": "string"}, "description": "Filter: document, script, xhr, fetch, image, etc."},
+                "methods": {"type": "array", "items": {"type": "string"}, "description": "Filter: GET, POST, PUT, DELETE"},
+                "capture_body": {"type": "boolean", "description": "Capture response bodies (increases memory)", "default": False}
+            }
+        }
+    ),
+    Tool(
+        name="browser_network_get",
+        description="Get captured network requests with optional filters. Returns all requests with headers, status, timing.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "url_pattern": {"type": "string", "description": "Filter URLs by regex"},
+                "resource_type": {"type": "string", "description": "Filter by type: xhr, fetch, document, etc."},
+                "method": {"type": "string", "description": "Filter by HTTP method"},
+                "status_code": {"type": "integer", "description": "Filter by response status code"},
+                "api_only": {"type": "boolean", "description": "Only return API calls (XHR/Fetch)", "default": False},
+                "limit": {"type": "integer", "default": 100},
+                "offset": {"type": "integer", "default": 0}
+            }
+        }
+    ),
+    Tool(
+        name="browser_network_apis",
+        description="Discover all API endpoints from captured network traffic. Groups by base URL with methods and status codes.",
+        inputSchema={"type": "object", "properties": {}}
+    ),
+
+    # Page Analyzer
+    Tool(
+        name="browser_page_summary",
+        description="Analyze the current page and return structured summary: title, headings, content, forms, links, detected technologies, readability.",
+        inputSchema={"type": "object", "properties": {}}
+    ),
+    Tool(
+        name="browser_page_tables",
+        description="Extract all HTML tables from the page as structured data (headers + rows).",
+        inputSchema={"type": "object", "properties": {}}
+    ),
+    Tool(
+        name="browser_page_seo",
+        description="Run a basic SEO audit: title, meta description, H1, alt text, canonical, Open Graph, structured data. Returns score + issues.",
+        inputSchema={"type": "object", "properties": {}}
+    ),
+
+    # Mobile Emulation
+    Tool(
+        name="browser_emulate_device",
+        description="Emulate a mobile/tablet/desktop device. Changes viewport, user agent, touch support.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "device": {"type": "string", "description": "Device preset: iphone_14, galaxy_s23, ipad, pixel_8, desktop_1080, etc."}
+            },
+            "required": ["device"]
+        }
+    ),
+
+    # Proxy
+    Tool(
+        name="browser_set_proxy",
+        description="Set proxy for the browser. Supports HTTP, HTTPS, SOCKS5. Requires browser restart.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "proxy_url": {"type": "string", "description": "Proxy URL: http://user:pass@host:port or socks5://host:port"}
+            },
+            "required": ["proxy_url"]
+        }
+    ),
+
+    # Session Save/Restore
+    Tool(
+        name="browser_save_session",
+        description="Save full browser state: cookies, localStorage, sessionStorage, open tabs. Restore later with restore_session.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Session name for later retrieval", "default": "default"}
+            }
+        }
+    ),
+    Tool(
+        name="browser_restore_session",
+        description="Restore a previously saved browser session with all cookies, storage, and tabs.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Session name to restore", "default": "default"}
+            }
+        }
+    ),
 ]
 
 
@@ -326,6 +485,20 @@ async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[TextCon
         "browser_get_images": ("get-images", []),
         "browser_wait": ("wait", ["selector", "timeout"]),
         "browser_scan_sensitive": ("scan-sensitive", []),
+        "browser_smart_find": ("smart-find", ["description", "tag", "timeout"]),
+        "browser_smart_click": ("smart-click", ["text", "tag", "timeout"]),
+        "browser_smart_fill": ("smart-fill", ["label", "value", "timeout"]),
+        "browser_workflow": ("workflow", ["steps", "variables", "on_error", "retry_count", "step_delay_ms"]),
+        "browser_network_start": ("network-start", ["url_pattern", "resource_types", "methods", "capture_body"]),
+        "browser_network_get": ("network-get", ["url_pattern", "resource_type", "method", "status_code", "api_only", "limit", "offset"]),
+        "browser_network_apis": ("network-apis", []),
+        "browser_page_summary": ("page-summary", []),
+        "browser_page_tables": ("page-tables", []),
+        "browser_page_seo": ("page-seo", []),
+        "browser_emulate_device": ("emulate-device", ["device"]),
+        "browser_set_proxy": ("set-proxy", ["proxy_url"]),
+        "browser_save_session": ("save-session", ["name"]),
+        "browser_restore_session": ("restore-session", ["name"]),
     }
 
     if name == "browser_status":

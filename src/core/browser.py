@@ -207,6 +207,21 @@ FAKE_RESPONSES = {
 class AgentBrowser:
     """Core browser engine with advanced anti-detection for AI agents."""
 
+    # Mobile device presets
+    DEVICE_PRESETS = {
+        "iphone_se": {"width": 375, "height": 667, "device_scale_factor": 2, "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"},
+        "iphone_14": {"width": 390, "height": 844, "device_scale_factor": 3, "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"},
+        "iphone_14_pro_max": {"width": 430, "height": 932, "device_scale_factor": 3, "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"},
+        "ipad": {"width": 768, "height": 1024, "device_scale_factor": 2, "user_agent": "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"},
+        "ipad_pro": {"width": 1024, "height": 1366, "device_scale_factor": 2, "user_agent": "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"},
+        "galaxy_s23": {"width": 360, "height": 780, "device_scale_factor": 3, "user_agent": "Mozilla/5.0 (Linux; Android 14; SM-S911B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"},
+        "galaxy_tab_s9": {"width": 800, "height": 1280, "device_scale_factor": 2, "user_agent": "Mozilla/5.0 (Linux; Android 14; SM-X810) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"},
+        "pixel_8": {"width": 412, "height": 915, "device_scale_factor": 2.625, "user_agent": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"},
+        "desktop_1080": {"width": 1920, "height": 1080, "device_scale_factor": 1, "user_agent": None},
+        "desktop_1440": {"width": 2560, "height": 1440, "device_scale_factor": 1, "user_agent": None},
+        "desktop_4k": {"width": 3840, "height": 2160, "device_scale_factor": 2, "user_agent": None},
+    }
+
     def __init__(self, config):
         self.config = config
         self.playwright = None
@@ -219,6 +234,9 @@ class AgentBrowser:
         self._console_logs: Dict[str, List[Dict]] = {}  # page_id → list of log entries
         self._cookie_dir = Path(os.path.expanduser("~/.agent-os/cookies"))
         self._download_dir = Path(os.path.expanduser("~/.agent-os/downloads"))
+        self._proxy_config = None
+        self._current_device = "desktop_1080"
+        self._network_capture = None  # Set externally
 
     async def start(self):
         """Launch the browser with stealth settings."""
@@ -230,26 +248,40 @@ class AgentBrowser:
         # Use headed or headless based on config
         headless = self.config.get("browser.headless", True)
 
-        self.browser = await self.playwright.chromium.launch(
-            headless=headless,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--disable-features=IsolateOrigins,site-per-process",
-                "--disable-infobars",
-                "--disable-background-timer-throttling",
-                "--disable-backgrounding-occluded-windows",
-                "--disable-renderer-backgrounding",
-                "--disable-dev-shm-usage",
-                "--no-first-run",
-                "--no-default-browser-check",
-                "--disable-extensions",
-                "--disable-component-extensions-with-background-pages",
-                "--window-size=1920,1080",
-                "--disable-web-security",
-                "--disable-features=TranslateUI",
-                "--disable-ipc-flooding-protection",
-            ]
-        )
+        # Build launch args
+        launch_args = [
+            "--disable-blink-features=AutomationControlled",
+            "--disable-features=IsolateOrigins,site-per-process",
+            "--disable-infobars",
+            "--disable-background-timer-throttling",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-renderer-backgrounding",
+            "--disable-dev-shm-usage",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-extensions",
+            "--disable-component-extensions-with-background-pages",
+            "--window-size=1920,1080",
+            "--disable-web-security",
+            "--disable-features=TranslateUI",
+            "--disable-ipc-flooding-protection",
+        ]
+
+        # Build launch options
+        launch_options = {
+            "headless": headless,
+            "args": launch_args,
+        }
+
+        # Proxy support
+        proxy_url = self.config.get("browser.proxy")
+        if proxy_url:
+            proxy_config = self._parse_proxy_url(proxy_url)
+            launch_options["proxy"] = proxy_config
+            self._proxy_config = proxy_config
+            logger.info(f"Proxy configured: {proxy_config.get('server', 'N/A')}")
+
+        self.browser = await self.playwright.chromium.launch(**launch_options)
 
         # Create context with realistic settings
         storage_state = self._load_cookies("default")
@@ -1075,6 +1107,299 @@ class AgentBrowser:
             self._console_logs.pop(tab_id, None)
             return True
         return False
+
+    def _parse_proxy_url(self, proxy_url: str) -> Dict[str, Any]:
+        """Parse proxy URL into Playwright proxy config."""
+        from urllib.parse import urlparse
+        parsed = urlparse(proxy_url)
+
+        config = {
+            "server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port or 8080}",
+        }
+
+        if parsed.username:
+            config["username"] = parsed.username
+        if parsed.password:
+            config["password"] = parsed.password
+
+        return config
+
+    async def set_proxy(self, proxy_url: str) -> Dict[str, Any]:
+        """
+        Set proxy for browser. Requires browser restart to take effect.
+
+        Args:
+            proxy_url: Proxy URL — e.g. "http://user:pass@proxy.example.com:8080"
+                       or "socks5://proxy.example.com:1080"
+
+        Returns:
+            Status and proxy info
+        """
+        proxy_config = self._parse_proxy_url(proxy_url)
+        self._proxy_config = proxy_config
+
+        # Save to config
+        self.config.set("browser.proxy", proxy_url)
+
+        return {
+            "status": "success",
+            "proxy": proxy_config,
+            "note": "Proxy will be active after browser restart. Use restart command.",
+        }
+
+    async def get_proxy(self) -> Dict[str, Any]:
+        """Get current proxy configuration."""
+        if not self._proxy_config:
+            return {"status": "success", "proxy": None, "message": "No proxy configured"}
+        return {"status": "success", "proxy": self._proxy_config}
+
+    async def emulate_device(self, device: str) -> Dict[str, Any]:
+        """
+        Emulate a mobile/tablet/desktop device.
+
+        Available devices:
+            Mobile: iphone_se, iphone_14, iphone_14_pro_max, galaxy_s23, pixel_8
+            Tablet: ipad, ipad_pro, galaxy_tab_s9
+            Desktop: desktop_1080, desktop_1440, desktop_4k
+
+        Args:
+            device: Device preset name
+        """
+        if device not in self.DEVICE_PRESETS:
+            return {
+                "status": "error",
+                "error": f"Unknown device: {device}",
+                "available_devices": list(self.DEVICE_PRESETS.keys()),
+            }
+
+        preset = self.DEVICE_PRESETS[device]
+        self._current_device = device
+
+        # Create new context with device settings
+        old_context = self.context
+
+        context_options = {
+            "viewport": {"width": preset["width"], "height": preset["height"]},
+            "device_scale_factor": preset["device_scale_factor"],
+            "is_mobile": preset["device_scale_factor"] > 1,
+            "has_touch": preset["device_scale_factor"] > 1,
+            "user_agent": preset["user_agent"] or self.config.get("browser.user_agent"),
+            "locale": "en-US",
+            "timezone_id": "America/New_York",
+            "ignore_https_errors": True,
+        }
+
+        self.context = await self.browser.new_context(**context_options)
+        await self.context.add_init_script(ANTI_DETECTION_JS)
+        await self.context.route("**/*", self._handle_request)
+
+        # Migrate pages
+        for page_id, old_page in list(self._pages.items()):
+            try:
+                url = old_page.url
+                new_page = await self.context.new_page()
+                self._pages[page_id] = new_page
+                if page_id == "main":
+                    self.page = new_page
+                if url and url != "about:blank":
+                    await new_page.goto(url, wait_until="domcontentloaded", timeout=15000)
+                await old_page.close()
+            except Exception as e:
+                logger.warning(f"Failed to migrate page {page_id}: {e}")
+
+        # Close old context
+        if old_context:
+            try:
+                await old_context.close()
+            except Exception:
+                pass
+
+        logger.info(f"Device emulation: {device} ({preset['width']}x{preset['height']})")
+
+        return {
+            "status": "success",
+            "device": device,
+            "viewport": {"width": preset["width"], "height": preset["height"]},
+            "device_scale_factor": preset["device_scale_factor"],
+            "is_mobile": preset["device_scale_factor"] > 1,
+            "user_agent": preset["user_agent"] or self.config.get("browser.user_agent"),
+        }
+
+    async def list_devices(self) -> Dict[str, Any]:
+        """List all available device emulation presets."""
+        devices = {}
+        for name, preset in self.DEVICE_PRESETS.items():
+            devices[name] = {
+                "viewport": f"{preset['width']}x{preset['height']}",
+                "device_scale_factor": preset["device_scale_factor"],
+                "type": "mobile" if preset["device_scale_factor"] > 1 and preset["width"] < 500 else
+                        "tablet" if preset["device_scale_factor"] > 1 else "desktop",
+            }
+        return {"status": "success", "devices": devices, "current": self._current_device}
+
+    async def save_session(self, name: str = "default") -> Dict[str, Any]:
+        """
+        Save full browser session state: cookies, localStorage, sessionStorage.
+        Can be restored later with restore_session().
+        """
+        session_dir = Path(os.path.expanduser("~/.agent-os/sessions"))
+        session_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save storage state (cookies + localStorage)
+        state = await self.context.storage_state()
+        state_path = session_dir / f"{name}.json"
+
+        # Also capture sessionStorage from all pages
+        session_data = {}
+        for page_id, page in self._pages.items():
+            try:
+                storage = await page.evaluate("""() => {
+                    const data = {};
+                    for (let i = 0; i < sessionStorage.length; i++) {
+                        const key = sessionStorage.key(i);
+                        data[key] = sessionStorage.getItem(key);
+                    }
+                    return data;
+                }""")
+                if storage:
+                    session_data[page_id] = storage
+            except Exception:
+                pass
+
+        state["session_storage"] = session_data
+        state["saved_at"] = time.time()
+        state["device"] = self._current_device
+        state["urls"] = {pid: page.url for pid, page in self._pages.items() if page.url != "about:blank"}
+
+        with open(state_path, "w") as f:
+            json.dump(state, f, indent=2)
+
+        logger.info(f"Session saved: {name} ({state_path})")
+
+        return {
+            "status": "success",
+            "name": name,
+            "path": str(state_path),
+            "cookies": len(state.get("cookies", [])),
+            "pages": list(state.get("urls", {}).keys()),
+        }
+
+    async def restore_session(self, name: str = "default") -> Dict[str, Any]:
+        """
+        Restore a previously saved browser session.
+        Recreates cookies, localStorage, sessionStorage, and navigates to saved URLs.
+        """
+        session_dir = Path(os.path.expanduser("~/.agent-os/sessions"))
+        state_path = session_dir / f"{name}.json"
+
+        if not state_path.exists():
+            return {"status": "error", "error": f"Session not found: {name}"}
+
+        with open(state_path, "r") as f:
+            state = json.load(f)
+
+        # Close existing context
+        if self.context:
+            try:
+                await self.context.close()
+            except Exception:
+                pass
+
+        # Create new context with saved state
+        context_options = {
+            "user_agent": self.config.get("browser.user_agent"),
+            "viewport": self.config.get("browser.viewport", {"width": 1920, "height": 1080}),
+            "locale": "en-US",
+            "timezone_id": "America/New_York",
+            "ignore_https_errors": True,
+        }
+
+        # Remove session_storage from state before passing to Playwright
+        storage_state = {k: v for k, v in state.items() if k not in ("session_storage", "saved_at", "device", "urls")}
+        context_options["storage_state"] = storage_state
+
+        self.context = await self.browser.new_context(**context_options)
+        await self.context.add_init_script(ANTI_DETECTION_JS)
+        await self.context.route("**/*", self._handle_request)
+
+        # Recreate pages with saved URLs
+        saved_urls = state.get("urls", {})
+        self._pages = {}
+
+        for page_id, url in saved_urls.items():
+            try:
+                page = await self.context.new_page()
+                self._pages[page_id] = page
+                if page_id == "main":
+                    self.page = page
+                if url and url != "about:blank":
+                    await page.goto(url, wait_until="domcontentloaded", timeout=15000)
+
+                # Restore sessionStorage
+                session_storage = state.get("session_storage", {}).get(page_id, {})
+                if session_storage:
+                    for key, value in session_storage.items():
+                        try:
+                            await page.evaluate(
+                                f"(k, v) => sessionStorage.setItem(k, v)",
+                                key, value
+                            )
+                        except Exception:
+                            pass
+            except Exception as e:
+                logger.warning(f"Failed to restore page {page_id}: {e}")
+
+        # Ensure main page exists
+        if "main" not in self._pages:
+            self.page = await self.context.new_page()
+            self._pages["main"] = self.page
+
+        device = state.get("device", "desktop_1080")
+        self._current_device = device
+
+        logger.info(f"Session restored: {name}")
+
+        return {
+            "status": "success",
+            "name": name,
+            "cookies": len(state.get("cookies", [])),
+            "pages_restored": list(saved_urls.keys()),
+            "device": device,
+            "saved_at": state.get("saved_at"),
+        }
+
+    async def list_sessions(self) -> Dict[str, Any]:
+        """List all saved sessions."""
+        session_dir = Path(os.path.expanduser("~/.agent-os/sessions"))
+        sessions = []
+
+        if session_dir.exists():
+            for path in session_dir.glob("*.json"):
+                try:
+                    with open(path) as f:
+                        state = json.load(f)
+                    sessions.append({
+                        "name": path.stem,
+                        "cookies": len(state.get("cookies", [])),
+                        "pages": list(state.get("urls", {}).keys()),
+                        "device": state.get("device", "unknown"),
+                        "saved_at": state.get("saved_at"),
+                    })
+                except Exception:
+                    continue
+
+        return {"status": "success", "sessions": sessions}
+
+    async def delete_session(self, name: str) -> Dict[str, Any]:
+        """Delete a saved session."""
+        session_dir = Path(os.path.expanduser("~/.agent-os/sessions"))
+        state_path = session_dir / f"{name}.json"
+
+        if not state_path.exists():
+            return {"status": "error", "error": f"Session not found: {name}"}
+
+        state_path.unlink()
+        return {"status": "success", "deleted": name}
 
     async def stop(self):
         """Clean shutdown."""
