@@ -224,6 +224,10 @@
                     <h2>🍪 Cookies</h2>
                     <div class="panel-actions">
                         <button class="btn btn-sm" id="btn-fetch-cookies">↻ Refresh</button>
+                        <button class="btn btn-sm" id="btn-export-cookies">⬇ Export JSON</button>
+                        <label class="btn btn-sm" id="btn-import-cookies" for="cookie-import-input">⬆ Import JSON</label>
+                        <input type="file" id="cookie-import-input" accept=".json" style="display:none" />
+                        <span class="cookie-import-status" id="cookie-import-status"></span>
                     </div>
                 </div>
                 <div class="table-wrap">

@@ -426,6 +426,109 @@
         return `<div style="padding-left:${depth * 16}px"><span class="dom-text">${escHtml(JSON.stringify(node).substring(0, 200))}</span></div>`;
     }
 
+    // ─── Cookie Import/Export ───────────────────────────────
+
+    function initCookieImportExport() {
+        // Export button
+        $("#btn-export-cookies")?.addEventListener("click", exportCookies);
+
+        // Import file input
+        $("#cookie-import-input")?.addEventListener("change", handleCookieImport);
+    }
+
+    async function exportCookies() {
+        const btn = $("#btn-export-cookies");
+        btn.textContent = "⏳ Exporting...";
+        btn.disabled = true;
+
+        try {
+            // Fetch as blob to trigger download
+            const res = await fetch("/api/cookies/export");
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.error || "Export failed");
+            }
+
+            const blob = await res.blob();
+            const count = res.headers.get("X-Cookie-Count") || "0";
+
+            // Trigger download
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+
+            // Extract filename from Content-Disposition or generate one
+            const disposition = res.headers.get("Content-Disposition");
+            const match = disposition && disposition.match(/filename="?(.+?)"?$/);
+            a.download = match ? match[1] : `agent-os-cookies-${Date.now()}.json`;
+
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            btn.textContent = `⬇ Exported (${count})`;
+            setTimeout(() => {
+                btn.textContent = "⬇ Export JSON";
+            }, 2000);
+        } catch (e) {
+            btn.textContent = "⬇ Export Failed";
+            setTimeout(() => {
+                btn.textContent = "⬇ Export JSON";
+            }, 2000);
+            console.error("Cookie export failed:", e);
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    async function handleCookieImport(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const status = $("#cookie-import-status");
+        const btn = $("#btn-import-cookies");
+
+        status.textContent = "Importing...";
+        status.className = "cookie-import-status importing";
+        btn.style.opacity = "0.5";
+
+        try {
+            const formData = new FormData();
+            formData.append("file", file);
+
+            const res = await fetch("/api/cookies/import", {
+                method: "POST",
+                body: formData,
+            });
+
+            const result = await res.json();
+
+            if (result.status === "success") {
+                status.textContent = `✓ ${result.imported} imported, ${result.skipped} skipped`;
+                status.className = "cookie-import-status success";
+
+                // Refresh cookie table
+                fetchCookies();
+            } else {
+                status.textContent = `✗ ${result.error || "Import failed"}`;
+                status.className = "cookie-import-status error";
+            }
+        } catch (err) {
+            status.textContent = `✗ ${err.message}`;
+            status.className = "cookie-import-status error";
+        } finally {
+            btn.style.opacity = "1";
+            // Reset file input so same file can be re-imported
+            e.target.value = "";
+            // Clear status after 5 seconds
+            setTimeout(() => {
+                status.textContent = "";
+                status.className = "cookie-import-status";
+            }, 5000);
+        }
+    }
+
     // ─── Cookies ─────────────────────────────────────────────
 
     async function fetchCookies() {
@@ -739,6 +842,7 @@
         initNavigation();
         initTerminal();
         initQuickCommands();
+        initCookieImportExport();
         initEventListeners();
         connectWS();
 

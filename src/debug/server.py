@@ -111,6 +111,8 @@ class DebugServer:
         # Action endpoints
         self._http_app.router.add_post("/api/command", self._handle_api_run_command)
         self._http_app.router.add_post("/api/session/destroy", self._handle_api_destroy_session)
+        self._http_app.router.add_get("/api/cookies/export", self._handle_api_cookies_export)
+        self._http_app.router.add_post("/api/cookies/import", self._handle_api_cookies_import)
 
         # WebSocket for real-time updates
         self._http_app.router.add_get("/ws", self._handle_ws)
@@ -303,6 +305,118 @@ class DebugServer:
             return web.json_response({"status": "success", "destroyed": session_id})
         except Exception as e:
             return web.json_response({"status": "error", "error": str(e)}, status=400)
+
+    async def _handle_api_cookies_export(self, request: web.Request) -> web.Response:
+        """Export all cookies as a downloadable JSON file."""
+        try:
+            result = await self.browser.get_cookies()
+            cookies = result.get("cookies", [])
+            export_data = {
+                "version": "1.0",
+                "agent_os_version": "2.1.0",
+                "exported_at": time.time(),
+                "cookie_count": len(cookies),
+                "cookies": cookies,
+            }
+            # Pretty-print for readability
+            body = json.dumps(export_data, indent=2, ensure_ascii=False)
+            filename = f"agent-os-cookies-{int(time.time())}.json"
+            return web.Response(
+                body=body,
+                content_type="application/json",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"',
+                    "X-Cookie-Count": str(len(cookies)),
+                },
+            )
+        except Exception as e:
+            return web.json_response({"status": "error", "error": str(e)}, status=500)
+
+    async def _handle_api_cookies_import(self, request: web.Request) -> web.Response:
+        """Import cookies from a JSON file upload."""
+        try:
+            # Support both multipart file upload and raw JSON body
+            content_type = request.content_type or ""
+
+            if "multipart" in content_type:
+                reader = await request.multipart()
+                field = await reader.next()
+                if not field or field.name != "file":
+                    return web.json_response({"status": "error", "error": "Expected file field named 'file'"}, status=400)
+                file_data = await field.read()
+                import_data = json.loads(file_data.decode("utf-8"))
+            else:
+                import_data = await request.json()
+
+            # Support multiple formats:
+            # 1. Our export format: {"cookies": [...]}
+            # 2. Plain array: [...]
+            # 3. Chrome-style: {"cookies": [{"name":..., "value":..., ...}]}
+            # 4. Netscape/wget format lines
+            if isinstance(import_data, list):
+                cookies = import_data
+            elif isinstance(import_data, dict):
+                cookies = import_data.get("cookies", [])
+                # Also support key-value dict format: {"name": "value", ...}
+                if not cookies and not import_data.get("version"):
+                    # Try treating as key-value pairs
+                    cookies = [{"name": k, "value": v} for k, v in import_data.items() if isinstance(v, str)]
+            else:
+                return web.json_response({"status": "error", "error": "Invalid cookie format"}, status=400)
+
+            if not cookies:
+                return web.json_response({"status": "error", "error": "No cookies found in import data"}, status=400)
+
+            # Import each cookie via browser
+            imported = 0
+            skipped = 0
+            errors = []
+
+            for cookie in cookies:
+                try:
+                    name = cookie.get("name")
+                    value = cookie.get("value")
+                    if not name or value is None:
+                        skipped += 1
+                        continue
+
+                    # Build cookie params, supporting multiple formats
+                    params = {
+                        "name": name,
+                        "value": str(value),
+                        "domain": cookie.get("domain"),
+                        "path": cookie.get("path", "/"),
+                        "secure": cookie.get("secure", False),
+                        "http_only": cookie.get("httpOnly", cookie.get("http_only", False)),
+                        "same_site": cookie.get("sameSite", cookie.get("same_site")),
+                    }
+
+                    # Handle expires field (can be number or string)
+                    expires = cookie.get("expires")
+                    if expires is not None:
+                        params["expires"] = expires
+
+                    result = await self.browser.set_cookie(**params)
+                    if result.get("status") == "success":
+                        imported += 1
+                    else:
+                        skipped += 1
+                        errors.append(f"{name}: {result.get('error', 'unknown error')}")
+                except Exception as e:
+                    skipped += 1
+                    errors.append(f"{cookie.get('name', '?')}: {str(e)}")
+
+            return web.json_response({
+                "status": "success",
+                "imported": imported,
+                "skipped": skipped,
+                "total": len(cookies),
+                "errors": errors[:10] if errors else [],
+            })
+        except json.JSONDecodeError as e:
+            return web.json_response({"status": "error", "error": f"Invalid JSON: {e}"}, status=400)
+        except Exception as e:
+            return web.json_response({"status": "error", "error": str(e)}, status=500)
 
     # ─── WebSocket Handler ─────────────────────────────────
 
