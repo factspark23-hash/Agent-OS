@@ -32,13 +32,14 @@ class AgentServer:
         self._http_runner = None
         self._start_time = time.time()
 
-        # Smart Wait + Auto Heal + Auto Retry + Recording engines (lazy init)
+        # Smart Wait + Auto Heal + Auto Retry + Recording + Multi-Agent engines (lazy init)
         self._smart_wait = None
         self._auto_heal = None
         self._auto_retry = None
         self._recorder = None
         self._replay = None
         self._analyzer = None
+        self._agent_hub = None
 
     async def start(self):
         """Start both WebSocket and HTTP servers."""
@@ -277,6 +278,31 @@ class AgentServer:
             "replay-export-workflow": {"params": {"include_navigations": "bool (default true)"}, "description": "Export recording as reusable workflow JSON"},
             "analyze": {"params": {"recording_id": "string"}, "description": "Analyze recording: performance, errors, navigation flow, command stats"},
             "analyze-search": {"params": {"recording_id": "string", "event_type": "string (optional)", "query": "string (optional)", "from_ms": "float (optional)", "to_ms": "float (optional)", "limit": "int (default 100)"}, "description": "Search events in recording by type, text, time range"},
+
+            # Multi-Agent Hub
+            "hub-register": {"params": {"agent_id": "string (optional, auto-generated)", "name": "string (optional)", "role": "observer|operator|supervisor|admin (default operator)", "capabilities": "list[string] (optional)", "metadata": "dict (optional)"}, "description": "Register an agent with the collaboration hub"},
+            "hub-unregister": {"params": {"agent_id": "string"}, "description": "Unregister agent, release locks, reassign tasks"},
+            "hub-heartbeat": {"params": {"agent_id": "string"}, "description": "Agent heartbeat — must call every 15s or get reaped"},
+            "hub-status": {"params": {}, "description": "Get hub status: agents, tasks, locks, memory, stats"},
+            "hub-agents": {"params": {"alive_only": "bool (default true)"}, "description": "List registered agents with role, capabilities, status"},
+            "hub-lock": {"params": {"agent_id": "string", "resource": "string (e.g. page:main, element:#login-btn)", "lock_type": "shared|exclusive (default exclusive)", "ttl_seconds": "float (default 30)", "timeout_ms": "float (default 5000)"}, "description": "Acquire lock on page/element/tab to prevent conflicts"},
+            "hub-unlock": {"params": {"agent_id": "string", "lock_id": "string"}, "description": "Release a lock"},
+            "hub-locks": {"params": {"resource": "string (optional)", "agent_id": "string (optional)"}, "description": "Get active locks with filters"},
+            "hub-task-create": {"params": {"title": "string", "description": "string (optional)", "assigned_to": "string (optional)", "assigned_by": "string (optional)", "priority": "int (default 0)", "tags": "list[string] (optional)", "dependencies": "list[string] (optional)", "max_retries": "int (default 0)"}, "description": "Create task on shared task board"},
+            "hub-task-claim": {"params": {"agent_id": "string", "task_id": "string (optional, auto-selects highest priority)", "tags": "list[string] (optional)"}, "description": "Claim an unassigned task"},
+            "hub-task-start": {"params": {"agent_id": "string", "task_id": "string"}, "description": "Mark task as in-progress"},
+            "hub-task-complete": {"params": {"agent_id": "string", "task_id": "string", "result": "dict (optional)"}, "description": "Mark task as completed with result"},
+            "hub-task-fail": {"params": {"agent_id": "string", "task_id": "string", "error": "string (optional)"}, "description": "Mark task as failed (auto-retry if retries remain)"},
+            "hub-task-cancel": {"params": {"task_id": "string", "cancelled_by": "string (optional)"}, "description": "Cancel a task"},
+            "hub-tasks": {"params": {"status": "string (optional)", "assigned_to": "string (optional)", "tags": "list[string] (optional)", "limit": "int (default 50)"}, "description": "Get tasks with filters and status counts"},
+            "hub-broadcast": {"params": {"sender_id": "string", "topic": "string", "payload": "dict", "ttl_seconds": "float (optional)"}, "description": "Broadcast event to all agents via pub/sub"},
+            "hub-events": {"params": {"agent_id": "string", "topic": "string (optional)", "since_seconds": "float (optional)", "limit": "int (default 50)"}, "description": "Get events for an agent (default: since last check)"},
+            "hub-memory-set": {"params": {"agent_id": "string", "key": "string", "value": "any", "ttl_seconds": "float (default 0, no expiry)", "access": "shared|private|readonly (default shared)"}, "description": "Set shared memory entry"},
+            "hub-memory-get": {"params": {"agent_id": "string", "key": "string"}, "description": "Get shared memory entry"},
+            "hub-memory-delete": {"params": {"agent_id": "string", "key": "string"}, "description": "Delete shared memory entry"},
+            "hub-memory-list": {"params": {"prefix": "string (optional)", "agent_id": "string (optional)"}, "description": "List shared memory keys"},
+            "hub-handoff": {"params": {"from_agent_id": "string", "to_agent_id": "string", "resource": "string (default page:main)", "context": "dict (optional)"}, "description": "Hand off session control between agents (transfers locks)"},
+            "hub-audit": {"params": {"agent_id": "string (optional)", "action": "string (optional)", "since_seconds": "float (optional)", "limit": "int (default 100)"}, "description": "Get full audit trail with filters"},
         }
         return web.json_response(commands)
 
@@ -371,6 +397,12 @@ class AgentServer:
             from src.tools.session_recording import SessionAnalyzer
             self._analyzer = SessionAnalyzer()
         return self._analyzer
+
+    def _get_agent_hub(self):
+        if self._agent_hub is None:
+            from src.tools.multi_agent import AgentHub
+            self._agent_hub = AgentHub(self.browser, self.session_manager)
+        return self._agent_hub
 
     async def _process_command(self, data: Dict) -> Dict[str, Any]:
         """Process any agent command."""
@@ -543,6 +575,31 @@ class AgentServer:
             "replay-export-workflow": self._cmd_replay_export_workflow,
             "analyze": self._cmd_analyze,
             "analyze-search": self._cmd_analyze_search,
+
+            # Multi-Agent Hub
+            "hub-register": self._cmd_hub_register,
+            "hub-unregister": self._cmd_hub_unregister,
+            "hub-heartbeat": self._cmd_hub_heartbeat,
+            "hub-status": self._cmd_hub_status,
+            "hub-agents": self._cmd_hub_agents,
+            "hub-lock": self._cmd_hub_lock,
+            "hub-unlock": self._cmd_hub_unlock,
+            "hub-locks": self._cmd_hub_locks,
+            "hub-task-create": self._cmd_hub_task_create,
+            "hub-task-claim": self._cmd_hub_task_claim,
+            "hub-task-start": self._cmd_hub_task_start,
+            "hub-task-complete": self._cmd_hub_task_complete,
+            "hub-task-fail": self._cmd_hub_task_fail,
+            "hub-task-cancel": self._cmd_hub_task_cancel,
+            "hub-tasks": self._cmd_hub_tasks,
+            "hub-broadcast": self._cmd_hub_broadcast,
+            "hub-events": self._cmd_hub_events,
+            "hub-memory-set": self._cmd_hub_memory_set,
+            "hub-memory-get": self._cmd_hub_memory_get,
+            "hub-memory-delete": self._cmd_hub_memory_delete,
+            "hub-memory-list": self._cmd_hub_memory_list,
+            "hub-handoff": self._cmd_hub_handoff,
+            "hub-audit": self._cmd_hub_audit,
         }
 
         handler = handlers.get(command)
@@ -1509,5 +1566,233 @@ class AgentServer:
             query=data.get("query"),
             from_ms=data.get("from_ms"),
             to_ms=data.get("to_ms"),
+            limit=data.get("limit", 100),
+        )
+
+    # ─── Multi-Agent Hub Commands ───────────────────────────
+
+    async def _cmd_hub_register(self, data: Dict, session) -> Dict:
+        """Register an agent with the hub."""
+        hub = self._get_agent_hub()
+        return await hub.register_agent(
+            agent_id=data.get("agent_id"),
+            name=data.get("name"),
+            role=data.get("role", "operator"),
+            capabilities=data.get("capabilities"),
+            metadata=data.get("metadata"),
+        )
+
+    async def _cmd_hub_unregister(self, data: Dict, session) -> Dict:
+        """Unregister an agent."""
+        agent_id = data.get("agent_id")
+        if not agent_id:
+            return {"status": "error", "error": "Missing 'agent_id'"}
+        hub = self._get_agent_hub()
+        return await hub.unregister_agent(agent_id)
+
+    async def _cmd_hub_heartbeat(self, data: Dict, session) -> Dict:
+        """Agent heartbeat."""
+        agent_id = data.get("agent_id")
+        if not agent_id:
+            return {"status": "error", "error": "Missing 'agent_id'"}
+        hub = self._get_agent_hub()
+        return await hub.heartbeat(agent_id)
+
+    async def _cmd_hub_status(self, data: Dict, session) -> Dict:
+        """Get hub status and statistics."""
+        hub = self._get_agent_hub()
+        return hub.get_status()
+
+    async def _cmd_hub_agents(self, data: Dict, session) -> Dict:
+        """List registered agents."""
+        hub = self._get_agent_hub()
+        return hub.get_agents(alive_only=data.get("alive_only", True))
+
+    async def _cmd_hub_lock(self, data: Dict, session) -> Dict:
+        """Acquire a lock on a resource."""
+        agent_id = data.get("agent_id")
+        resource = data.get("resource")
+        if not agent_id or not resource:
+            return {"status": "error", "error": "Missing 'agent_id' or 'resource'"}
+        hub = self._get_agent_hub()
+        return await hub.acquire_lock(
+            agent_id=agent_id,
+            resource=resource,
+            lock_type=data.get("lock_type", "exclusive"),
+            ttl_seconds=data.get("ttl_seconds"),
+            timeout_ms=data.get("timeout_ms", 5000),
+        )
+
+    async def _cmd_hub_unlock(self, data: Dict, session) -> Dict:
+        """Release a lock."""
+        agent_id = data.get("agent_id")
+        lock_id = data.get("lock_id")
+        if not agent_id or not lock_id:
+            return {"status": "error", "error": "Missing 'agent_id' or 'lock_id'"}
+        hub = self._get_agent_hub()
+        return await hub.release_lock(agent_id, lock_id)
+
+    async def _cmd_hub_locks(self, data: Dict, session) -> Dict:
+        """Get active locks."""
+        hub = self._get_agent_hub()
+        return hub.get_locks(resource=data.get("resource"), agent_id=data.get("agent_id"))
+
+    async def _cmd_hub_task_create(self, data: Dict, session) -> Dict:
+        """Create a task on the shared board."""
+        title = data.get("title")
+        if not title:
+            return {"status": "error", "error": "Missing 'title'"}
+        hub = self._get_agent_hub()
+        return await hub.create_task(
+            title=title,
+            description=data.get("description", ""),
+            assigned_to=data.get("assigned_to"),
+            assigned_by=data.get("assigned_by"),
+            priority=data.get("priority", 0),
+            tags=data.get("tags"),
+            dependencies=data.get("dependencies"),
+            max_retries=data.get("max_retries", 0),
+            metadata=data.get("metadata"),
+        )
+
+    async def _cmd_hub_task_claim(self, data: Dict, session) -> Dict:
+        """Claim an unassigned task."""
+        agent_id = data.get("agent_id")
+        if not agent_id:
+            return {"status": "error", "error": "Missing 'agent_id'"}
+        hub = self._get_agent_hub()
+        return await hub.claim_task(agent_id, task_id=data.get("task_id"), tags=data.get("tags"))
+
+    async def _cmd_hub_task_start(self, data: Dict, session) -> Dict:
+        """Mark task as in-progress."""
+        agent_id = data.get("agent_id")
+        task_id = data.get("task_id")
+        if not agent_id or not task_id:
+            return {"status": "error", "error": "Missing 'agent_id' or 'task_id'"}
+        hub = self._get_agent_hub()
+        return await hub.start_task(agent_id, task_id)
+
+    async def _cmd_hub_task_complete(self, data: Dict, session) -> Dict:
+        """Mark task as completed."""
+        agent_id = data.get("agent_id")
+        task_id = data.get("task_id")
+        if not agent_id or not task_id:
+            return {"status": "error", "error": "Missing 'agent_id' or 'task_id'"}
+        hub = self._get_agent_hub()
+        return await hub.complete_task(agent_id, task_id, result=data.get("result"))
+
+    async def _cmd_hub_task_fail(self, data: Dict, session) -> Dict:
+        """Mark task as failed."""
+        agent_id = data.get("agent_id")
+        task_id = data.get("task_id")
+        if not agent_id or not task_id:
+            return {"status": "error", "error": "Missing 'agent_id' or 'task_id'"}
+        hub = self._get_agent_hub()
+        return await hub.fail_task(agent_id, task_id, error=data.get("error", ""))
+
+    async def _cmd_hub_task_cancel(self, data: Dict, session) -> Dict:
+        """Cancel a task."""
+        task_id = data.get("task_id")
+        if not task_id:
+            return {"status": "error", "error": "Missing 'task_id'"}
+        hub = self._get_agent_hub()
+        return await hub.cancel_task(task_id, cancelled_by=data.get("cancelled_by"))
+
+    async def _cmd_hub_tasks(self, data: Dict, session) -> Dict:
+        """Get tasks with filters."""
+        hub = self._get_agent_hub()
+        return hub.get_tasks(
+            status=data.get("status"),
+            assigned_to=data.get("assigned_to"),
+            tags=data.get("tags"),
+            limit=data.get("limit", 50),
+        )
+
+    async def _cmd_hub_broadcast(self, data: Dict, session) -> Dict:
+        """Broadcast event to all agents."""
+        sender_id = data.get("sender_id")
+        topic = data.get("topic")
+        if not sender_id or not topic:
+            return {"status": "error", "error": "Missing 'sender_id' or 'topic'"}
+        hub = self._get_agent_hub()
+        return await hub.broadcast(
+            sender_id=sender_id,
+            topic=topic,
+            payload=data.get("payload", {}),
+            ttl_seconds=data.get("ttl_seconds"),
+        )
+
+    async def _cmd_hub_events(self, data: Dict, session) -> Dict:
+        """Get events for an agent."""
+        agent_id = data.get("agent_id")
+        if not agent_id:
+            return {"status": "error", "error": "Missing 'agent_id'"}
+        hub = self._get_agent_hub()
+        return hub.get_events(
+            agent_id=agent_id,
+            topic=data.get("topic"),
+            since_seconds=data.get("since_seconds"),
+            limit=data.get("limit", 50),
+        )
+
+    async def _cmd_hub_memory_set(self, data: Dict, session) -> Dict:
+        """Set shared memory."""
+        agent_id = data.get("agent_id")
+        key = data.get("key")
+        if not agent_id or not key:
+            return {"status": "error", "error": "Missing 'agent_id' or 'key'"}
+        hub = self._get_agent_hub()
+        return await hub.memory_set(
+            agent_id=agent_id,
+            key=key,
+            value=data.get("value"),
+            ttl_seconds=data.get("ttl_seconds", 0),
+            access=data.get("access", "shared"),
+        )
+
+    async def _cmd_hub_memory_get(self, data: Dict, session) -> Dict:
+        """Get shared memory."""
+        agent_id = data.get("agent_id")
+        key = data.get("key")
+        if not agent_id or not key:
+            return {"status": "error", "error": "Missing 'agent_id' or 'key'"}
+        hub = self._get_agent_hub()
+        return await hub.memory_get(agent_id, key)
+
+    async def _cmd_hub_memory_delete(self, data: Dict, session) -> Dict:
+        """Delete shared memory."""
+        agent_id = data.get("agent_id")
+        key = data.get("key")
+        if not agent_id or not key:
+            return {"status": "error", "error": "Missing 'agent_id' or 'key'"}
+        hub = self._get_agent_hub()
+        return await hub.memory_delete(agent_id, key)
+
+    async def _cmd_hub_memory_list(self, data: Dict, session) -> Dict:
+        """List shared memory keys."""
+        hub = self._get_agent_hub()
+        return hub.memory_list(prefix=data.get("prefix"), agent_id=data.get("agent_id"))
+
+    async def _cmd_hub_handoff(self, data: Dict, session) -> Dict:
+        """Hand off session control between agents."""
+        from_id = data.get("from_agent_id")
+        to_id = data.get("to_agent_id")
+        if not from_id or not to_id:
+            return {"status": "error", "error": "Missing 'from_agent_id' or 'to_agent_id'"}
+        hub = self._get_agent_hub()
+        return await hub.handoff(
+            from_agent_id=from_id,
+            to_agent_id=to_id,
+            resource=data.get("resource", "page:main"),
+            context=data.get("context"),
+        )
+
+    async def _cmd_hub_audit(self, data: Dict, session) -> Dict:
+        """Get audit trail."""
+        hub = self._get_agent_hub()
+        return hub.get_audit(
+            agent_id=data.get("agent_id"),
+            action=data.get("action"),
+            since_seconds=data.get("since_seconds"),
             limit=data.get("limit", 100),
         )
