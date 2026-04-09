@@ -35,7 +35,15 @@ if [ ! -d "$VENV_DIR" ]; then
         fi
     fi
 
-    python3 -m venv "$VENV_DIR"
+    # Try normal venv first, fall back to --without-pip + manual pip install
+    python3 -m venv "$VENV_DIR" 2>/dev/null || {
+        echo "  ⚠️  ensurepip not available, using --without-pip fallback..."
+        python3 -m venv --without-pip "$VENV_DIR"
+        source "$VENV_DIR/bin/activate"
+        curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
+        python /tmp/get-pip.py -q
+        rm -f /tmp/get-pip.py
+    }
     echo "✅ Virtual environment created"
 else
     echo "✅ Virtual environment already exists"
