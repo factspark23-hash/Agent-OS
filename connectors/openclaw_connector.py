@@ -17,7 +17,7 @@ from typing import Dict, Any, Optional
 AGENT_OS_URL = os.environ.get("AGENT_OS_URL", "http://localhost:8001")
 AGENT_TOKEN = os.environ.get("AGENT_OS_TOKEN", "openclaw-agent")
 
-# All 25 tools — same set as MCP, OpenAI, and Claude connectors
+# All 38 tools — same set as MCP, OpenAI, and Claude connectors
 TOOLS_MANIFEST = {
     "name": "agent-os-browser",
     "version": "1.0.0",
@@ -352,7 +352,7 @@ def get_manifest() -> dict:
 
 
 def get_tool_names() -> list:
-    """Return the names of all 25 available tools."""
+    """Return the names of all 38 available tools."""
     return [t["name"] for t in TOOLS_MANIFEST["tools"]]
 
 

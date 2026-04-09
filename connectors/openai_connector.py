@@ -24,7 +24,7 @@ AGENT_OS_URL = os.environ.get("AGENT_OS_URL", "http://localhost:8001")
 AGENT_TOKEN = os.environ.get("AGENT_OS_TOKEN", "openai-connector-default")
 
 
-# ─── Canonical Tool Definitions (25 tools — same as MCP) ──────
+# ─── Canonical Tool Definitions (38 tools — same as MCP) ──────
 # Single source of truth. Both OpenAI and Claude formats are generated from this.
 
 _TOOL_DEFS = [
@@ -447,7 +447,7 @@ def get_tools(format: str = "openai") -> List[Dict]:
 
 
 def get_all_tool_names() -> List[str]:
-    """Return the names of all 25 available tools."""
+    """Return the names of all 38 available tools."""
     return [t["name"] for t in _TOOL_DEFS]
 
 

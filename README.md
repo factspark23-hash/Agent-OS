@@ -4,7 +4,7 @@ A browser automation server built **exclusively for AI agents** — not humans.
 
 Connect any AI (Claude, GPT-4, Codex, OpenClaw, Qwen, local LLMs) and give them a real browser with anti-detection, human mimicry, and full control. Free, open-source, runs locally.
 
-**Stack:** Python + Playwright (Chromium) — no GPU, no cloud, no monthly fees.
+**Stack:** Python 3.10+ / Playwright (Chromium) — no GPU, no cloud, no monthly fees.
 
 ## Why Agent-OS?
 
@@ -18,9 +18,9 @@ Connect any AI (Claude, GPT-4, Codex, OpenClaw, Qwen, local LLMs) and give them 
 
 ## Features
 
-- 🛡️ **Anti-Detection** — Blocks reCAPTCHA, hCaptcha, Cloudflare Turnstile, PerimeterX, DataDome at the network level (before scripts load)
-- 🤖 **42 Browser Tools** — Navigate, click, fill forms, screenshot, scroll, tabs, DOM analysis, smart finder, workflows, network capture, page analysis, and more
-- 🧠 **Human Mimicry** — Bezier mouse curves, realistic typing delays, natural scroll behavior
+- 🛡️ **Anti-Detection** — Blocks reCAPTCHA, hCaptcha, Cloudflare Turnstile, PerimeterX, DataDome, Imperva, Akamai, Kasada at the network level
+- 🤖 **74+ CLI Commands / 38 Connector Tools** — Navigate, click, fill forms, screenshot, scroll, tabs, DOM analysis, smart finder, workflows, network capture, page analysis, and more
+- 🧠 **Human Mimicry** — Bezier mouse curves, realistic typing delays, natural scroll behavior, typo simulation
 - 🔍 **Security Scanners** — XSS, SQL injection, sensitive data exposure detection
 - 🔍 **Smart Element Finder** — Find elements by visible text — no CSS selector needed
 - 🎯 **Multi-Step Workflows** — Chain actions with variables, retries, error handling, save/load templates
@@ -31,7 +31,9 @@ Connect any AI (Claude, GPT-4, Codex, OpenClaw, Qwen, local LLMs) and give them 
 - 🔄 **Session Save/Restore** — Save full browser state (cookies, localStorage, tabs) and restore later
 - 🎬 **Video Transcription** — Local Whisper integration (no cloud APIs)
 - 🔒 **Privacy First** — Sessions auto-wipe, AES-256 credential vault, zero telemetry
-- 🔌 **Connect Any Agent** — MCP (Claude/Codex), OpenAI, Claude API, OpenClaw, CLI — all 42 tools on every connector
+- 🔌 **Connect Any Agent** — MCP (Claude/Codex), OpenAI, Claude API, OpenClaw, CLI — all tools on every connector
+- 🍪 **Cookie Management** — Get/set cookies with full control (domain, path, secure, httpOnly, sameSite)
+- 📋 **Console Log Capture** — Capture and retrieve browser console output (log, warn, error, pageerror)
 
 ## Quick Start
 
@@ -76,7 +78,7 @@ curl -X POST http://localhost:8001/command \
 
 ## Connect Your AI Agent
 
-All connectors expose the **same 42 tools**. Pick your platform:
+All connectors expose the same tool set. Pick your platform:
 
 ### MCP (Claude Desktop / Codex)
 
@@ -115,7 +117,7 @@ result = await call_tool("browser_navigate", {"url": "https://github.com"})
 ```python
 from connectors.openclaw_connector import get_manifest, execute_tool
 
-manifest = get_manifest()  # 42 tools, register with OpenClaw
+manifest = get_manifest()  # Register with OpenClaw
 result = await execute_tool("browser_click", {"selector": "button[type=submit]"})
 ```
 
@@ -132,38 +134,156 @@ subprocess.run(["./connectors/agent-os-tool.sh", "click", "button.submit"])
 execSync("./connectors/agent-os-tool.sh screenshot")
 ```
 
-## All 42 Tools
+## All Tools
 
-| Category | Tools |
-|----------|-------|
-| **Navigation** | `navigate`, `back`, `forward`, `reload` |
-| **Interaction** | `click`, `type`, `press`, `hover`, `fill-form`, `wait`, `double-click`, `right-click`, `context-action` |
-| **Content** | `get-content`, `get-dom`, `get-links`, `get-images`, `screenshot` |
-| **Control** | `scroll`, `evaluate-js`, `tabs`, `status`, `viewport` |
-| **Drag & Drop** | `drag-drop`, `drag-offset` |
-| **Forms** | `fill-form`, `clear-input`, `checkbox`, `select`, `upload` |
-| **Cookies** | `get-cookies`, `set-cookie`, `console-logs` |
-| **Smart Finder** | `smart-find`, `smart-find-all`, `smart-click`, `smart-fill` |
-| **Workflows** | `workflow`, `workflow-template`, `workflow-json`, `workflow-save`, `workflow-list`, `workflow-status` |
-| **Network** | `network-start`, `network-stop`, `network-get`, `network-apis`, `network-detail`, `network-stats`, `network-export`, `network-clear` |
-| **Page Analysis** | `page-summary`, `page-tables`, `page-structured`, `page-emails`, `page-phones`, `page-accessibility`, `page-seo` |
-| **Security** | `scan-xss`, `scan-sqli`, `scan-sensitive` |
-| **Auth** | `save-credentials`, `auto-login` |
-| **Media** | `transcribe` |
-| **Proxy** | `set-proxy`, `get-proxy` |
-| **Mobile** | `emulate-device`, `list-devices` |
-| **Sessions** | `save-session`, `restore-session`, `list-sessions`, `delete-session` |
+### Navigation
+| Tool | Description |
+|------|-------------|
+| `navigate` | Navigate to a URL with human-like timing |
+| `back` | Go back in browser history |
+| `forward` | Go forward in browser history |
+| `reload` | Reload the current page |
+
+### Interaction
+| Tool | Description |
+|------|-------------|
+| `click` | Click an element (CSS selector) with Bezier mouse movement |
+| `double-click` | Double-click an element |
+| `right-click` | Right-click an element (opens context menu) |
+| `context-action` | Right-click + select context menu option by text |
+| `type` | Type text into focused element with human-like delays |
+| `press` | Press keyboard key (Enter, Tab, Escape, etc.) |
+| `hover` | Hover over an element |
+| `fill-form` | Fill multiple form fields with human-like typing |
+| `clear-input` | Clear an input field |
+| `checkbox` | Set checkbox to checked/unchecked |
+| `select` | Select a dropdown option |
+| `upload` | Upload a file to a file input |
+| `wait` | Wait for an element to appear |
+| `drag-drop` | Drag element and drop on another |
+| `drag-offset` | Drag element by pixel offset |
+
+### Smart Finder (No CSS Selectors Needed!)
+| Tool | Description |
+|------|-------------|
+| `smart-find` | Find element by visible text, label, or description |
+| `smart-find-all` | Find ALL matching elements, ranked by relevance |
+| `smart-click` | Click element by its visible text |
+| `smart-fill` | Find input by label/placeholder and fill it |
+
+### Content Extraction
+| Tool | Description |
+|------|-------------|
+| `get-content` | Get page HTML and text content |
+| `get-dom` | Get structured DOM snapshot |
+| `get-links` | Get all links on the page |
+| `get-images` | Get all images with src, alt, dimensions |
+| `get-text` | Get text content of a specific element |
+| `get-attr` | Get attribute value from an element |
+| `screenshot` | Take screenshot (base64 PNG, full-page option) |
+| `evaluate-js` | Execute JavaScript in page context |
+| `scroll` | Scroll page up/down with human-like behavior |
+| `viewport` | Change browser viewport size |
+
+### Browser Control
+| Tool | Description |
+|------|-------------|
+| `tabs` | Manage tabs: list, new, switch, close |
+| `console-logs` | Get captured browser console logs |
+| `get-cookies` | Get all cookies |
+| `set-cookie` | Set a cookie with full control |
+| `add-extension` | Load Chrome extension (headed mode) |
+
+### Page Analysis
+| Tool | Description |
+|------|-------------|
+| `page-summary` | Full page analysis: title, headings, content, forms, links, tech stack, readability |
+| `page-tables` | Extract all HTML tables as structured data |
+| `page-structured` | Extract JSON-LD and Microdata structured data |
+| `page-emails` | Find all email addresses on page |
+| `page-phones` | Find all phone numbers on page |
+| `page-accessibility` | Basic accessibility audit |
+| `page-seo` | SEO audit with score and issues |
+
+### Multi-Step Workflows
+| Tool | Description |
+|------|-------------|
+| `workflow` | Execute multi-step workflow with variables, retries, error handling |
+| `workflow-template` | Execute a saved or built-in workflow template |
+| `workflow-json` | Execute workflow from JSON string |
+| `workflow-save` | Save workflow as reusable template |
+| `workflow-list` | List all workflow templates |
+| `workflow-status` | Get status of a running workflow |
+
+**Built-in templates:** `google_search`, `login`, `screenshot_full`
+
+### Network Capture
+| Tool | Description |
+|------|-------------|
+| `network-start` | Start capturing requests (filter by URL, type, method) |
+| `network-stop` | Stop capturing and get summary |
+| `network-get` | Get captured requests with filters and pagination |
+| `network-apis` | Discover all API endpoints from captured traffic |
+| `network-detail` | Get full details of a specific request |
+| `network-stats` | Get capture statistics |
+| `network-export` | Export captured requests (JSON or HAR format) |
+| `network-clear` | Clear captured data |
+
+### Security Scanners
+| Tool | Description |
+|------|-------------|
+| `scan-xss` | Scan URL for Cross-Site Scripting vulnerabilities |
+| `scan-sqli` | Scan URL for SQL injection vulnerabilities |
+| `scan-sensitive` | Scan page for exposed sensitive data (API keys, tokens, IPs) |
+
+### Authentication
+| Tool | Description |
+|------|-------------|
+| `save-creds` | Save credentials with AES-256 encryption |
+| `auto-login` | Auto-login using saved credentials |
+
+### Media
+| Tool | Description |
+|------|-------------|
+| `transcribe` | Transcribe video/audio from URL using local Whisper |
+
+### Proxy
+| Tool | Description |
+|------|-------------|
+| `set-proxy` | Set proxy (HTTP, HTTPS, SOCKS5) |
+| `get-proxy` | Get current proxy configuration |
+
+### Mobile Emulation
+| Tool | Description |
+|------|-------------|
+| `emulate-device` | Emulate mobile/tablet/desktop device |
+| `list-devices` | List all available device presets |
+
+**Available devices:** `iphone_se`, `iphone_14`, `iphone_14_pro_max`, `ipad`, `ipad_pro`, `galaxy_s23`, `galaxy_tab_s9`, `pixel_8`, `desktop_1080`, `desktop_1440`, `desktop_4k`
+
+### Sessions
+| Tool | Description |
+|------|-------------|
+| `save-session` | Save full browser state (cookies, localStorage, sessionStorage, tabs) |
+| `restore-session` | Restore previously saved browser state |
+| `list-sessions` | List all saved sessions |
+| `delete-session` | Delete a saved session |
+
+### Forms
+| Tool | Description |
+|------|-------------|
+| `fill-job` | Auto-fill job application forms with profile data |
 
 ## How Anti-Detection Works
 
 Agent-OS doesn't solve CAPTCHAs — it **prevents them from loading**:
 
-1. **Network-level blocking** — Detection scripts (reCAPTCHA, hCaptcha, Cloudflare Turnstile, PerimeterX, DataDome) are intercepted and blocked before the browser executes them
-2. **DOM patching** — `navigator.webdriver`, plugin lists, hardware fingerprints are spoofed
-3. **Human mimicry** — Mouse movements use Bezier curves, typing has realistic random delays
+1. **Network-level blocking** — Detection scripts (reCAPTCHA, hCaptcha, Cloudflare Turnstile, PerimeterX, DataDome, Imperva, Akamai, Kasada) are intercepted and blocked before the browser executes them
+2. **DOM patching** — `navigator.webdriver`, plugin lists, hardware fingerprints, WebGL, canvas, audio, and WebRTC are all spoofed
+3. **Human mimicry** — Mouse movements use Bezier curves, typing has realistic random delays, typo simulation, natural scroll behavior
 4. **Script injection** — Anti-detection JavaScript runs before any page scripts
 
-**What's blocked:** Google reCAPTCHA v2/v3, hCaptcha, Cloudflare Turnstile, PerimeterX, DataDome, Imperva, Akamai Bot Manager, Kasada
+**What's blocked:** Google reCAPTCHA v2/v3, hCaptcha, Cloudflare Turnstile, PerimeterX, DataDome, Imperva, Akamai Bot Manager, Kasada, Shape Security
 
 **Honest limitations:** Advanced TLS fingerprinting can still detect Playwright. Some sophisticated bot protection (BotD) may still work. Effectiveness varies by site — test on your specific targets.
 
@@ -172,20 +292,22 @@ Agent-OS doesn't solve CAPTCHAs — it **prevents them from loading**:
 ```
 Agent-OS/
 ├── main.py                    # Entry point & CLI
-├── Dockerfile                 # Docker build
+├── Dockerfile                 # Docker build (multi-stage, ~350MB)
 ├── docker-compose.yml         # Docker Compose config
 ├── setup.sh                   # One-click installer
+├── requirements.txt           # Python dependencies
+├── qwen_bridge.py             # Qwen model bridge
 ├── src/
 │   ├── core/
-│   │   ├── browser.py         # Playwright browser with anti-detection
+│   │   ├── browser.py         # Playwright browser with stealth patches
 │   │   ├── config.py          # Configuration management
 │   │   └── session.py         # Session lifecycle & auto-wipe
 │   ├── agents/
-│   │   └── server.py          # WebSocket + REST API server
+│   │   └── server.py          # WebSocket + REST API server (74 commands)
 │   ├── security/
-│   │   ├── captcha_bypass.py  # Detection script blocking
+│   │   ├── captcha_bypass.py  # Detection script blocking engine
 │   │   ├── human_mimicry.py   # Bezier mouse, typing simulation
-│   │   └── auth_handler.py    # Encrypted credential vault
+│   │   └── auth_handler.py    # AES-256 encrypted credential vault
 │   └── tools/
 │       ├── scanner.py         # XSS, SQLi, sensitive data scanners
 │       ├── transcriber.py     # Video/audio transcription (Whisper)
@@ -195,10 +317,10 @@ Agent-OS/
 │       ├── network_capture.py # HTTP request capture & analysis
 │       └── page_analyzer.py   # Page summary, SEO, accessibility
 ├── connectors/
-│   ├── mcp_server.py          # MCP (42 tools)
-│   ├── openai_connector.py    # OpenAI + Claude (42 tools)
-│   ├── openclaw_connector.py  # OpenClaw (42 tools)
-│   └── agent-os-tool.sh       # CLI (42+ commands)
+│   ├── mcp_server.py          # MCP connector (38 tools)
+│   ├── openai_connector.py    # OpenAI + Claude connector (38 tools)
+│   ├── openclaw_connector.py  # OpenClaw connector (38 tools)
+│   └── agent-os-tool.sh       # CLI connector (74 commands)
 ├── tests/
 │   ├── test_all.py            # Core tests
 │   └── test_connectors.py     # Connector consistency tests
@@ -228,6 +350,67 @@ session:
 security:
   captcha_bypass: true
   human_mimicry: true
+```
+
+## CLI Arguments
+
+```bash
+python3 main.py [options]
+
+Options:
+  --headed              Show browser window
+  --agent-token TOKEN   Set agent authentication token
+  --port PORT           WebSocket port (HTTP = port+1)
+  --max-ram MB          Cap RAM usage in MB
+  --config PATH         Config file path
+  --proxy URL           Proxy URL (http://user:pass@host:port)
+  --device PRESET       Device preset (iphone_14, galaxy_s23, etc.)
+```
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/command` | POST | Execute any tool command |
+| `/status` | GET | Server status, uptime, sessions |
+| `/commands` | GET | List all available commands with params |
+| `/debug` | GET | Debug info (sessions, tabs, blocked requests) |
+| `/screenshot` | GET | Quick screenshot (base64 text) |
+
+## HTTP API Example
+
+```bash
+# Check status
+curl http://localhost:8001/status
+
+# Navigate
+curl -X POST http://localhost:8001/command \
+  -H "Content-Type: application/json" \
+  -d '{"token":"my-agent-123","command":"navigate","url":"https://example.com"}'
+
+# Smart click (no selector needed)
+curl -X POST http://localhost:8001/command \
+  -H "Content-Type: application/json" \
+  -d '{"token":"my-agent-123","command":"smart-click","text":"Sign In"}'
+
+# Execute workflow
+curl -X POST http://localhost:8001/command \
+  -H "Content-Type: application/json" \
+  -d '{"token":"my-agent-123","command":"workflow","steps":[{"command":"navigate","url":"https://google.com"},{"command":"fill-form","fields":{"input[name=q]":"hello"}},{"command":"press","key":"Enter"}]}'
+```
+
+## WebSocket API
+
+```javascript
+const ws = new WebSocket('ws://localhost:8000');
+ws.onopen = () => {
+  ws.send(JSON.stringify({
+    token: 'my-agent-123',
+    command: 'navigate',
+    url: 'https://example.com'
+  }));
+};
+ws.onmessage = (e) => console.log(JSON.parse(e.data));
 ```
 
 ## Requirements
