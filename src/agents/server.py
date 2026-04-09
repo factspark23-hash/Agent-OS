@@ -32,6 +32,10 @@ class AgentServer:
         self._http_runner = None
         self._start_time = time.time()
 
+        # Smart Wait + Auto Heal engines (lazy init)
+        self._smart_wait = None
+        self._auto_heal = None
+
     async def start(self):
         """Start both WebSocket and HTTP servers."""
         ws_host = self.config.get("server.host", "127.0.0.1")
@@ -214,6 +218,27 @@ class AgentServer:
             "restore-session": {"params": {"name": "string (optional)"}, "description": "Restore previously saved browser state"},
             "list-sessions": {"params": {}, "description": "List all saved sessions"},
             "delete-session": {"params": {"name": "string"}, "description": "Delete a saved session"},
+
+            # Smart Wait Engine
+            "smart-wait": {"params": {"selector": "string (optional)", "idle_ms": "int (default 500)", "dom_stable_ms": "int (default 300)", "timeout_ms": "int (default 30000)", "page_id": "string (optional)"}, "description": "Auto smart wait — combines page_ready + network_idle + dom_stable + optional element_ready"},
+            "smart-wait-network": {"params": {"idle_ms": "int (default 500)", "timeout_ms": "int (default 30000)", "page_id": "string (optional)"}, "description": "Wait for network to go idle (no in-flight requests for idle_ms)"},
+            "smart-wait-dom": {"params": {"stability_ms": "int (default 300)", "timeout_ms": "int (default 15000)", "page_id": "string (optional)"}, "description": "Wait for DOM mutations to stop"},
+            "smart-wait-element": {"params": {"selector": "string", "timeout_ms": "int (default 15000)", "require_interactable": "bool (default true)", "wait_for_animation": "bool (default true)", "page_id": "string (optional)"}, "description": "Wait for element to be visible, interactable, and not animating"},
+            "smart-wait-page": {"params": {"timeout_ms": "int (default 30000)", "require_images": "bool (default true)", "require_fonts": "bool (default true)", "page_id": "string (optional)"}, "description": "Wait for page fully loaded (docs, images, fonts, frameworks)"},
+            "smart-wait-js": {"params": {"expression": "string", "timeout_ms": "int (default 10000)", "poll_ms": "int (optional)", "page_id": "string (optional)"}, "description": "Wait for JavaScript expression to become truthy"},
+            "smart-wait-compose": {"params": {"conditions": "list[dict]", "mode": "all|any (default all)", "timeout_ms": "int (default 30000)", "page_id": "string (optional)"}, "description": "Wait for multiple conditions with AND/OR logic"},
+
+            # Auto-Heal Engine
+            "heal-click": {"params": {"selector": "string", "timeout_ms": "int (optional)", "page_id": "string (optional)"}, "description": "Click with auto-heal — recovers if selector breaks"},
+            "heal-fill": {"params": {"selector": "string", "value": "string", "timeout_ms": "int (optional)", "page_id": "string (optional)"}, "description": "Fill form field with auto-heal"},
+            "heal-wait": {"params": {"selector": "string", "timeout_ms": "int (optional)", "page_id": "string (optional)"}, "description": "Wait for element with auto-heal"},
+            "heal-hover": {"params": {"selector": "string", "timeout_ms": "int (optional)", "page_id": "string (optional)"}, "description": "Hover with auto-heal"},
+            "heal-double-click": {"params": {"selector": "string", "timeout_ms": "int (optional)", "page_id": "string (optional)"}, "description": "Double-click with auto-heal"},
+            "heal-selector": {"params": {"selector": "string", "page_id": "string (optional)"}, "description": "Manually heal a broken selector"},
+            "heal-fingerprint": {"params": {"selector": "string", "page_id": "string (optional)"}, "description": "Capture element fingerprint for future healing"},
+            "heal-fingerprint-page": {"params": {"page_id": "string (optional)"}, "description": "Auto-fingerprint all interactive elements on the page"},
+            "heal-stats": {"params": {}, "description": "Get auto-heal statistics and healing history"},
+            "heal-clear": {"params": {}, "description": "Clear all healing caches"},
         }
         return web.json_response(commands)
 
@@ -270,6 +295,20 @@ class AgentServer:
             return web.json_response(result)
         except Exception as e:
             return web.json_response({"status": "error", "error": str(e)}, status=400)
+
+    # ─── Lazy-Init Engines ──────────────────────────────────
+
+    def _get_smart_wait(self):
+        if self._smart_wait is None:
+            from src.tools.smart_wait import SmartWait
+            self._smart_wait = SmartWait(self.browser)
+        return self._smart_wait
+
+    def _get_auto_heal(self):
+        if self._auto_heal is None:
+            from src.tools.auto_heal import AutoHeal
+            self._auto_heal = AutoHeal(self.browser, smart_wait=self._get_smart_wait())
+        return self._auto_heal
 
     async def _process_command(self, data: Dict) -> Dict[str, Any]:
         """Process any agent command."""
@@ -387,6 +426,27 @@ class AgentServer:
             "restore-session": self._cmd_restore_session,
             "list-sessions": self._cmd_list_sessions,
             "delete-session": self._cmd_delete_session,
+
+            # Smart Wait
+            "smart-wait": self._cmd_smart_wait,
+            "smart-wait-network": self._cmd_smart_wait_network,
+            "smart-wait-dom": self._cmd_smart_wait_dom,
+            "smart-wait-element": self._cmd_smart_wait_element,
+            "smart-wait-page": self._cmd_smart_wait_page,
+            "smart-wait-js": self._cmd_smart_wait_js,
+            "smart-wait-compose": self._cmd_smart_wait_compose,
+
+            # Auto Heal
+            "heal-click": self._cmd_heal_click,
+            "heal-fill": self._cmd_heal_fill,
+            "heal-wait": self._cmd_heal_wait,
+            "heal-hover": self._cmd_heal_hover,
+            "heal-double-click": self._cmd_heal_double_click,
+            "heal-selector": self._cmd_heal_selector,
+            "heal-fingerprint": self._cmd_heal_fingerprint,
+            "heal-fingerprint-page": self._cmd_heal_fingerprint_page,
+            "heal-stats": self._cmd_heal_stats,
+            "heal-clear": self._cmd_heal_clear,
         }
 
         handler = handlers.get(command)
@@ -906,3 +966,187 @@ class AgentServer:
         if not name:
             return {"status": "error", "error": "Missing 'name'"}
         return await self.browser.delete_session(name)
+
+    # ─── Smart Wait Commands ────────────────────────────────
+
+    async def _cmd_smart_wait(self, data: Dict, session) -> Dict:
+        """Auto smart wait — combines page_ready + network_idle + dom_stable + optional element_ready."""
+        wait = self._get_smart_wait()
+        return await wait.auto(
+            selector=data.get("selector"),
+            idle_ms=data.get("idle_ms", 500),
+            dom_stable_ms=data.get("dom_stable_ms", 300),
+            timeout_ms=data.get("timeout_ms", 30000),
+            require_interactable=data.get("require_interactable", True),
+            page_id=data.get("page_id", "main"),
+        )
+
+    async def _cmd_smart_wait_network(self, data: Dict, session) -> Dict:
+        """Wait for network to go idle (no in-flight requests)."""
+        wait = self._get_smart_wait()
+        return await wait.network_idle(
+            idle_ms=data.get("idle_ms", 500),
+            timeout_ms=data.get("timeout_ms", 30000),
+            page_id=data.get("page_id", "main"),
+        )
+
+    async def _cmd_smart_wait_dom(self, data: Dict, session) -> Dict:
+        """Wait for DOM mutations to stop."""
+        wait = self._get_smart_wait()
+        return await wait.dom_stable(
+            stability_ms=data.get("stability_ms", 300),
+            timeout_ms=data.get("timeout_ms", 15000),
+            page_id=data.get("page_id", "main"),
+        )
+
+    async def _cmd_smart_wait_element(self, data: Dict, session) -> Dict:
+        """Wait for element to be visible, interactable, and not animating."""
+        selector = data.get("selector")
+        if not selector:
+            return {"status": "error", "error": "Missing 'selector'"}
+        wait = self._get_smart_wait()
+        return await wait.element_ready(
+            selector=selector,
+            timeout_ms=data.get("timeout_ms", 15000),
+            require_interactable=data.get("require_interactable", True),
+            wait_for_animation=data.get("wait_for_animation", True),
+            page_id=data.get("page_id", "main"),
+        )
+
+    async def _cmd_smart_wait_page(self, data: Dict, session) -> Dict:
+        """Wait for page to be fully loaded (docs, images, fonts, frameworks)."""
+        wait = self._get_smart_wait()
+        return await wait.page_ready(
+            timeout_ms=data.get("timeout_ms", 30000),
+            require_images=data.get("require_images", True),
+            require_fonts=data.get("require_fonts", True),
+            page_id=data.get("page_id", "main"),
+        )
+
+    async def _cmd_smart_wait_js(self, data: Dict, session) -> Dict:
+        """Wait for JavaScript expression to become truthy."""
+        expression = data.get("expression")
+        if not expression:
+            return {"status": "error", "error": "Missing 'expression'"}
+        wait = self._get_smart_wait()
+        return await wait.js_condition(
+            expression=expression,
+            timeout_ms=data.get("timeout_ms", 10000),
+            poll_ms=data.get("poll_ms"),
+            page_id=data.get("page_id", "main"),
+        )
+
+    async def _cmd_smart_wait_compose(self, data: Dict, session) -> Dict:
+        """Wait for multiple conditions (AND/OR logic)."""
+        conditions = data.get("conditions")
+        if not conditions:
+            return {"status": "error", "error": "Missing 'conditions' list"}
+        wait = self._get_smart_wait()
+        return await wait.compose(
+            conditions=conditions,
+            mode=data.get("mode", "all"),
+            timeout_ms=data.get("timeout_ms", 30000),
+            page_id=data.get("page_id", "main"),
+        )
+
+    # ─── Auto Heal Commands ─────────────────────────────────
+
+    async def _cmd_heal_click(self, data: Dict, session) -> Dict:
+        """Click with auto-heal — recovers if selector breaks."""
+        selector = data.get("selector")
+        if not selector:
+            return {"status": "error", "error": "Missing 'selector'"}
+        heal = self._get_auto_heal()
+        return await heal.click(
+            selector=selector,
+            page_id=data.get("page_id", "main"),
+            timeout_ms=data.get("timeout_ms", 5000),
+        )
+
+    async def _cmd_heal_fill(self, data: Dict, session) -> Dict:
+        """Fill form field with auto-heal."""
+        selector = data.get("selector")
+        value = data.get("value")
+        if not selector or value is None:
+            return {"status": "error", "error": "Missing 'selector' or 'value'"}
+        heal = self._get_auto_heal()
+        return await heal.fill(
+            selector=selector,
+            value=value,
+            page_id=data.get("page_id", "main"),
+            timeout_ms=data.get("timeout_ms", 5000),
+        )
+
+    async def _cmd_heal_wait(self, data: Dict, session) -> Dict:
+        """Wait for element with auto-heal."""
+        selector = data.get("selector")
+        if not selector:
+            return {"status": "error", "error": "Missing 'selector'"}
+        heal = self._get_auto_heal()
+        return await heal.wait(
+            selector=selector,
+            page_id=data.get("page_id", "main"),
+            timeout_ms=data.get("timeout_ms", 10000),
+        )
+
+    async def _cmd_heal_hover(self, data: Dict, session) -> Dict:
+        """Hover with auto-heal."""
+        selector = data.get("selector")
+        if not selector:
+            return {"status": "error", "error": "Missing 'selector'"}
+        heal = self._get_auto_heal()
+        return await heal.hover(
+            selector=selector,
+            page_id=data.get("page_id", "main"),
+            timeout_ms=data.get("timeout_ms", 5000),
+        )
+
+    async def _cmd_heal_double_click(self, data: Dict, session) -> Dict:
+        """Double-click with auto-heal."""
+        selector = data.get("selector")
+        if not selector:
+            return {"status": "error", "error": "Missing 'selector'"}
+        heal = self._get_auto_heal()
+        return await heal.double_click(
+            selector=selector,
+            page_id=data.get("page_id", "main"),
+            timeout_ms=data.get("timeout_ms", 5000),
+        )
+
+    async def _cmd_heal_selector(self, data: Dict, session) -> Dict:
+        """Manually heal a broken selector."""
+        selector = data.get("selector")
+        if not selector:
+            return {"status": "error", "error": "Missing 'selector'"}
+        heal = self._get_auto_heal()
+        return await heal.heal_selector(
+            broken_selector=selector,
+            page_id=data.get("page_id", "main"),
+        )
+
+    async def _cmd_heal_fingerprint(self, data: Dict, session) -> Dict:
+        """Capture fingerprint of an element for future healing."""
+        selector = data.get("selector")
+        if not selector:
+            return {"status": "error", "error": "Missing 'selector'"}
+        heal = self._get_auto_heal()
+        return await heal.fingerprint(
+            selector=selector,
+            page_id=data.get("page_id", "main"),
+        )
+
+    async def _cmd_heal_fingerprint_page(self, data: Dict, session) -> Dict:
+        """Auto-fingerprint all interactive elements on the page."""
+        heal = self._get_auto_heal()
+        return await heal.fingerprint_page(page_id=data.get("page_id", "main"))
+
+    async def _cmd_heal_stats(self, data: Dict, session) -> Dict:
+        """Get auto-heal statistics and history."""
+        heal = self._get_auto_heal()
+        return heal.get_stats()
+
+    async def _cmd_heal_clear(self, data: Dict, session) -> Dict:
+        """Clear all healing caches."""
+        heal = self._get_auto_heal()
+        heal.clear_cache()
+        return {"status": "success", "message": "Healing caches cleared"}
