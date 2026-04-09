@@ -117,7 +117,7 @@ class AgentOS:
         logger.info(f"  HTTP API:  http://127.0.0.1:{http_port}")
         if self.debug_server:
             logger.info(f"  Debug UI:  http://127.0.0.1:{debug_port}")
-        logger.info(f"  Agent Token: {default_token}")
+        logger.info(f"  Agent Token: {default_token[:8]}...{default_token[-4:]}")
         logger.info("")
         logger.info("  Quick test:")
         logger.info(f'  curl -X POST http://127.0.0.1:{http_port}/command \\')

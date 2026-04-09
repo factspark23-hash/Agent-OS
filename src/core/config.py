@@ -6,6 +6,7 @@ import os
 import yaml
 import secrets
 import hashlib
+import copy
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -15,7 +16,8 @@ DEFAULT_CONFIG = {
         "ws_port": 8000,
         "http_port": 8001,
         "debug_port": 8002,
-        "max_connections": 10
+        "max_connections": 10,
+        "cors_origin": "http://127.0.0.1:8002",
     },
     "browser": {
         "headless": True,
@@ -73,12 +75,13 @@ class Config:
                 loaded = yaml.safe_load(f) or {}
             # Merge with defaults to ensure all keys exist
             return self._deep_merge(DEFAULT_CONFIG, loaded)
-        self.save(DEFAULT_CONFIG)
-        return DEFAULT_CONFIG
+        # Return defaults in memory — don't auto-save to disk
+        # (call save() explicitly if persistence is needed)
+        return copy.deepcopy(DEFAULT_CONFIG)
 
     def _deep_merge(self, base: Dict, override: Dict) -> Dict:
         """Deep merge override into base dict. Override values win."""
-        result = base.copy()
+        result = copy.deepcopy(base)
         for key, value in override.items():
             if key in result and isinstance(result[key], dict) and isinstance(value, dict):
                 result[key] = self._deep_merge(result[key], value)

@@ -85,7 +85,6 @@ class AgentBrowser:
             "--disable-extensions",
             "--disable-component-extensions-with-background-pages",
             "--window-size=1920,1080",
-            "--disable-web-security",
             "--disable-features=TranslateUI",
             "--disable-ipc-flooding-protection",
         ]

@@ -22,29 +22,34 @@ from src.debug.server import DebugServer
 # ─── Config Tests ─────────────────────────────────────────────
 
 class TestConfig:
+    def _make_config(self, name="config"):
+        import tempfile
+        path = tempfile.mktemp(suffix=f"-{name}.yaml")
+        return Config(path)
+
     def test_default_config(self):
         """Test default config has all required keys."""
-        config = Config("/tmp/test-agent-os-config.yaml")
+        config = self._make_config("defaults")
         assert config.get("server.ws_port") == 8000
         assert config.get("browser.headless") is True
         assert config.get("session.timeout_minutes") == 15
 
     def test_set_and_get(self):
         """Test setting and getting config values."""
-        config = Config("/tmp/test-agent-os-config2.yaml")
+        config = self._make_config("setget")
         config.set("browser.max_ram_mb", 450)
         assert config.get("browser.max_ram_mb") == 450
 
     def test_generate_token(self):
         """Test token generation."""
-        config = Config("/tmp/test-agent-os-config3.yaml")
+        config = self._make_config("token")
         token = config.generate_agent_token("claude")
         assert token.startswith("claude-")
         assert len(token) > 20  # Now uses 16 hex bytes = 32 chars suffix
 
     def test_deep_merge(self):
         """Test config deep merge preserves defaults."""
-        config = Config("/tmp/test-merge-config.yaml")
+        config = self._make_config("merge")
         # Override a single value
         config.set("browser.max_ram_mb", 999)
         assert config.get("browser.max_ram_mb") == 999
@@ -56,9 +61,14 @@ class TestConfig:
 # ─── Session Tests ─────────────────────────────────────────────
 
 class TestSession:
+    def _make_config(self, name="session"):
+        import tempfile
+        path = tempfile.mktemp(suffix=f"-{name}.yaml")
+        return Config(path)
+
     def test_create_session(self):
         """Test session creation."""
-        config = Config("/tmp/test-session-config.yaml")
+        config = self._make_config("create")
         sm = SessionManager(config)
         session = sm.create_session("test-token-123")
         assert session.session_id is not None
@@ -75,7 +85,7 @@ class TestSession:
 
     def test_get_by_token(self):
         """Test finding session by token."""
-        config = Config("/tmp/test-session-config2.yaml")
+        config = self._make_config("bytoken")
         sm = SessionManager(config)
         sm.create_session("my-agent-token")
         found = sm.get_session_by_token("my-agent-token")
@@ -84,7 +94,7 @@ class TestSession:
 
     def test_list_active(self):
         """Test listing active sessions."""
-        config = Config("/tmp/test-session-config3.yaml")
+        config = self._make_config("listactive")
         sm = SessionManager(config)
         sm.create_session("token-1")
         sm.create_session("token-2")
@@ -197,8 +207,9 @@ class TestIntegration:
     async def test_server_command_list(self):
         """Test that server returns available commands."""
         import aiohttp
+        import tempfile
 
-        config = Config("/tmp/test-integration-config.yaml")
+        config = Config(tempfile.mktemp(suffix="-integration.yaml"))
         # We can't start a full server in tests, but we can verify command routing
         assert config.get("server.ws_port") == 8000
 
@@ -213,14 +224,19 @@ class TestIntegration:
 # ─── Debug Server Tests ───────────────────────────────────────
 
 class TestDebugServer:
+    def _make_config(self, name="debug"):
+        import tempfile
+        path = tempfile.mktemp(suffix=f"-{name}.yaml")
+        return Config(path)
+
     def test_config_has_debug_port(self):
         """Test that default config includes debug port."""
-        config = Config("/tmp/test-debug-config.yaml")
+        config = self._make_config("port")
         assert config.get("server.debug_port") == 8002
 
     def test_command_history(self):
         """Test command recording."""
-        config = Config("/tmp/test-debug-config2.yaml")
+        config = self._make_config("cmdhist")
         # Mock dependencies
         debug = DebugServer(config, None, None, None)
         debug.record_command("navigate", {"url": "https://example.com"}, {"status": "success"})
@@ -230,7 +246,7 @@ class TestDebugServer:
 
     def test_console_log_recording(self):
         """Test console log recording."""
-        config = Config("/tmp/test-debug-config3.yaml")
+        config = self._make_config("consolelog")
         debug = DebugServer(config, None, None, None)
         debug.record_console_log("error", "Something went wrong", "main")
         assert len(debug._console_logs) == 1
@@ -238,7 +254,7 @@ class TestDebugServer:
 
     def test_max_history_limit(self):
         """Test that history respects max limit."""
-        config = Config("/tmp/test-debug-config4.yaml")
+        config = self._make_config("maxhist")
         debug = DebugServer(config, None, None, None)
         for i in range(250):
             debug.record_command(f"cmd-{i}", {}, {"status": "success"})
@@ -291,12 +307,17 @@ class TestStealthModule:
 # ─── Server Security Tests ────────────────────────────────────
 
 class TestServerSecurity:
+    def _make_config(self, name="security"):
+        import tempfile
+        path = tempfile.mktemp(suffix=f"-{name}.yaml")
+        return Config(path)
+
     def test_token_validation_with_configured_token(self):
         """Test token validation rejects wrong tokens."""
         from src.core.config import Config
         from src.agents.server import AgentServer
 
-        config = Config("/tmp/test-security-config.yaml")
+        config = self._make_config("token")
         config.set("server.agent_token", "my-secret-token")
 
         # Mock browser and session_manager
@@ -312,7 +333,7 @@ class TestServerSecurity:
         from src.core.config import Config
         from src.agents.server import AgentServer
 
-        config = Config("/tmp/test-security-config2.yaml")
+        config = self._make_config("allowed")
         config.set("server.allowed_tokens", ["token-a", "token-b", "token-c"])
 
         server = AgentServer(config, None, None)
@@ -322,12 +343,14 @@ class TestServerSecurity:
         assert server._validate_token("token-c") is True
         assert server._validate_token("token-d") is False
 
-    def test_token_validation_dev_mode(self):
-        """Test token validation in dev mode (no token configured)."""
+    def test_token_validation_rejects_when_no_token_configured(self):
+        """Test token validation rejects all tokens when none configured (production safety)."""
         import os
+        import tempfile
         from src.core.config import Config
         from src.agents.server import AgentServer
-        cfg_path = "/tmp/test-security-config3-fresh.yaml"
+        # Use unique temp path to avoid bleed from other tests
+        cfg_path = tempfile.mktemp(suffix=".yaml")
         if os.path.exists(cfg_path):
             os.remove(cfg_path)
         config = Config(cfg_path)
@@ -337,16 +360,19 @@ class TestServerSecurity:
 
         server = AgentServer(config, None, None)
 
-        # Dev mode: any non-empty token works
-        assert server._validate_token("anything") is True
+        # Production safety: reject all when no token configured
+        assert server._validate_token("anything") is False
         assert server._validate_token("") is False
+        # Cleanup (file may not exist since Config doesn't auto-save)
+        if os.path.exists(cfg_path):
+            os.remove(cfg_path)
 
     def test_rate_limiting(self):
         """Test rate limiter blocks excessive requests."""
         from src.core.config import Config
         from src.agents.server import AgentServer
 
-        config = Config("/tmp/test-security-config4.yaml")
+        config = self._make_config("ratelimit")
         config.set("server.rate_limit_max", 3)
         config.set("server.rate_limit_window", 60)
 

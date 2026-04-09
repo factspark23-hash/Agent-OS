@@ -1,3 +1,4 @@
+# Python
 __pycache__/
 *.pyc
 *.pyo
@@ -10,11 +11,8 @@ build/
 venv/
 .venv/
 
-# Agent-OS runtime
+# Agent-OS runtime data
 .agent-os/
-~/.agent-os/
-
-# Security files
 *.enc
 .vault_key
 
@@ -26,4 +24,7 @@ venv/
 .env
 .env.*
 !.env.example
-pycache
+
+# OS
+.DS_Store
+Thumbs.db

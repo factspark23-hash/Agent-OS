@@ -82,7 +82,7 @@ class AgentServer:
         """Validate agent token against configured token(s).
 
         Supports multiple valid tokens via config 'server.allowed_tokens' list,
-        or falls back to the single agent_token. Empty config = accept all (dev mode).
+        or falls back to the single agent_token. Requires a token to be configured.
         """
         if not token:
             return False
@@ -97,8 +97,8 @@ class AgentServer:
         if configured:
             return token == configured
 
-        # No token configured = dev mode, accept anything (with warning)
-        return True
+        # No token configured = reject (production safety)
+        return False
 
     def _check_rate_limit(self, identifier: str) -> bool:
         """Check if identifier (IP or token) is within rate limits. Returns True if allowed."""

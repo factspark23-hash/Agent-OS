@@ -6,7 +6,6 @@ WORKDIR /app
 
 # Install system deps for Playwright Chromium
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first (cache layer)
@@ -38,7 +37,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcairo2 \
     libasound2 \
     fonts-liberation \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
@@ -73,9 +71,9 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/home/agentos/.cache/ms-playwright
 # 8002 = Visual Debug UI (browser dashboard)
 EXPOSE 8000 8001 8002
 
-# Health check
+# Health check (uses Python — no curl needed)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8001/status || exit 1
+    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8001/status')" || exit 1
 
 # Default: run headless with auto-generated token
 ENTRYPOINT ["python3", "main.py"]
