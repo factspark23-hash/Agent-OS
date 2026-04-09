@@ -40,6 +40,7 @@ class AgentServer:
         self._replay = None
         self._analyzer = None
         self._agent_hub = None
+        self._proxy_manager = None
 
     async def start(self):
         """Start both WebSocket and HTTP servers."""
@@ -303,6 +304,23 @@ class AgentServer:
             "hub-memory-list": {"params": {"prefix": "string (optional)", "agent_id": "string (optional)"}, "description": "List shared memory keys"},
             "hub-handoff": {"params": {"from_agent_id": "string", "to_agent_id": "string", "resource": "string (default page:main)", "context": "dict (optional)"}, "description": "Hand off session control between agents (transfers locks)"},
             "hub-audit": {"params": {"agent_id": "string (optional)", "action": "string (optional)", "since_seconds": "float (optional)", "limit": "int (default 100)"}, "description": "Get full audit trail with filters"},
+
+            # Proxy Rotation Engine
+            "proxy-add": {"params": {"url": "string (http://user:pass@host:port)", "country": "string (optional, ISO code)", "region": "string (optional)", "tags": "list[string] (optional)", "weight": "float (default 1.0)", "max_requests_per_minute": "int (0=unlimited)"}, "description": "Add a proxy to the pool"},
+            "proxy-remove": {"params": {"proxy_id": "string"}, "description": "Remove a proxy from the pool"},
+            "proxy-load-file": {"params": {"filepath": "string", "proxy_type": "string (default http)"}, "description": "Load proxies from file (JSON, CSV, or plain text)"},
+            "proxy-load-api": {"params": {"api_url": "string", "api_key": "string (optional)"}, "description": "Load proxies from an API endpoint"},
+            "proxy-get": {"params": {"domain": "string (optional, for sticky)", "session_id": "string (optional, for affinity)", "country": "string (optional, geo-target)", "tags": "list[string] (optional)", "with_failover": "bool (default true)"}, "description": "Get best available proxy based on rotation strategy"},
+            "proxy-record": {"params": {"proxy_id": "string", "success": "bool", "latency_ms": "float (optional)", "status_code": "int (optional)", "error": "string (optional)"}, "description": "Record result of proxy usage (updates health stats)"},
+            "proxy-check": {"params": {"proxy_id": "string"}, "description": "Run health check on a specific proxy"},
+            "proxy-check-all": {"params": {}, "description": "Run health check on all proxies (parallel)"},
+            "proxy-list": {"params": {"status": "string (optional)", "country": "string (optional)"}, "description": "List all proxies with stats"},
+            "proxy-enable": {"params": {"proxy_id": "string"}, "description": "Re-enable a dead/disabled proxy"},
+            "proxy-disable": {"params": {"proxy_id": "string"}, "description": "Disable a proxy"},
+            "proxy-strategy": {"params": {"strategy": "round_robin|random|weighted|least_used|sticky|per_domain|fastest|geo"}, "description": "Set rotation strategy"},
+            "proxy-stats": {"params": {}, "description": "Get comprehensive proxy statistics"},
+            "proxy-save": {"params": {"filename": "string (default proxies.json)"}, "description": "Save proxy pool to disk"},
+            "proxy-load": {"params": {"filename": "string (default proxies.json)"}, "description": "Load proxy pool from disk"},
         }
         return web.json_response(commands)
 
@@ -403,6 +421,12 @@ class AgentServer:
             from src.tools.multi_agent import AgentHub
             self._agent_hub = AgentHub(self.browser, self.session_manager)
         return self._agent_hub
+
+    def _get_proxy_manager(self):
+        if self._proxy_manager is None:
+            from src.tools.proxy_rotation import ProxyManager
+            self._proxy_manager = ProxyManager()
+        return self._proxy_manager
 
     async def _process_command(self, data: Dict) -> Dict[str, Any]:
         """Process any agent command."""
@@ -600,6 +624,23 @@ class AgentServer:
             "hub-memory-list": self._cmd_hub_memory_list,
             "hub-handoff": self._cmd_hub_handoff,
             "hub-audit": self._cmd_hub_audit,
+
+            # Proxy Rotation
+            "proxy-add": self._cmd_proxy_add,
+            "proxy-remove": self._cmd_proxy_remove,
+            "proxy-load-file": self._cmd_proxy_load_file,
+            "proxy-load-api": self._cmd_proxy_load_api,
+            "proxy-get": self._cmd_proxy_get,
+            "proxy-record": self._cmd_proxy_record,
+            "proxy-check": self._cmd_proxy_check,
+            "proxy-check-all": self._cmd_proxy_check_all,
+            "proxy-list": self._cmd_proxy_list,
+            "proxy-enable": self._cmd_proxy_enable,
+            "proxy-disable": self._cmd_proxy_disable,
+            "proxy-strategy": self._cmd_proxy_strategy,
+            "proxy-stats": self._cmd_proxy_stats,
+            "proxy-save": self._cmd_proxy_save,
+            "proxy-load": self._cmd_proxy_load,
         }
 
         handler = handlers.get(command)
@@ -1796,3 +1837,126 @@ class AgentServer:
             since_seconds=data.get("since_seconds"),
             limit=data.get("limit", 100),
         )
+
+    # ─── Proxy Rotation Commands ────────────────────────────
+
+    async def _cmd_proxy_add(self, data: Dict, session) -> Dict:
+        """Add a proxy to the pool."""
+        url = data.get("url")
+        if not url:
+            return {"status": "error", "error": "Missing 'url'"}
+        pm = self._get_proxy_manager()
+        return pm.add_proxy(
+            url=url,
+            country=data.get("country", ""),
+            region=data.get("region", ""),
+            tags=data.get("tags", []),
+            weight=data.get("weight", 1.0),
+            max_requests_per_minute=data.get("max_requests_per_minute", 0),
+        )
+
+    async def _cmd_proxy_remove(self, data: Dict, session) -> Dict:
+        """Remove a proxy."""
+        proxy_id = data.get("proxy_id")
+        if not proxy_id:
+            return {"status": "error", "error": "Missing 'proxy_id'"}
+        pm = self._get_proxy_manager()
+        return pm.remove_proxy(proxy_id)
+
+    async def _cmd_proxy_load_file(self, data: Dict, session) -> Dict:
+        """Load proxies from file."""
+        filepath = data.get("filepath")
+        if not filepath:
+            return {"status": "error", "error": "Missing 'filepath'"}
+        pm = self._get_proxy_manager()
+        return pm.load_proxies(filepath, proxy_type=data.get("proxy_type", "http"))
+
+    async def _cmd_proxy_load_api(self, data: Dict, session) -> Dict:
+        """Load proxies from API endpoint."""
+        api_url = data.get("api_url")
+        if not api_url:
+            return {"status": "error", "error": "Missing 'api_url'"}
+        pm = self._get_proxy_manager()
+        return await pm.load_from_api(api_url, api_key=data.get("api_key"))
+
+    async def _cmd_proxy_get(self, data: Dict, session) -> Dict:
+        """Get the best available proxy for use."""
+        pm = self._get_proxy_manager()
+        return await pm.get_proxy(
+            domain=data.get("domain"),
+            session_id=data.get("session_id"),
+            country=data.get("country"),
+            tags=data.get("tags"),
+            with_failover=data.get("with_failover", True),
+        )
+
+    async def _cmd_proxy_record(self, data: Dict, session) -> Dict:
+        """Record result of proxy usage."""
+        proxy_id = data.get("proxy_id")
+        if not proxy_id:
+            return {"status": "error", "error": "Missing 'proxy_id'"}
+        pm = self._get_proxy_manager()
+        return pm.record_result(
+            proxy_id=proxy_id,
+            success=data.get("success", True),
+            latency_ms=data.get("latency_ms", 0),
+            status_code=data.get("status_code", 0),
+            error=data.get("error", ""),
+        )
+
+    async def _cmd_proxy_check(self, data: Dict, session) -> Dict:
+        """Health check a specific proxy."""
+        proxy_id = data.get("proxy_id")
+        if not proxy_id:
+            return {"status": "error", "error": "Missing 'proxy_id'"}
+        pm = self._get_proxy_manager()
+        return await pm.check_proxy(proxy_id)
+
+    async def _cmd_proxy_check_all(self, data: Dict, session) -> Dict:
+        """Health check all proxies."""
+        pm = self._get_proxy_manager()
+        return await pm.check_all()
+
+    async def _cmd_proxy_list(self, data: Dict, session) -> Dict:
+        """List all proxies."""
+        pm = self._get_proxy_manager()
+        return pm.list_proxies(status=data.get("status"), country=data.get("country"))
+
+    async def _cmd_proxy_enable(self, data: Dict, session) -> Dict:
+        """Re-enable a dead/disabled proxy."""
+        proxy_id = data.get("proxy_id")
+        if not proxy_id:
+            return {"status": "error", "error": "Missing 'proxy_id'"}
+        pm = self._get_proxy_manager()
+        return pm.enable_proxy(proxy_id)
+
+    async def _cmd_proxy_disable(self, data: Dict, session) -> Dict:
+        """Disable a proxy."""
+        proxy_id = data.get("proxy_id")
+        if not proxy_id:
+            return {"status": "error", "error": "Missing 'proxy_id'"}
+        pm = self._get_proxy_manager()
+        return pm.disable_proxy(proxy_id)
+
+    async def _cmd_proxy_strategy(self, data: Dict, session) -> Dict:
+        """Set rotation strategy."""
+        strategy = data.get("strategy")
+        if not strategy:
+            return {"status": "error", "error": "Missing 'strategy'. Valid: round_robin, random, weighted, least_used, sticky, per_domain, fastest, geo"}
+        pm = self._get_proxy_manager()
+        return pm.set_strategy(strategy)
+
+    async def _cmd_proxy_stats(self, data: Dict, session) -> Dict:
+        """Get proxy stats."""
+        pm = self._get_proxy_manager()
+        return pm.get_stats()
+
+    async def _cmd_proxy_save(self, data: Dict, session) -> Dict:
+        """Save proxy pool to disk."""
+        pm = self._get_proxy_manager()
+        return pm.save(filename=data.get("filename", "proxies.json"))
+
+    async def _cmd_proxy_load(self, data: Dict, session) -> Dict:
+        """Load proxy pool from disk."""
+        pm = self._get_proxy_manager()
+        return pm.load(filename=data.get("filename", "proxies.json"))
