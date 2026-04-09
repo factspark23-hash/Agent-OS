@@ -2,7 +2,7 @@
 """
 Agent-OS Connector Tests
 Tests MCP, OpenAI, Claude, OpenClaw, and CLI connectors.
-Enforces that ALL connectors expose the same 25 tools.
+Enforces that ALL connectors expose the same 40 tools.
 
 Run:
     python -m pytest tests/test_connectors.py -v
@@ -20,21 +20,32 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 AGENT_OS_URL = "http://localhost:8001"
 AGENT_TOKEN = "test-connector-token"
 
-# Canonical 25 tool names — every connector must match this exactly
+# Canonical 40 tool names — every connector must match this exactly
 EXPECTED_TOOLS = sorted([
     "browser_auto_login",
     "browser_back",
     "browser_click",
     "browser_evaluate_js",
+    "browser_extract",
     "browser_fill_form",
+    "browser_filter_network",
+    "browser_find_element",
     "browser_forward",
+    "browser_generate_pdf",
     "browser_get_content",
     "browser_get_dom",
     "browser_get_images",
     "browser_get_links",
+    "browser_get_markdown",
+    "browser_get_network_logs",
+    "browser_har_save",
+    "browser_har_start",
+    "browser_har_stop",
     "browser_hover",
     "browser_navigate",
     "browser_press",
+    "browser_proxy",
+    "browser_proxy_rotate",
     "browser_reload",
     "browser_save_credentials",
     "browser_scan_sensitive",
@@ -42,11 +53,15 @@ EXPECTED_TOOLS = sorted([
     "browser_scan_xss",
     "browser_screenshot",
     "browser_scroll",
+    "browser_set_profile",
     "browser_status",
     "browser_tabs",
     "browser_transcribe",
     "browser_type",
     "browser_wait",
+    "browser_webhook_list",
+    "browser_webhook_register",
+    "browser_webhook_remove",
 ])
 
 
@@ -54,7 +69,7 @@ EXPECTED_TOOLS = sorted([
 
 @pytest.mark.asyncio
 async def test_mcp_tools():
-    """Test MCP has all 25 tools with correct names."""
+    """Test MCP has all 40 tools with correct names."""
     from connectors.mcp_server import TOOLS
     tool_names = sorted([t.name for t in TOOLS])
     assert tool_names == EXPECTED_TOOLS, (
@@ -68,7 +83,7 @@ async def test_mcp_tools():
 
 @pytest.mark.asyncio
 async def test_openai_connector():
-    """Test OpenAI connector has all 25 tools in correct format."""
+    """Test OpenAI connector has all 40 tools in correct format."""
     from connectors.openai_connector import get_tools, get_all_tool_names
 
     # Check tool count
@@ -81,7 +96,7 @@ async def test_openai_connector():
 
     # Verify OpenAI format
     openai_tools = get_tools("openai")
-    assert len(openai_tools) == 25
+    assert len(openai_tools) == 40
     for tool in openai_tools:
         assert tool.get("type") == "function", f"Tool missing type=function: {tool}"
         func = tool.get("function", {})
@@ -92,11 +107,11 @@ async def test_openai_connector():
 
 @pytest.mark.asyncio
 async def test_claude_connector():
-    """Test Claude connector has all 25 tools in correct format."""
+    """Test Claude connector has all 40 tools in correct format."""
     from connectors.openai_connector import get_tools
 
     claude_tools = get_tools("claude")
-    assert len(claude_tools) == 25
+    assert len(claude_tools) == 40
     tool_names = sorted([t["name"] for t in claude_tools])
     assert tool_names == EXPECTED_TOOLS, (
         f"Claude tools mismatch.\n"
@@ -115,14 +130,14 @@ async def test_claude_connector():
 
 @pytest.mark.asyncio
 async def test_openclaw_connector():
-    """Test OpenClaw connector has all 25 tools."""
+    """Test OpenClaw connector has all 40 tools."""
     from connectors.openclaw_connector import get_manifest, get_tool_names
 
     manifest = get_manifest()
     assert "tools" in manifest, "Manifest missing 'tools' key"
 
     tool_names = sorted(get_tool_names())
-    assert len(tool_names) == 25, f"Expected 25 tools, got {len(tool_names)}"
+    assert len(tool_names) == 40, f"Expected 40 tools, got {len(tool_names)}"
     assert tool_names == EXPECTED_TOOLS, (
         f"OpenClaw tools mismatch.\n"
         f"  Missing: {set(EXPECTED_TOOLS) - set(tool_names)}\n"
@@ -165,7 +180,7 @@ async def test_mcp_protocol():
     assert handle_list_tools is not None, "MCP list_tools handler missing"
     assert handle_call_tool is not None, "MCP call_tool handler missing"
 
-    # Test list tools returns all 25
+    # Test list tools returns all 40
     tools = await handle_list_tools()
     tool_names = sorted([t.name for t in tools])
     assert tool_names == EXPECTED_TOOLS, (

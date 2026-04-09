@@ -21,7 +21,18 @@ DEFAULT_CONFIG = {
         "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         "viewport": {"width": 1920, "height": 1080},
         "max_ram_mb": 500,
-        "page_timeout_ms": 30000
+        "page_timeout_ms": 30000,
+        # Proxy configuration — single proxy (string URL or dict)
+        # Supported formats:
+        #   - "http://user:pass@host:port"
+        #   - "https://host:port"
+        #   - "socks5://host:port"
+        #   - {"server": "host:port", "username": "user", "password": "pass", "protocol": "http"}
+        "proxy": None,
+        # Proxy rotation list — round-robin rotation across multiple proxies.
+        # Each entry can be a URL string or a proxy dict (same format as proxy above).
+        # When non-empty, overrides browser.proxy for rotation.
+        "proxies": [],
     },
     "session": {
         "timeout_minutes": 15,
@@ -42,7 +53,16 @@ DEFAULT_CONFIG = {
     "transcription": {
         "model": "tiny",
         "language": "auto"
-    }
+    },
+    "retry": {
+        "max_retries": 3,
+        "base_delay": 0.5,
+        "max_delay": 10.0,
+        "backoff_factor": 2.0,
+    },
+    "webhooks": {
+        "endpoints": [],
+    },
 }
 
 

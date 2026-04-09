@@ -49,6 +49,23 @@ if [ -z "$1" ]; then
     echo "  evaluate-js <script>        Execute JavaScript"
     echo "  scroll <direction> <amount> Scroll page"
     echo ""
+    echo "Element Finder:"
+    echo "  find-element <description> [method] [exact]   Find element by text/role/aria/smart"
+    echo "  find-all-interactive                           Find all interactive elements"
+    echo ""
+    echo "Data Extraction:"
+    echo "  extract <type> [page-id]    Extract data (tables|lists|articles|jsonld|metadata|links|all)"
+    echo "  get-markdown [page-id]      Convert page to Markdown"
+    echo ""
+    echo "PDF:"
+    echo "  generate-pdf [page-id] [format] [landscape]   Generate PDF"
+    echo ""
+    echo "HAR Recording:"
+    echo "  har-start [page-id]         Start HAR recording"
+    echo "  har-stop [page-id]          Stop HAR recording"
+    echo "  har-save [page-id] [path]   Save HAR to file"
+    echo "  har-status [page-id]        Get HAR recording status"
+    echo ""
     echo "Security:"
     echo "  scan-xss <url>              Scan for XSS"
     echo "  scan-sqli <url>             Scan for SQLi"
@@ -70,6 +87,25 @@ if [ -z "$1" ]; then
     echo "  tabs switch <id>            Switch to tab"
     echo "  tabs close <id>             Close tab"
     echo ""
+    echo "Stealth Profiles:"
+    echo "  set-profile <name>          Set stealth profile (windows-chrome, mac-safari, etc.)"
+    echo "  list-profiles               List available profiles"
+    echo ""
+    echo "Network:"
+    echo "  get-network-logs [page-id] [url-pattern] [status-code] [resource-type]"
+    echo "  clear-network-logs [page-id]"
+    echo "  get-api-calls [page-id] [url-pattern]"
+    echo ""
+    echo "Proxy:"
+    echo "  proxy-rotate                Rotate to next proxy"
+    echo "  proxy-status                Show proxy config"
+    echo ""
+    echo "Webhooks:"
+    echo "  webhook-register <url> <events-json> [secret]"
+    echo "  webhook-list                List webhooks"
+    echo "  webhook-remove <webhook-id> Remove webhook"
+    echo "  webhook-test <webhook-id>   Test webhook"
+    echo ""
     echo "Server:"
     echo "  status                      Server status"
     echo "  commands                    List all commands"
@@ -81,6 +117,7 @@ COMMAND="$1"
 shift
 
 case "$COMMAND" in
+    # ── Navigation ──
     navigate)
         DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"navigate\",\"url\":\"$1\"}"
         ;;
@@ -93,6 +130,8 @@ case "$COMMAND" in
     reload)
         DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"reload\"}"
         ;;
+
+    # ── Content ──
     get-content)
         DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"get-content\"}"
         ;;
@@ -109,6 +148,16 @@ case "$COMMAND" in
         FULL="${1:-false}"
         DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"screenshot\",\"full_page\":$FULL}"
         ;;
+    scroll)
+        DIR="${1:-down}"
+        AMT="${2:-500}"
+        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"scroll\",\"direction\":\"$DIR\",\"amount\":$AMT}"
+        ;;
+    evaluate-js)
+        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"evaluate-js\",\"script\":\"$1\"}"
+        ;;
+
+    # ── Interaction ──
     click)
         DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"click\",\"selector\":\"$1\"}"
         ;;
@@ -134,14 +183,95 @@ case "$COMMAND" in
         TIMEOUT="${2:-10000}"
         DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"wait\",\"selector\":\"$1\",\"timeout\":$TIMEOUT}"
         ;;
-    scroll)
-        DIR="${1:-down}"
-        AMT="${2:-500}"
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"scroll\",\"direction\":\"$DIR\",\"amount\":$AMT}"
+
+    # ── Element Finder ──
+    find-element)
+        METHOD="${2:-smart}"
+        EXACT="${3:-false}"
+        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"find-element\",\"description\":\"$1\",\"method\":\"$METHOD\",\"exact\":$EXACT}"
         ;;
-    evaluate-js)
-        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"evaluate-js\",\"script\":\"$1\"}"
+    find-all-interactive)
+        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"find-all-interactive\"}"
         ;;
+
+    # ── Data Extraction ──
+    extract)
+        PAGE_ID="${2:-main}"
+        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"extract\",\"type\":\"$1\",\"page_id\":\"$PAGE_ID\"}"
+        ;;
+    get-markdown)
+        PAGE_ID="${1:-main}"
+        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"get-markdown\",\"page_id\":\"$PAGE_ID\"}"
+        ;;
+
+    # ── PDF ──
+    generate-pdf)
+        PAGE_ID="${1:-main}"
+        FORMAT="${2:-A4}"
+        LANDSCAPE="${3:-false}"
+        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"generate-pdf\",\"page_id\":\"$PAGE_ID\",\"format\":\"$FORMAT\",\"landscape\":$LANDSCAPE}"
+        ;;
+
+    # ── HAR Recording ──
+    har-start)
+        PAGE_ID="${1:-main}"
+        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"har-start\",\"page_id\":\"$PAGE_ID\"}"
+        ;;
+    har-stop)
+        PAGE_ID="${1:-main}"
+        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"har-stop\",\"page_id\":\"$PAGE_ID\"}"
+        ;;
+    har-save)
+        PAGE_ID="${1:-main}"
+        PATH_ARG="${2:-}"
+        if [ -n "$PATH_ARG" ]; then
+            DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"har-save\",\"page_id\":\"$PAGE_ID\",\"path\":\"$PATH_ARG\"}"
+        else
+            DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"har-save\",\"page_id\":\"$PAGE_ID\"}"
+        fi
+        ;;
+    har-status)
+        PAGE_ID="${1:-main}"
+        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"har-status\",\"page_id\":\"$PAGE_ID\"}"
+        ;;
+
+    # ── Stealth Profiles ──
+    set-profile)
+        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"set-profile\",\"profile\":\"$1\"}"
+        ;;
+    list-profiles)
+        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"list-profiles\"}"
+        ;;
+
+    # ── Network ──
+    get-network-logs)
+        PAGE_ID="${1:-main}"
+        URL_PAT="${2:-}"
+        STATUS="${3:-}"
+        RES_TYPE="${4:-}"
+        if [ -n "$URL_PAT" ] && [ -n "$STATUS" ] && [ -n "$RES_TYPE" ]; then
+            DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"get-network-logs\",\"page_id\":\"$PAGE_ID\",\"url_pattern\":\"$URL_PAT\",\"status_code\":$STATUS,\"resource_type\":\"$RES_TYPE\"}"
+        elif [ -n "$URL_PAT" ]; then
+            DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"get-network-logs\",\"page_id\":\"$PAGE_ID\",\"url_pattern\":\"$URL_PAT\"}"
+        else
+            DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"get-network-logs\",\"page_id\":\"$PAGE_ID\"}"
+        fi
+        ;;
+    clear-network-logs)
+        PAGE_ID="${1:-main}"
+        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"clear-network-logs\",\"page_id\":\"$PAGE_ID\"}"
+        ;;
+    get-api-calls)
+        PAGE_ID="${1:-main}"
+        URL_PAT="${2:-}"
+        if [ -n "$URL_PAT" ]; then
+            DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"get-api-calls\",\"page_id\":\"$PAGE_ID\",\"url_pattern\":\"$URL_PAT\"}"
+        else
+            DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"get-api-calls\",\"page_id\":\"$PAGE_ID\"}"
+        fi
+        ;;
+
+    # ── Security ──
     scan-xss)
         DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"scan-xss\",\"url\":\"$1\"}"
         ;;
@@ -151,19 +281,27 @@ case "$COMMAND" in
     scan-sensitive)
         DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"scan-sensitive\"}"
         ;;
+
+    # ── Media ──
     transcribe)
         LANG="${2:-auto}"
         DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"transcribe\",\"url\":\"$1\",\"language\":\"$LANG\"}"
         ;;
+
+    # ── Auth ──
     save-creds)
         DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"save-creds\",\"domain\":\"$1\",\"username\":\"$2\",\"password\":\"$3\"}"
         ;;
     auto-login)
         DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"auto-login\",\"url\":\"$1\",\"domain\":\"$2\"}"
         ;;
+
+    # ── Forms ──
     fill-job)
         DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"fill-job\",\"url\":\"$1\",\"profile\":$2}"
         ;;
+
+    # ── Tabs ──
     tabs)
         TAB_ACTION="$1"
         TAB_ID="${2:-}"
@@ -173,6 +311,37 @@ case "$COMMAND" in
             DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"tabs\",\"action\":\"$TAB_ACTION\"}"
         fi
         ;;
+
+    # ── Proxy ──
+    proxy-rotate)
+        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"proxy-rotate\"}"
+        ;;
+    proxy-status)
+        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"proxy-status\"}"
+        ;;
+
+    # ── Webhooks ──
+    webhook-register)
+        URL="$1"
+        EVENTS="$2"
+        SECRET="${3:-}"
+        if [ -n "$SECRET" ]; then
+            DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"webhook-register\",\"url\":\"$URL\",\"events\":$EVENTS,\"secret\":\"$SECRET\"}"
+        else
+            DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"webhook-register\",\"url\":\"$URL\",\"events\":$EVENTS}"
+        fi
+        ;;
+    webhook-list)
+        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"webhook-list\"}"
+        ;;
+    webhook-remove)
+        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"webhook-remove\",\"webhook_id\":\"$1\"}"
+        ;;
+    webhook-test)
+        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"webhook-test\",\"webhook_id\":\"$1\"}"
+        ;;
+
+    # ── Server ──
     status)
         curl -s "$AGENT_OS_URL/status" | python3 -m json.tool
         exit 0

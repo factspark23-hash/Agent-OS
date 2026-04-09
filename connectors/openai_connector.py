@@ -24,7 +24,7 @@ AGENT_OS_URL = os.environ.get("AGENT_OS_URL", "http://localhost:8001")
 AGENT_TOKEN = os.environ.get("AGENT_OS_TOKEN", "openai-connector-default")
 
 
-# ─── Canonical Tool Definitions (25 tools — same as MCP) ──────
+# ─── Canonical Tool Definitions ───────────────────────────────
 # Single source of truth. Both OpenAI and Claude formats are generated from this.
 
 _TOOL_DEFS = [
@@ -203,6 +203,180 @@ _TOOL_DEFS = [
         "params": {},
         "required": [],
     },
+    # ── New: Element Finder ──
+    {
+        "name": "browser_find_element",
+        "description": "Find an element by text, ARIA role, aria-label, or natural language description (e.g., 'the login button', 'search input').",
+        "params": {
+            "description": {"type": "string", "description": "Element description: text, role name, aria-label, or natural language"},
+            "method": {"type": "string", "enum": ["smart", "text", "role", "aria-label"], "description": "Search strategy (default: smart)"},
+            "exact": {"type": "boolean", "description": "Exact text match (text method only)"},
+        },
+        "required": ["description"],
+    },
+    {
+        "name": "browser_find_all_interactive",
+        "description": "Find all interactive elements (buttons, inputs, links, selects) on the page.",
+        "params": {
+            "page_id": {"type": "string", "description": "Tab ID (default: main)"},
+        },
+        "required": [],
+    },
+    # ── New: Data Extraction ──
+    {
+        "name": "browser_extract",
+        "description": "Extract structured data from the page: tables, lists, articles, JSON-LD, metadata, links, or all.",
+        "params": {
+            "type": {"type": "string", "enum": ["tables", "lists", "articles", "jsonld", "metadata", "links", "all"], "description": "Extraction type (default: all)"},
+            "page_id": {"type": "string", "description": "Tab ID (default: main)"},
+        },
+        "required": [],
+    },
+    # ── New: Markdown ──
+    {
+        "name": "browser_get_markdown",
+        "description": "Convert the current page to clean Markdown. Strips ads, nav, footer, scripts, styles.",
+        "params": {
+            "page_id": {"type": "string", "description": "Tab ID (default: main)"},
+        },
+        "required": [],
+    },
+    # ── New: PDF ──
+    {
+        "name": "browser_generate_pdf",
+        "description": "Generate a PDF from the current page. Saves to the downloads directory.",
+        "params": {
+            "page_id": {"type": "string", "description": "Tab ID (default: main)"},
+            "format": {"type": "string", "description": "Page format: A4, Letter, etc. (default: A4)"},
+            "landscape": {"type": "boolean", "description": "Landscape orientation"},
+            "scale": {"type": "number", "description": "Scale factor (0.1-2.0)"},
+        },
+        "required": [],
+    },
+    # ── New: HAR Recording ──
+    {
+        "name": "browser_har_start",
+        "description": "Start HAR (HTTP Archive) recording for a page.",
+        "params": {
+            "page_id": {"type": "string", "description": "Tab ID (default: main)"},
+        },
+        "required": [],
+    },
+    {
+        "name": "browser_har_stop",
+        "description": "Stop HAR recording for a page.",
+        "params": {
+            "page_id": {"type": "string", "description": "Tab ID (default: main)"},
+        },
+        "required": [],
+    },
+    {
+        "name": "browser_har_save",
+        "description": "Save recorded HAR data to a JSON file.",
+        "params": {
+            "page_id": {"type": "string", "description": "Tab ID (default: main)"},
+            "path": {"type": "string", "description": "Output file path (auto-generated if omitted)"},
+        },
+        "required": [],
+    },
+    {
+        "name": "browser_har_status",
+        "description": "Get HAR recording status (active, request count, duration).",
+        "params": {
+            "page_id": {"type": "string", "description": "Tab ID (default: main)"},
+        },
+        "required": [],
+    },
+    # ── New: Stealth Profiles ──
+    {
+        "name": "browser_set_profile",
+        "description": "Apply a stealth browser profile to mimic a specific OS/browser combination. Requires browser restart.",
+        "params": {
+            "profile": {"type": "string", "enum": ["windows-chrome", "mac-safari", "linux-firefox", "mobile-chrome-android", "mobile-safari-ios"], "description": "Stealth profile name"},
+        },
+        "required": ["profile"],
+    },
+    {
+        "name": "browser_list_profiles",
+        "description": "List all available stealth profiles with descriptions.",
+        "params": {},
+        "required": [],
+    },
+    # ── New: Network Logs ──
+    {
+        "name": "browser_get_network_logs",
+        "description": "Get network request logs, optionally filtered by URL pattern, status code, or resource type.",
+        "params": {
+            "page_id": {"type": "string", "description": "Tab ID (default: main)"},
+            "url_pattern": {"type": "string", "description": "Filter by URL substring"},
+            "status_code": {"type": "integer", "description": "Filter by HTTP status code"},
+            "resource_type": {"type": "string", "description": "Resource type (document, xhr, fetch, script, image, etc.)"},
+        },
+        "required": [],
+    },
+    {
+        "name": "browser_clear_network_logs",
+        "description": "Clear captured network request logs for a page.",
+        "params": {
+            "page_id": {"type": "string", "description": "Tab ID (default: main)"},
+        },
+        "required": [],
+    },
+    {
+        "name": "browser_get_api_calls",
+        "description": "Get XHR/Fetch API calls from the network log.",
+        "params": {
+            "page_id": {"type": "string", "description": "Tab ID (default: main)"},
+            "url_pattern": {"type": "string", "description": "Filter by URL substring"},
+        },
+        "required": [],
+    },
+    # ── New: Proxy ──
+    {
+        "name": "browser_proxy_rotate",
+        "description": "Rotate to the next proxy in the configured proxy list. Requires browser restart.",
+        "params": {},
+        "required": [],
+    },
+    {
+        "name": "browser_proxy_status",
+        "description": "Get current proxy configuration and status.",
+        "params": {},
+        "required": [],
+    },
+    # ── New: Webhooks ──
+    {
+        "name": "browser_webhook_register",
+        "description": "Register a webhook endpoint to receive real-time browser events.",
+        "params": {
+            "url": {"type": "string", "description": "HTTP(S) URL to receive POST events"},
+            "events": {"type": "array", "items": {"type": "string"}, "description": "Event types: navigation, click, form_submit, screenshot, error, session_start, session_end, etc."},
+            "secret": {"type": "string", "description": "Optional HMAC-SHA256 secret for signing payloads"},
+        },
+        "required": ["url", "events"],
+    },
+    {
+        "name": "browser_webhook_list",
+        "description": "List all registered webhooks.",
+        "params": {},
+        "required": [],
+    },
+    {
+        "name": "browser_webhook_remove",
+        "description": "Remove a registered webhook by ID.",
+        "params": {
+            "webhook_id": {"type": "string", "description": "Webhook ID to remove"},
+        },
+        "required": ["webhook_id"],
+    },
+    {
+        "name": "browser_webhook_test",
+        "description": "Send a test ping to verify a webhook is working.",
+        "params": {
+            "webhook_id": {"type": "string", "description": "Webhook ID to test"},
+        },
+        "required": ["webhook_id"],
+    },
 ]
 
 # Command map: tool name → (API command name, param keys)
@@ -232,6 +406,27 @@ _COMMAND_MAP = {
     "browser_get_images": ("get-images", []),
     "browser_wait": ("wait", ["selector", "timeout"]),
     "browser_scan_sensitive": ("scan-sensitive", []),
+    # New commands
+    "browser_find_element": ("find-element", ["description", "method", "exact"]),
+    "browser_find_all_interactive": ("find-all-interactive", ["page_id"]),
+    "browser_extract": ("extract", ["type", "page_id"]),
+    "browser_get_markdown": ("get-markdown", ["page_id"]),
+    "browser_generate_pdf": ("generate-pdf", ["page_id", "format", "landscape", "scale"]),
+    "browser_har_start": ("har-start", ["page_id"]),
+    "browser_har_stop": ("har-stop", ["page_id"]),
+    "browser_har_save": ("har-save", ["page_id", "path"]),
+    "browser_har_status": ("har-status", ["page_id"]),
+    "browser_set_profile": ("set-profile", ["profile"]),
+    "browser_list_profiles": ("list-profiles", []),
+    "browser_get_network_logs": ("get-network-logs", ["page_id", "url_pattern", "status_code", "resource_type"]),
+    "browser_clear_network_logs": ("clear-network-logs", ["page_id"]),
+    "browser_get_api_calls": ("get-api-calls", ["page_id", "url_pattern"]),
+    "browser_proxy_rotate": ("proxy-rotate", []),
+    "browser_proxy_status": ("proxy-status", []),
+    "browser_webhook_register": ("webhook-register", ["url", "events", "secret"]),
+    "browser_webhook_list": ("webhook-list", []),
+    "browser_webhook_remove": ("webhook-remove", ["webhook_id"]),
+    "browser_webhook_test": ("webhook-test", ["webhook_id"]),
 }
 
 
@@ -246,6 +441,8 @@ def _to_openai_schema(tool: dict) -> dict:
             prop["enum"] = pschema["enum"]
         if "additionalProperties" in pschema:
             prop["additionalProperties"] = pschema["additionalProperties"]
+        if "items" in pschema:
+            prop["items"] = pschema["items"]
         props[pname] = prop
 
     return {
@@ -273,6 +470,8 @@ def _to_claude_schema(tool: dict) -> dict:
             prop["enum"] = pschema["enum"]
         if "additionalProperties" in pschema:
             prop["additionalProperties"] = pschema["additionalProperties"]
+        if "items" in pschema:
+            prop["items"] = pschema["items"]
         props[pname] = prop
 
     return {
@@ -310,7 +509,7 @@ def get_tools(format: str = "openai") -> List[Dict]:
 
 
 def get_all_tool_names() -> List[str]:
-    """Return the names of all 25 available tools."""
+    """Return the names of all available tools."""
     return [t["name"] for t in _TOOL_DEFS]
 
 

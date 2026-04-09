@@ -1,6 +1,7 @@
 """
 Agent-OS Stealth Browser Engine
-Advanced anti-detection with real Chrome, cookie persistence, proxy support.
+Advanced anti-detection with real Chrome, cookie persistence, proxy support,
+network traffic logging, and retry-based error recovery.
 """
 import asyncio
 import json
@@ -10,12 +11,20 @@ import time
 import logging
 import os
 import pickle
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from pathlib import Path
 
 from playwright.async_api import async_playwright, Browser, Page, BrowserContext
 
+from src.core.retry import retry, retry_async
+
 logger = logging.getLogger("agent-os.browser")
+
+# Maximum entries per page in the network log circular buffer
+_NETWORK_LOG_LIMIT = 1000
+# Maximum post_data size to capture (bytes)
+_MAX_POST_DATA_CAPTURE = 1024
+
 
 # ─── Advanced Anti-Detection JavaScript ───────────────────────
 # Injected into every page to fool bot detection systems
@@ -138,7 +147,6 @@ if (audioContext) {
         const osc = origCreateOscillator.call(this);
         const origConnect = osc.connect;
         osc.connect = function(dest) {
-            // Add tiny noise to audio fingerprint
             return origConnect.call(this, dest);
         };
         return osc;
@@ -153,7 +161,6 @@ if (origRTCPeerConnection) {
         const origCreateOffer = pc.createOffer;
         pc.createOffer = function(options) {
             return origCreateOffer.call(pc, options).then(offer => {
-                // Remove local IP from SDP
                 offer.sdp = offer.sdp.replace(/a=candidate:.*typ host.*/g, '');
                 return offer;
             });
@@ -171,7 +178,6 @@ if (navigator.mediaDevices) {
     const origEnumerateDevices = navigator.mediaDevices.enumerateDevices;
     navigator.mediaDevices.enumerateDevices = async function() {
         const devices = await origEnumerateDevices.call(this);
-        // Return realistic device list
         return [
             {deviceId: 'default', kind: 'audioinput', label: 'Default - Microphone', groupId: 'group1'},
             {deviceId: 'default', kind: 'audiooutput', label: 'Default - Speaker', groupId: 'group1'},
@@ -205,7 +211,15 @@ FAKE_RESPONSES = {
 
 
 class AgentBrowser:
-    """Core browser engine with advanced anti-detection for AI agents."""
+    """Core browser engine with advanced anti-detection for AI agents.
+
+    Features:
+        - Stealth patches injected on every page
+        - Proxy rotation (single or multiple proxies)
+        - Network traffic logging with circular buffers
+        - Retry-based error recovery for navigation and interaction
+        - Human-like mouse movement and typing via HumanMimicry
+    """
 
     def __init__(self, config):
         self.config = config
@@ -219,42 +233,197 @@ class AgentBrowser:
         self._console_logs: Dict[str, List[Dict]] = {}  # page_id → list of log entries
         self._cookie_dir = Path(os.path.expanduser("~/.agent-os/cookies"))
         self._download_dir = Path(os.path.expanduser("~/.agent-os/downloads"))
+        # Proxy support
+        self._proxy_index: int = 0
+        self._current_proxy_info: Optional[Dict[str, str]] = None
+        # Network logging: page_id → list of request/response entries
+        self._network_logs: Dict[str, List[Dict]] = {}
+        # Active stealth profile
+        self._active_profile: Optional[Dict] = None
+        # Current profile name (string identifier)
+        self._current_profile: Optional[str] = None
+        # HAR recorder instance (lazy init via src.tools.har_recorder)
+        self._har_recorder = None
 
-    async def start(self):
-        """Launch the browser with stealth settings."""
-        self._cookie_dir.mkdir(parents=True, exist_ok=True)
-        self._download_dir.mkdir(parents=True, exist_ok=True)
+    # ─── Proxy Helpers ────────────────────────────────────────
 
-        self.playwright = await async_playwright().start()
+    def _get_proxy_config(self) -> Optional[Dict[str, str]]:
+        """Get the current proxy configuration from config.
 
-        # Use headed or headless based on config
-        headless = self.config.get("browser.headless", True)
+        Checks ``browser.proxies`` (rotation list) first, then falls back to
+        ``browser.proxy`` (single proxy).  Supports http, https, and socks5.
 
-        self.browser = await self.playwright.chromium.launch(
-            headless=headless,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--disable-features=IsolateOrigins,site-per-process",
-                "--disable-infobars",
-                "--disable-background-timer-throttling",
-                "--disable-backgrounding-occluded-windows",
-                "--disable-renderer-backgrounding",
-                "--disable-dev-shm-usage",
-                "--no-first-run",
-                "--no-default-browser-check",
-                "--disable-extensions",
-                "--disable-component-extensions-with-background-pages",
-                "--window-size=1920,1080",
-                "--disable-web-security",
-                "--disable-features=TranslateUI",
-                "--disable-ipc-flooding-protection",
-            ]
-        )
+        Returns:
+            Playwright-compatible proxy dict, or None if no proxy configured.
+        """
+        # Rotation list takes priority
+        proxies: List[str] = self.config.get("browser.proxies", [])
+        if proxies:
+            idx = self._proxy_index % len(proxies)
+            proxy_url = proxies[idx]
+            parsed = self._parse_proxy_url(proxy_url)
+            self._current_proxy_info = parsed
+            logger.info(f"Using proxy #{idx}: {parsed.get('server', proxy_url)}")
+            return parsed
 
-        # Create context with realistic settings
-        storage_state = self._load_cookies("default")
+        # Single proxy
+        proxy = self.config.get("browser.proxy")
+        if proxy:
+            if isinstance(proxy, dict):
+                # Already in Playwright format
+                self._current_proxy_info = proxy
+                return proxy
+            parsed = self._parse_proxy_url(proxy)
+            self._current_proxy_info = parsed
+            return parsed
 
-        context_options = {
+        return None
+
+    def _parse_proxy_url(self, proxy_input: Any) -> Dict[str, str]:
+        """Parse a proxy URL or dict into Playwright proxy config.
+
+        Supports:
+            - ``http://user:pass@host:port``
+            - ``https://host:port``
+            - ``socks5://host:port``
+            - dict with keys: server, username, password, protocol
+
+        Returns:
+            Dict with ``server`` (required), ``username``, ``password`` (optional).
+        """
+        if isinstance(proxy_input, dict):
+            # Already structured — normalise keys
+            result: Dict[str, str] = {}
+            server = proxy_input.get("server", "")
+            protocol = proxy_input.get("protocol", "")
+            if protocol and "://" not in server:
+                server = f"{protocol}://{server}"
+            result["server"] = server
+            if proxy_input.get("username"):
+                result["username"] = proxy_input["username"]
+            if proxy_input.get("password"):
+                result["password"] = proxy_input["password"]
+            return result
+
+        # String URL
+        from urllib.parse import urlparse
+        proxy_str = str(proxy_input)
+        parsed = urlparse(proxy_str)
+        scheme = parsed.scheme or "http"
+        host = parsed.hostname or proxy_str
+        port = parsed.port
+        if not port:
+            port = 1080 if "socks" in scheme else 8080
+        config: Dict[str, str] = {
+            "server": f"{scheme}://{host}:{port}",
+        }
+        if parsed.username:
+            config["username"] = parsed.username
+        if parsed.password:
+            config["password"] = parsed.password
+        return config
+
+    async def rotate_proxy(self) -> Dict[str, Any]:
+        """Rotate to the next proxy in the list and restart the browser context.
+
+        Creates a brand-new browser context with the new proxy.  All existing
+        pages are re-created under the new context so that future requests
+        go through the rotated proxy.
+
+        Returns:
+            Dict with status and proxy info.
+        """
+        proxies: List[str] = self.config.get("browser.proxies", [])
+        if not proxies:
+            return {"status": "error", "error": "No proxies configured. Set browser.proxies first."}
+
+        self._proxy_index = (self._proxy_index + 1) % len(proxies)
+        proxy_url = proxies[self._proxy_index]
+        proxy_config = self._parse_proxy_url(proxy_url)
+
+        logger.info(f"Rotating to proxy #{self._proxy_index}: {proxy_config.get('server')}")
+
+        # Restart browser with new proxy
+        try:
+            # Close existing context and browser
+            if self.context:
+                await self.context.close()
+            if self.browser:
+                await self.browser.close()
+
+            headless = self.config.get("browser.headless", True)
+            launch_args = self._build_launch_args()
+            launch_options: Dict[str, Any] = {
+                "headless": headless,
+                "args": launch_args,
+                "proxy": proxy_config,
+            }
+
+            self.browser = await self.playwright.chromium.launch(**launch_options)
+
+            # Re-create context
+            context_options = self._build_context_options()
+            self.context = await self.browser.new_context(**context_options)
+            await self.context.add_init_script(ANTI_DETECTION_JS)
+            if self._active_profile:
+                from src.security.stealth_profiles import generate_stealth_js
+                profile_js = generate_stealth_js(self._active_profile)
+                await self.context.add_init_script(profile_js)
+            await self.context.route("**/*", self._handle_request)
+            self.context.on("download", self._handle_download)
+
+            # Re-create main page
+            self.page = await self.context.new_page()
+            self._pages.clear()
+            self._pages["main"] = self.page
+            self._attach_console_listener("main", self.page)
+            self._attach_network_listener("main", self.page)
+
+            self._current_proxy_info = proxy_config
+
+            return {
+                "status": "success",
+                "proxy_index": self._proxy_index,
+                "proxy_server": proxy_config.get("server"),
+                "total_proxies": len(proxies),
+                "message": "Browser restarted with new proxy.",
+            }
+        except Exception as e:
+            logger.error(f"Proxy rotation failed: {e}")
+            return {"status": "error", "error": str(e)}
+
+    def get_current_proxy(self) -> Optional[Dict[str, str]]:
+        """Return the currently active proxy config (sans password)."""
+        if not self._current_proxy_info:
+            return None
+        safe = {k: v for k, v in self._current_proxy_info.items() if k != "password"}
+        return safe
+
+    # ─── Launch helpers ───────────────────────────────────────
+
+    def _build_launch_args(self) -> List[str]:
+        """Build Chrome launch arguments."""
+        return [
+            "--disable-blink-features=AutomationControlled",
+            "--disable-features=IsolateOrigins,site-per-process",
+            "--disable-infobars",
+            "--disable-background-timer-throttling",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-renderer-backgrounding",
+            "--disable-dev-shm-usage",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-extensions",
+            "--disable-component-extensions-with-background-pages",
+            "--window-size=1920,1080",
+            "--disable-web-security",
+            "--disable-features=TranslateUI",
+            "--disable-ipc-flooding-protection",
+        ]
+
+    def _build_context_options(self) -> Dict[str, Any]:
+        """Build browser context options from config."""
+        return {
             "user_agent": self.config.get("browser.user_agent"),
             "viewport": self.config.get("browser.viewport", {"width": 1920, "height": 1080}),
             "locale": "en-US",
@@ -268,6 +437,51 @@ class AgentBrowser:
             "ignore_https_errors": True,
         }
 
+    # ─── Lifecycle ────────────────────────────────────────────
+
+    async def start(self, profile: Optional[Dict] = None):
+        """Launch the browser with stealth settings and optional proxy."""
+        self._cookie_dir.mkdir(parents=True, exist_ok=True)
+        self._download_dir.mkdir(parents=True, exist_ok=True)
+
+        self.playwright = await async_playwright().start()
+
+        headless = self.config.get("browser.headless", True)
+        launch_args = self._build_launch_args()
+
+        proxy_config = self._get_proxy_config()
+        launch_options: Dict[str, Any] = {
+            "headless": headless,
+            "args": launch_args,
+        }
+        if proxy_config:
+            launch_options["proxy"] = proxy_config
+            logger.info(f"Browser launching with proxy: {proxy_config.get('server')}")
+
+        self.browser = await self.playwright.chromium.launch(**launch_options)
+
+        # Create context with realistic settings
+        storage_state = self._load_cookies("default")
+        context_options = self._build_context_options()
+
+        # Auto-apply profile from config if not explicitly provided
+        if not profile:
+            profile_name = self.config.get("browser.profile")
+            if profile_name:
+                from src.security.stealth_profiles import StealthProfileManager
+                profile = StealthProfileManager.get_profile(profile_name)
+                if profile:
+                    self._current_profile = profile_name
+                    logger.info("Auto-applying stealth profile from config: %s", profile_name)
+                else:
+                    logger.warning("Config profile '%s' not found, using defaults", profile_name)
+
+        # Apply stealth profile if provided
+        if profile:
+            from src.security.stealth_profiles import apply_profile_to_context_options
+            context_options = apply_profile_to_context_options(profile, context_options)
+            self._active_profile = profile
+
         if storage_state:
             context_options["storage_state"] = storage_state
 
@@ -275,6 +489,12 @@ class AgentBrowser:
 
         # Inject stealth script on every page
         await self.context.add_init_script(ANTI_DETECTION_JS)
+
+        # Inject profile-specific stealth if profile active
+        if profile:
+            from src.security.stealth_profiles import generate_stealth_js
+            profile_js = generate_stealth_js(profile)
+            await self.context.add_init_script(profile_js)
 
         # Set up request interception for bot detection blocking
         await self.context.route("**/*", self._handle_request)
@@ -285,16 +505,22 @@ class AgentBrowser:
         self.page = await self.context.new_page()
         self._pages["main"] = self.page
         self._attach_console_listener("main", self.page)
+        self._attach_network_listener("main", self.page)
 
         logger.info("Browser started with stealth patches v2.0")
 
+    # ─── Console & Network Listeners ─────────────────────────
+
     def _attach_console_listener(self, page_id: str, page: Page):
-        """Attach console and error listeners to a page."""
+        """Attach console and error listeners to a page.
+
+        Maintains a circular buffer of the last 200 console entries per page.
+        """
         self._console_logs[page_id] = []
 
         def on_console(msg):
             entry = {
-                "type": msg.type,               # log, warning, error, info, debug, etc.
+                "type": msg.type,
                 "text": msg.text,
                 "location": {
                     "url": msg.location.get("url", ""),
@@ -303,10 +529,10 @@ class AgentBrowser:
                 },
                 "timestamp": time.time(),
             }
-            self._console_logs[page_id].append(entry)
-            # Keep last 200 entries per page to cap memory
-            if len(self._console_logs[page_id]) > 200:
-                self._console_logs[page_id] = self._console_logs[page_id][-200:]
+            logs = self._console_logs[page_id]
+            logs.append(entry)
+            if len(logs) > 200:
+                del logs[:len(logs) - 200]
 
         def on_page_error(error):
             entry = {
@@ -315,12 +541,226 @@ class AgentBrowser:
                 "location": {"url": "", "line": 0, "column": 0},
                 "timestamp": time.time(),
             }
-            self._console_logs[page_id].append(entry)
-            if len(self._console_logs[page_id]) > 200:
-                self._console_logs[page_id] = self._console_logs[page_id][-200:]
+            logs = self._console_logs[page_id]
+            logs.append(entry)
+            if len(logs) > 200:
+                del logs[:len(logs) - 200]
 
         page.on("console", on_console)
         page.on("pageerror", on_page_error)
+
+    def _attach_network_listener(self, page_id: str, page: Page):
+        """Attach network request/response logging to a page.
+
+        Captures request and response data, correlating them by URL.
+        Maintains a circular buffer of ``_NETWORK_LOG_LIMIT`` entries per page.
+
+        For each request the following fields are captured:
+            url, method, resource_type, headers, timestamp, post_data (first 1KB)
+
+        For each response the following fields are captured:
+            status, response_headers, content_type, response_size, timing
+
+        Timing includes: request_start, response_start (from Playwright response.timing).
+        """
+        self._network_logs[page_id] = []
+        # Pending requests dict: request_id → log_entry  (for correlation)
+        pending: Dict[int, Dict[str, Any]] = {}
+
+        def on_request(request) -> None:
+            try:
+                # Capture post_data (first 1KB only to cap memory)
+                post_data = None
+                raw_post = request.post_data
+                if raw_post:
+                    post_data = raw_post[:_MAX_POST_DATA_CAPTURE]
+
+                entry: Dict[str, Any] = {
+                    "url": request.url,
+                    "method": request.method,
+                    "resource_type": request.resource_type,
+                    "headers": dict(request.headers),
+                    "timestamp": time.time(),
+                    "post_data": post_data,
+                    # Response fields (filled later)
+                    "status": None,
+                    "response_headers": None,
+                    "content_type": None,
+                    "response_size": None,
+                    "timing": None,
+                }
+
+                # Store as pending keyed by Python id of the request object
+                req_id = id(request)
+                pending[req_id] = entry
+
+                logs = self._network_logs[page_id]
+                logs.append(entry)
+                # Enforce circular buffer limit
+                if len(logs) > _NETWORK_LOG_LIMIT:
+                    del logs[:len(logs) - _NETWORK_LOG_LIMIT]
+            except Exception as e:
+                logger.debug(f"Network listener on_request error: {e}")
+
+        def on_response(response) -> None:
+            try:
+                req_id = id(response.request)
+                entry = pending.pop(req_id, None)
+                if entry is None:
+                    # Fallback: try to find by URL (less reliable)
+                    for e in reversed(self._network_logs.get(page_id, [])):
+                        if e["url"] == response.url and e["status"] is None:
+                            entry = e
+                            break
+
+                if entry is not None:
+                    entry["status"] = response.status
+                    entry["response_headers"] = dict(response.headers)
+                    entry["content_type"] = response.headers.get("content-type", "")
+                    try:
+                        entry["response_size"] = int(response.headers.get("content-length", 0))
+                    except (ValueError, TypeError):
+                        entry["response_size"] = 0
+
+                    # Capture Playwright timing info
+                    try:
+                        timing = response.request.timing
+                        if timing:
+                            entry["timing"] = {
+                                "request_start": timing.get("startTime", 0),
+                                "response_start": timing.get("responseStart", 0),
+                                "response_end": timing.get("responseEnd", 0),
+                            }
+                    except Exception:
+                        entry["timing"] = None
+            except Exception as e:
+                logger.debug(f"Network listener on_response error: {e}")
+
+        def on_request_failed(request) -> None:
+            try:
+                req_id = id(request)
+                entry = pending.pop(req_id, None)
+                if entry is not None:
+                    entry["status"] = 0  # 0 indicates a failed request
+                    entry["content_type"] = "error"
+            except Exception:
+                pass
+
+        page.on("request", on_request)
+        page.on("response", on_response)
+        page.on("requestfailed", on_request_failed)
+
+    # ─── Network Log API ──────────────────────────────────────
+
+    def get_network_logs(
+        self,
+        page_id: str = "main",
+        filter_url: Optional[str] = None,
+        filter_status: Optional[int] = None,
+        filter_type: Optional[str] = None,
+        limit: int = 100,
+    ) -> Dict[str, Any]:
+        """Get filtered network request logs for a page.
+
+        Args:
+            page_id:      Tab / page identifier.
+            filter_url:   Substring match on URL (case-sensitive).
+            filter_status: Exact match on HTTP status code.
+            filter_type:  Match on resource_type (e.g. "xhr", "fetch", "document").
+            limit:        Maximum number of entries to return (most recent first).
+
+        Returns:
+            Dict with status, filtered logs, counts.
+        """
+        logs = self._network_logs.get(page_id, [])
+
+        if not logs:
+            return {
+                "status": "success",
+                "page_id": page_id,
+                "logs": [],
+                "returned": 0,
+                "total_captured": 0,
+            }
+
+        filtered = logs
+        if filter_url:
+            filtered = [l for l in filtered if filter_url in l.get("url", "")]
+        if filter_status is not None:
+            filtered = [l for l in filtered if l.get("status") == filter_status]
+        if filter_type:
+            filtered = [l for l in filtered if l.get("resource_type") == filter_type]
+
+        # Most recent first, capped by limit
+        result = list(reversed(filtered[-limit:]))
+
+        return {
+            "status": "success",
+            "page_id": page_id,
+            "logs": result,
+            "returned": len(result),
+            "total_filtered": len(filtered),
+            "total_captured": len(logs),
+        }
+
+    def clear_network_logs(self, page_id: Optional[str] = None) -> Dict[str, Any]:
+        """Clear network logs for a specific page or all pages.
+
+        Args:
+            page_id: If provided, clear only this page. Otherwise clear all.
+
+        Returns:
+            Dict with status and count of cleared entries.
+        """
+        if page_id:
+            count = len(self._network_logs.get(page_id, []))
+            self._network_logs[page_id] = []
+            logger.info(f"Cleared {count} network log entries for page '{page_id}'")
+            return {"status": "success", "page_id": page_id, "cleared": count}
+
+        total = sum(len(v) for v in self._network_logs.values())
+        self._network_logs.clear()
+        logger.info(f"Cleared {total} network log entries across all pages")
+        return {"status": "success", "page_id": "all", "cleared": total}
+
+    def get_api_calls(
+        self,
+        page_id: str = "main",
+        filter_url: Optional[str] = None,
+        limit: int = 100,
+    ) -> Dict[str, Any]:
+        """Get only XHR and Fetch (API) requests from the network log.
+
+        Args:
+            page_id:    Tab / page identifier.
+            filter_url: Optional substring filter on URL.
+            limit:      Maximum entries to return.
+
+        Returns:
+            Dict with status, filtered API calls, counts.
+        """
+        logs = self._network_logs.get(page_id, [])
+
+        api_calls = [
+            l for l in logs
+            if l.get("resource_type") in ("xhr", "fetch")
+        ]
+
+        if filter_url:
+            api_calls = [l for l in api_calls if filter_url in l.get("url", "")]
+
+        result = list(reversed(api_calls[-limit:]))
+
+        return {
+            "status": "success",
+            "page_id": page_id,
+            "api_calls": result,
+            "returned": len(result),
+            "total_api_calls": len(api_calls),
+            "total_captured": len(logs),
+        }
+
+    # ─── Cookie Helpers ───────────────────────────────────────
 
     def _load_cookies(self, profile: str) -> Optional[Dict]:
         """Load saved cookies for a profile."""
@@ -341,6 +781,8 @@ class AgentBrowser:
             with open(cookie_file, "w") as f:
                 json.dump(state, f)
             logger.info(f"Cookies saved for profile: {profile}")
+
+    # ─── Download & Request Interception ──────────────────────
 
     async def _handle_download(self, download):
         """Handle file downloads."""
@@ -376,51 +818,74 @@ class AgentBrowser:
         # Allow all other requests
         await route.continue_()
 
+    # ─── Navigation & Interaction (with retry) ────────────────
+
+    @retry_async(max_retries=3, backoff_base=1.0, backoff_max=15.0)
     async def navigate(self, url: str, page_id: str = "main", wait_until: str = "domcontentloaded") -> Dict[str, Any]:
-        """Navigate to a URL with human-like timing."""
+        """Navigate to a URL with human-like timing and automatic retry.
+
+        Retries up to 3 times on transient navigation failures (timeouts,
+        connection resets, etc.).  Permanent errors like DNS resolution
+        failures are not retried.
+        """
         page = self._pages.get(page_id, self.page)
 
         # Human-like delay before navigation
         await asyncio.sleep(random.uniform(0.3, 1.2))
 
-        try:
-            response = await page.goto(url, wait_until=wait_until, timeout=30000)
+        response = await page.goto(url, wait_until=wait_until, timeout=30000)
 
-            # Wait for page to fully load
-            await asyncio.sleep(random.uniform(0.5, 1.5))
+        # Wait for page to fully load
+        await asyncio.sleep(random.uniform(0.5, 1.5))
 
-            # Save cookies after navigation
-            await self._save_cookies("default")
+        # Save cookies after navigation
+        await self._save_cookies("default")
 
-            return {
-                "status": "success",
-                "url": page.url,
-                "title": await page.title(),
-                "status_code": response.status if response else 200,
-                "blocked_requests": self._blocked_requests
-            }
-        except Exception as e:
-            logger.error(f"Navigation failed: {e}")
-            return {"status": "error", "error": str(e)}
-
-    async def get_content(self, page_id: str = "main") -> Dict[str, Any]:
-        """Get current page content."""
-        page = self._pages.get(page_id, self.page)
         return {
+            "status": "success",
             "url": page.url,
             "title": await page.title(),
-            "html": await page.content(),
-            "text": await page.inner_text("body") if await page.query_selector("body") else ""
+            "status_code": response.status if response else 200,
+            "blocked_requests": self._blocked_requests
         }
 
-    async def screenshot(self, page_id: str = "main", full_page: bool = False) -> str:
-        """Take a base64 screenshot."""
-        page = self._pages.get(page_id, self.page)
-        img_bytes = await page.screenshot(type="png", full_page=full_page)
-        return base64.b64encode(img_bytes).decode()
+    @retry_async(max_retries=2, backoff_base=0.5, backoff_max=5.0)
+    async def click(self, selector: str, page_id: str = "main") -> Dict[str, Any]:
+        """Click an element with human-like mouse movement.
 
+        Retries up to 2 times on transient failures (element detached,
+        click intercepted, etc.).
+        """
+        from src.security.human_mimicry import HumanMimicry
+        page = self._pages.get(page_id, self.page)
+        mimicry = HumanMimicry()
+
+        element = await page.query_selector(selector)
+        if not element:
+            return {"status": "error", "error": f"Element not found: {selector}"}
+
+        box = await element.bounding_box()
+        if box:
+            target_x = box["x"] + box["width"] / 2
+            target_y = box["y"] + box["height"] / 2
+            path = mimicry.mouse_path(target_x, target_y)
+
+            for x, y in path:
+                await page.mouse.move(x, y)
+                await asyncio.sleep(random.uniform(0.005, 0.02))
+
+        await asyncio.sleep(random.uniform(0.05, 0.15))
+        await element.click()
+        await asyncio.sleep(random.uniform(0.2, 0.5))
+
+        return {"status": "success", "selector": selector}
+
+    @retry_async(max_retries=2, backoff_base=0.5, backoff_max=5.0)
     async def fill_form(self, fields: Dict[str, str], page_id: str = "main") -> Dict[str, Any]:
-        """Fill form fields with human-like typing."""
+        """Fill form fields with human-like typing.
+
+        Retries field-level operations on transient failures.
+        """
         from src.security.human_mimicry import HumanMimicry
         page = self._pages.get(page_id, self.page)
         mimicry = HumanMimicry()
@@ -456,37 +921,12 @@ class AgentBrowser:
 
         return {"status": "success", "filled": filled, "total": len(fields)}
 
-    async def click(self, selector: str, page_id: str = "main") -> Dict[str, Any]:
-        """Click an element with human-like mouse movement."""
-        from src.security.human_mimicry import HumanMimicry
-        page = self._pages.get(page_id, self.page)
-        mimicry = HumanMimicry()
-
-        try:
-            element = await page.query_selector(selector)
-            if not element:
-                return {"status": "error", "error": f"Element not found: {selector}"}
-
-            box = await element.bounding_box()
-            if box:
-                target_x = box["x"] + box["width"] / 2
-                target_y = box["y"] + box["height"] / 2
-                path = mimicry.mouse_path(target_x, target_y)
-
-                for x, y in path:
-                    await page.mouse.move(x, y)
-                    await asyncio.sleep(random.uniform(0.005, 0.02))
-
-            await asyncio.sleep(random.uniform(0.05, 0.15))
-            await element.click()
-            await asyncio.sleep(random.uniform(0.2, 0.5))
-
-            return {"status": "success", "selector": selector}
-        except Exception as e:
-            return {"status": "error", "error": str(e)}
-
+    @retry_async(max_retries=2, backoff_base=0.5, backoff_max=5.0)
     async def type_text(self, text: str, page_id: str = "main") -> Dict[str, Any]:
-        """Type text with human-like delays (into focused element)."""
+        """Type text with human-like delays (into focused element).
+
+        Retries on transient keyboard input failures.
+        """
         from src.security.human_mimicry import HumanMimicry
         page = self._pages.get(page_id, self.page)
         mimicry = HumanMimicry()
@@ -495,6 +935,24 @@ class AgentBrowser:
             await page.keyboard.type(char, delay=mimicry.typing_delay())
 
         return {"status": "success", "typed": len(text)}
+
+    # ─── Other interaction methods (unchanged) ────────────────
+
+    async def get_content(self, page_id: str = "main") -> Dict[str, Any]:
+        """Get current page content."""
+        page = self._pages.get(page_id, self.page)
+        return {
+            "url": page.url,
+            "title": await page.title(),
+            "html": await page.content(),
+            "text": await page.inner_text("body") if await page.query_selector("body") else ""
+        }
+
+    async def screenshot(self, page_id: str = "main", full_page: bool = False) -> str:
+        """Take a base64 screenshot."""
+        page = self._pages.get(page_id, self.page)
+        img_bytes = await page.screenshot(type="png", full_page=full_page)
+        return base64.b64encode(img_bytes).decode()
 
     async def press_key(self, key: str, page_id: str = "main") -> Dict[str, Any]:
         """Press a keyboard key (Enter, Tab, Escape, etc.)."""
@@ -549,7 +1007,6 @@ class AgentBrowser:
 
     async def scroll(self, direction: str = "down", amount: int = 500, page_id: str = "main") -> Dict[str, Any]:
         """Scroll with human-like behavior."""
-        from src.security.human_mimicry import HumanMimicry
         page = self._pages.get(page_id, self.page)
 
         y = amount if direction == "down" else -amount
@@ -673,7 +1130,7 @@ class AgentBrowser:
                     await item.click()
                     await asyncio.sleep(random.uniform(0.2, 0.5))
                     return {"status": "success", "action": action_text, "selector": selector}
-            except:
+            except Exception:
                 continue
 
         # If no menu item found, try keyboard shortcut based on common actions
@@ -885,14 +1342,7 @@ class AgentBrowser:
             return {"status": "error", "error": str(e)}
 
     async def add_extension(self, extension_path: str) -> Dict[str, Any]:
-        """Load a Chrome extension (CRX unpacked directory). Requires headed mode.
-
-        Usage: First download/extract the extension, then point to its directory.
-        Note: Extensions only work in headed mode (--headed flag).
-        """
-        # Playwright doesn't support dynamic extension loading after launch.
-        # Extensions must be loaded at browser launch via --load-extension flag.
-        # We store the path and advise restart.
+        """Load a Chrome extension (CRX unpacked directory). Requires headed mode."""
         ext_dir = Path(extension_path)
         if not ext_dir.exists():
             return {"status": "error", "error": f"Extension path does not exist: {extension_path}"}
@@ -906,7 +1356,7 @@ class AgentBrowser:
                 ext_info = json.load(f)
             ext_name = ext_info.get("name", "Unknown")
             ext_version = ext_info.get("version", "Unknown")
-        except:
+        except Exception:
             ext_name = "Unknown"
             ext_version = "Unknown"
 
@@ -949,7 +1399,6 @@ class AgentBrowser:
 
     async def get_cookies(self, page_id: str = "main") -> Dict[str, Any]:
         """Get all cookies for the current page."""
-        page = self._pages.get(page_id, self.page)
         cookies = await self.context.cookies()
         return {"status": "success", "cookies": cookies, "count": len(cookies)}
 
@@ -1058,6 +1507,7 @@ class AgentBrowser:
         page = await self.context.new_page()
         self._pages[tab_id] = page
         self._attach_console_listener(tab_id, page)
+        self._attach_network_listener(tab_id, page)
         return tab_id
 
     async def switch_tab(self, tab_id: str) -> Dict[str, Any]:
@@ -1073,8 +1523,144 @@ class AgentBrowser:
             await self._pages[tab_id].close()
             del self._pages[tab_id]
             self._console_logs.pop(tab_id, None)
+            self._network_logs.pop(tab_id, None)
             return True
         return False
+
+    async def set_proxy(self, proxy_url: str) -> Dict[str, Any]:
+        """Set a single proxy and restart the browser."""
+        self.config.set("browser.proxy", proxy_url)
+        return {"status": "success", "message": "Proxy set. Restart browser to apply.", "proxy": proxy_url}
+
+    async def generate_pdf(self, page_id: str = "main", options: Optional[Dict] = None) -> Dict[str, Any]:
+        """Generate a PDF of the current page.
+
+        Saves the PDF to ``~/.agent-os/downloads/`` with a timestamped filename.
+
+        Args:
+            page_id: Tab to generate PDF from (default "main").
+            options: PDF generation options:
+                - format: Paper format — "A4", "Letter", "Legal", "Tabloid",
+                  or ``{"width": 8.5, "height": 11}`` in inches.
+                - landscape: Boolean, landscape orientation.
+                - margin: Dict with ``top``, ``right``, ``bottom``, ``left``
+                  values as CSS strings (e.g. ``"1cm"``).
+                - print_background: Include background graphics (default True).
+                - scale: Page scale factor, 0.1 to 2 (default 1).
+                - header_template: HTML string for page header.
+                - footer_template: HTML string for page footer.
+                - prefer_css_page_size: Use CSS-defined page size (default False).
+
+        Returns:
+            Dict with ``status``, ``file_path``, ``file_size``, and ``filename``.
+        """
+        page = self._pages.get(page_id, self.page)
+        if page is None:
+            return {"status": "error", "error": f"Page '{page_id}' not found."}
+
+        # Build Playwright pdf() kwargs
+        pdf_options: Dict[str, Any] = {
+            "format": "A4",
+            "print_background": True,
+            "margin": {"top": "1cm", "bottom": "1cm", "left": "1cm", "right": "1cm"},
+        }
+
+        if options:
+            # Format: string name or custom {width, height} in inches
+            if "format" in options:
+                fmt = options["format"]
+                if isinstance(fmt, dict):
+                    pdf_options["width"] = f"{fmt.get('width', 8.5)}in"
+                    pdf_options["height"] = f"{fmt.get('height', 11)}in"
+                    pdf_options.pop("format", None)
+                else:
+                    pdf_options["format"] = fmt
+
+            if "landscape" in options:
+                pdf_options["landscape"] = bool(options["landscape"])
+
+            # Accept both "margin" and "margins" as key
+            margin = options.get("margin") or options.get("margins")
+            if margin and isinstance(margin, dict):
+                pdf_options["margin"] = {
+                    "top": str(margin.get("top", "1cm")),
+                    "right": str(margin.get("right", "1cm")),
+                    "bottom": str(margin.get("bottom", "1cm")),
+                    "left": str(margin.get("left", "1cm")),
+                }
+
+            if "print_background" in options:
+                pdf_options["print_background"] = bool(options["print_background"])
+
+            if "scale" in options:
+                scale = float(options["scale"])
+                pdf_options["scale"] = max(0.1, min(2.0, scale))
+
+            if "header_template" in options:
+                pdf_options["header_template"] = str(options["header_template"])
+
+            if "footer_template" in options:
+                pdf_options["footer_template"] = str(options["footer_template"])
+
+            if "prefer_css_page_size" in options:
+                pdf_options["prefer_css_page_size"] = bool(options["prefer_css_page_size"])
+
+        try:
+            pdf_bytes = await page.pdf(**pdf_options)
+
+            # Ensure download directory exists
+            self._download_dir.mkdir(parents=True, exist_ok=True)
+
+            # Build safe filename
+            title = await page.title()
+            safe_title = "".join(c if c.isalnum() or c in "-_ " else "_" for c in (title or ""))[:50]
+            filename = f"{safe_title or 'page'}_{int(time.time())}.pdf"
+            pdf_path = self._download_dir / filename
+            pdf_path.write_bytes(pdf_bytes)
+
+            logger.info("PDF generated: %s (%d bytes)", pdf_path, len(pdf_bytes))
+            return {
+                "status": "success",
+                "file_path": str(pdf_path),
+                "file_size": len(pdf_bytes),
+                "filename": filename,
+            }
+        except Exception as e:
+            logger.error("PDF generation failed: %s", e)
+            return {"status": "error", "error": str(e)}
+
+    async def apply_stealth_profile(self, profile_name: str) -> Dict[str, Any]:
+        """Apply a stealth profile to the running browser.
+
+        Creates a new browser context with the profile's fingerprint settings,
+        migrates cookies, and injects profile-specific anti-detection JS.
+        Does NOT require a full browser restart — only a context swap.
+
+        Args:
+            profile_name: Name of the profile (e.g. "windows-chrome", "mac-safari").
+
+        Returns:
+            Dict with status, profile details, and cookies migrated count.
+        """
+        from src.security.stealth_profiles import StealthProfileManager
+        manager = StealthProfileManager()
+        result = await manager.apply_profile(self, profile_name)
+        if result.get("status") == "success":
+            self._current_profile = profile_name
+        return result
+
+    async def set_stealth_profile(self, profile_name: str) -> Dict[str, Any]:
+        """Apply a stealth profile (alias for apply_stealth_profile).
+
+        Kept for backward compatibility. Delegates to apply_stealth_profile.
+
+        Args:
+            profile_name: Name of the profile to apply.
+
+        Returns:
+            Dict with status and profile details.
+        """
+        return await self.apply_stealth_profile(profile_name)
 
     async def stop(self):
         """Clean shutdown."""
