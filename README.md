@@ -19,12 +19,19 @@ Connect any AI (Claude, GPT-4, Codex, OpenClaw, Qwen, local LLMs) and give them 
 ## Features
 
 - 🛡️ **Anti-Detection** — Blocks reCAPTCHA, hCaptcha, Cloudflare Turnstile, PerimeterX, DataDome at the network level (before scripts load)
-- 🤖 **25 Browser Tools** — Navigate, click, fill forms, screenshot, scroll, tabs, DOM analysis, and more
+- 🤖 **42 Browser Tools** — Navigate, click, fill forms, screenshot, scroll, tabs, DOM analysis, smart finder, workflows, network capture, page analysis, and more
 - 🧠 **Human Mimicry** — Bezier mouse curves, realistic typing delays, natural scroll behavior
 - 🔍 **Security Scanners** — XSS, SQL injection, sensitive data exposure detection
+- 🔍 **Smart Element Finder** — Find elements by visible text — no CSS selector needed
+- 🎯 **Multi-Step Workflows** — Chain actions with variables, retries, error handling, save/load templates
+- 📊 **Network Capture** — Capture, filter, and export all HTTP requests. Discover API endpoints automatically
+- 🧪 **Page Analysis** — Summarize pages, extract tables, SEO audit, accessibility check, find emails/phones
+- 🌐 **Proxy Support** — HTTP, HTTPS, SOCKS5 with auth
+- 📱 **Mobile Emulation** — 11 device presets (iPhone, Galaxy, iPad, Pixel, Desktop)
+- 🔄 **Session Save/Restore** — Save full browser state (cookies, localStorage, tabs) and restore later
 - 🎬 **Video Transcription** — Local Whisper integration (no cloud APIs)
 - 🔒 **Privacy First** — Sessions auto-wipe, AES-256 credential vault, zero telemetry
-- 🔌 **Connect Any Agent** — MCP (Claude/Codex), OpenAI, Claude API, OpenClaw, CLI — all 25 tools on every connector
+- 🔌 **Connect Any Agent** — MCP (Claude/Codex), OpenAI, Claude API, OpenClaw, CLI — all 42 tools on every connector
 
 ## Quick Start
 
@@ -69,7 +76,7 @@ curl -X POST http://localhost:8001/command \
 
 ## Connect Your AI Agent
 
-All connectors expose the **same 25 tools**. Pick your platform:
+All connectors expose the **same 42 tools**. Pick your platform:
 
 ### MCP (Claude Desktop / Codex)
 
@@ -108,7 +115,7 @@ result = await call_tool("browser_navigate", {"url": "https://github.com"})
 ```python
 from connectors.openclaw_connector import get_manifest, execute_tool
 
-manifest = get_manifest()  # 25 tools, register with OpenClaw
+manifest = get_manifest()  # 42 tools, register with OpenClaw
 result = await execute_tool("browser_click", {"selector": "button[type=submit]"})
 ```
 
@@ -182,12 +189,16 @@ Agent-OS/
 │   └── tools/
 │       ├── scanner.py         # XSS, SQLi, sensitive data scanners
 │       ├── transcriber.py     # Video/audio transcription (Whisper)
-│       └── form_filler.py     # Smart form detection & filling
+│       ├── form_filler.py     # Smart form detection & filling
+│       ├── smart_finder.py    # Find elements by visible text
+│       ├── workflow.py        # Multi-step workflow engine
+│       ├── network_capture.py # HTTP request capture & analysis
+│       └── page_analyzer.py   # Page summary, SEO, accessibility
 ├── connectors/
-│   ├── mcp_server.py          # MCP (25 tools)
-│   ├── openai_connector.py    # OpenAI + Claude (25 tools)
-│   ├── openclaw_connector.py  # OpenClaw (25 tools)
-│   └── agent-os-tool.sh       # CLI (25+ commands)
+│   ├── mcp_server.py          # MCP (42 tools)
+│   ├── openai_connector.py    # OpenAI + Claude (42 tools)
+│   ├── openclaw_connector.py  # OpenClaw (42 tools)
+│   └── agent-os-tool.sh       # CLI (42+ commands)
 ├── tests/
 │   ├── test_all.py            # Core tests
 │   └── test_connectors.py     # Connector consistency tests
