@@ -750,3 +750,142 @@ All responses follow this format:
 | OpenClaw | 38 | `connectors/openclaw_connector.py` |
 | CLI (Bash) | 74 commands | `connectors/agent-os-tool.sh` |
 | HTTP API | 74 commands | Server at `/command` |
+| Persistent API | 30+ commands | Server at `/persistent/command` |
+
+---
+
+## Persistent Chromium (Production Mode)
+
+For production deployments serving multiple concurrent users, enable persistent mode:
+
+```bash
+python3 main.py --persistent --agent-token "my-token"
+```
+
+### Architecture
+
+```
+PersistentBrowserManager (singleton)
+├── BrowserInstance 1 (Chromium PID 1234)
+│   ├── UserContext "user-abc" → ~/.agent-os/users/user-abc/
+│   │   ├── main page (tab)
+│   │   ├── tab-1 (tab)
+│   │   ├── cookies.json
+│   │   └── context_state.json
+│   ├── UserContext "user-def" → ~/.agent-os/users/user-def/
+│   └── ... (up to 50 contexts)
+├── BrowserInstance 2 (Chromium PID 5678)
+│   └── ... (next 50 users)
+└── BrowserInstance N (up to 5 instances = 250 concurrent users)
+```
+
+### Key Design Decisions
+
+1. **Playwright persistent contexts** — Each user gets a real Chromium profile directory under `~/.agent-os/users/{user_id}/`. Cookies, localStorage, and sessionStorage persist on disk — survive restarts.
+
+2. **Browser pool** — Multiple Chromium processes for horizontal scaling. Users are assigned to the least-loaded instance via round-robin.
+
+3. **Per-user isolation** — Each user's context is completely isolated. No data leaks between users.
+
+4. **Auto-recovery** — Health checks every 30s. If a Chromium instance crashes, it's automatically restarted and all user contexts are restored from saved state.
+
+5. **LRU eviction** — Idle contexts are evicted after configurable timeout (default 60 min). State is saved to disk before eviction, so users can resume later.
+
+6. **Memory cap** — System monitors total Chromium memory. When cap is exceeded, oldest idle contexts are evicted.
+
+7. **Zero-downtime state** — Manager state is periodically saved to `~/.agent-os/state/manager_state.json`. On restart, all user contexts are automatically restored.
+
+### Configuration
+
+```yaml
+persistent:
+  enabled: false                       # Enable persistent mode
+  max_instances: 5                     # Max Chromium processes (each handles ~50 users)
+  max_contexts_per_instance: 50        # Max user contexts per Chromium process
+  health_check_interval_seconds: 30    # How often to check browser health
+  idle_timeout_minutes: 60             # Evict idle contexts after this
+  memory_cap_mb: 4000                  # Total Chromium memory cap
+  auto_restart: true                   # Auto-restart crashed browsers
+```
+
+### Scaling Estimates
+
+| Config | Concurrent Users | Memory (est.) |
+|--------|-----------------|---------------|
+| 1 instance × 50 contexts | 50 | ~800 MB |
+| 3 instances × 50 contexts | 150 | ~2.4 GB |
+| 5 instances × 50 contexts | 250 | ~4 GB |
+| 5 instances × 100 contexts | 500 | ~8 GB |
+
+### API Endpoints
+
+#### GET /persistent/health
+Full health report of all browser instances.
+
+```bash
+curl http://localhost:8001/persistent/health
+```
+
+**Response:**
+```json
+{
+  "status": "running",
+  "instances": {
+    "browser-a1b2c3d4": {
+      "state": "running",
+      "uptime_seconds": 3600,
+      "active_contexts": 12,
+      "total_pages": 28,
+      "memory_mb": 450.2,
+      "crash_count": 0,
+      "restart_count": 0
+    }
+  },
+  "summary": {
+    "total_instances": 1,
+    "total_user_contexts": 12,
+    "unique_users": 12,
+    "total_memory_mb": 450.2
+  }
+}
+```
+
+#### GET /persistent/users
+List all active user contexts.
+
+```bash
+curl http://localhost:8001/persistent/users
+```
+
+#### POST /persistent/command
+Execute a command for a specific user. Creates context if it doesn't exist.
+
+```bash
+curl -X POST http://localhost:8001/persistent/command \
+  -H "Content-Type: application/json" \
+  -d '{
+    "token": "my-agent",
+    "user_id": "user-123",
+    "command": "navigate",
+    "url": "https://example.com"
+  }'
+```
+
+**All standard commands work** — just add `user_id` field. The system automatically:
+- Creates or retrieves the user's persistent context
+- Executes the command
+- Saves state to disk
+- Returns the result
+
+### State Persistence
+
+User state is saved to `~/.agent-os/users/{user_id}/`:
+
+```
+~/.agent-os/users/user-123/
+├── context_state.json    # Tabs, viewport, device, last active
+├── cookies.json          # Full Playwright storage state
+└── (Chromium profile data — cookies, localStorage, etc.)
+```
+
+On restart, these are automatically restored. Users resume where they left off.

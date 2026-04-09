@@ -34,6 +34,7 @@ Connect any AI (Claude, GPT-4, Codex, OpenClaw, Qwen, local LLMs) and give them 
 - 🔌 **Connect Any Agent** — MCP (Claude/Codex), OpenAI, Claude API, OpenClaw, CLI — all tools on every connector
 - 🍪 **Cookie Management** — Get/set cookies with full control (domain, path, secure, httpOnly, sameSite)
 - 📋 **Console Log Capture** — Capture and retrieve browser console output (log, warn, error, pageerror)
+- 🔄 **Persistent Chromium** — Long-running browser with per-user isolated contexts, auto-recovery, health monitoring, state survives restarts
 
 ## Quick Start
 
@@ -61,6 +62,34 @@ chmod +x setup.sh && ./setup.sh
 source venv/bin/activate   # if venv was created
 python3 main.py --agent-token "my-agent-123"
 ```
+
+### Option 3: Persistent Chromium (Production)
+
+For production deployments serving multiple users, enable persistent mode:
+
+```bash
+# Via CLI flag
+python3 main.py --persistent --agent-token "my-token"
+
+# Via config (persistent.yaml or ~/.agent-os/config.yaml)
+# persistent:
+#   enabled: true
+#   max_instances: 5
+#   max_contexts_per_instance: 50
+#   idle_timeout_minutes: 60
+#   memory_cap_mb: 4000
+#   auto_restart: true
+```
+
+**Persistent mode provides:**
+- Long-running Chromium processes (no restart on every request)
+- Per-user isolated browser contexts with dedicated profile directories
+- State survives restarts (cookies, localStorage, open tabs auto-restore)
+- Auto-recovery from browser crashes
+- Health monitoring with configurable intervals
+- LRU eviction of idle contexts
+- Memory cap enforcement
+- Horizontal scaling via multiple Chromium instances
 
 ### Test It
 
@@ -365,9 +394,12 @@ Options:
   --config PATH         Config file path
   --proxy URL           Proxy URL (http://user:pass@host:port)
   --device PRESET       Device preset (iphone_14, galaxy_s23, etc.)
+  --persistent          Enable persistent Chromium (production mode)
 ```
 
 ## API Endpoints
+
+### Standard
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -376,6 +408,14 @@ Options:
 | `/commands` | GET | List all available commands with params |
 | `/debug` | GET | Debug info (sessions, tabs, blocked requests) |
 | `/screenshot` | GET | Quick screenshot (base64 text) |
+
+### Persistent Browser (when `--persistent` enabled)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/persistent/health` | GET | Health of all browser instances, memory, contexts |
+| `/persistent/users` | GET | List all active user contexts |
+| `/persistent/command` | POST | Execute command for a specific user (needs `user_id`) |
 
 ## HTTP API Example
 

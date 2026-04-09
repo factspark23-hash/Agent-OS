@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.core.config import Config
 from src.core.browser import AgentBrowser
 from src.core.session import SessionManager
+from src.core.persistent_browser import PersistentBrowserManager
 from src.agents.server import AgentServer
 
 # Setup logging
@@ -44,7 +45,8 @@ class AgentOS:
         self.config = Config(args.config)
         self.browser = AgentBrowser(self.config)
         self.session_manager = SessionManager(self.config)
-        self.server = AgentServer(self.config, self.browser, self.session_manager)
+        self.persistent_manager = PersistentBrowserManager(self.config) if (self.config.get("persistent.enabled", False) or args.persistent) else None
+        self.server = AgentServer(self.config, self.browser, self.session_manager, self.persistent_manager)
         self._running = False
         self._ram_monitor_task = None
 
@@ -75,6 +77,11 @@ class AgentOS:
         # Start session manager
         logger.info("Starting session manager...")
         await self.session_manager.start()
+
+        # Start persistent browser manager if enabled
+        if self.persistent_manager:
+            logger.info("Starting persistent browser manager...")
+            await self.persistent_manager.start()
 
         # Start agent server
         logger.info("Starting agent server...")
@@ -116,6 +123,9 @@ class AgentOS:
         if self._ram_monitor_task:
             self._ram_monitor_task.cancel()
 
+        if self.persistent_manager:
+            await self.persistent_manager.stop()
+
         await self.server.stop()
         await self.session_manager.stop()
         await self.browser.stop()
@@ -149,6 +159,7 @@ def parse_args():
     parser.add_argument("--config", type=str, help="Config file path")
     parser.add_argument("--proxy", type=str, help="Proxy URL (http://user:pass@host:port)")
     parser.add_argument("--device", type=str, help="Device preset (iphone_14, galaxy_s23, ipad, etc.)")
+    parser.add_argument("--persistent", action="store_true", help="Enable persistent Chromium (production mode)")
     return parser.parse_args()
 
 

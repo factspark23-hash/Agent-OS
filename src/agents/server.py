@@ -21,10 +21,11 @@ class AgentServer:
     - HTTP REST (port 8001): For curl/simple integrations
     """
 
-    def __init__(self, config, browser, session_manager):
+    def __init__(self, config, browser, session_manager, persistent_manager=None):
         self.config = config
         self.browser = browser
         self.session_manager = session_manager
+        self.persistent_manager = persistent_manager
         self._ws_clients: Dict[str, websockets.WebSocketServerProtocol] = {}
         self._ws_server = None
         self._http_app = None
@@ -70,6 +71,12 @@ class AgentServer:
         self._http_app.router.add_get("/debug", self._handle_debug)
         self._http_app.router.add_get("/screenshot", self._handle_screenshot)
 
+        # Persistent browser routes (if enabled)
+        if self.persistent_manager:
+            self._http_app.router.add_get("/persistent/health", self._handle_persistent_health)
+            self._http_app.router.add_get("/persistent/users", self._handle_persistent_users)
+            self._http_app.router.add_post("/persistent/command", self._handle_persistent_command)
+
     async def _ws_handler(self, websocket, path):
         """Handle WebSocket connections from agents."""
         client_id = f"ws-{id(websocket)}"
@@ -102,14 +109,19 @@ class AgentServer:
 
     async def _handle_status(self, request: web.Request) -> web.Response:
         """Handle HTTP GET /status."""
-        return web.json_response({
+        status = {
             "status": "running",
             "uptime_seconds": int(time.time() - self._start_time),
             "active_sessions": len(self.session_manager.list_active_sessions()),
             "active_ws_clients": len(self._ws_clients),
             "browser_active": self.browser.browser is not None,
+            "persistent_browser_enabled": self.persistent_manager is not None,
             "version": "2.0.0"
-        })
+        }
+        if self.persistent_manager:
+            ph = self.persistent_manager.get_health()
+            status["persistent_browser"] = ph["summary"]
+        return web.json_response(status)
 
     async def _handle_commands_list(self, request: web.Request) -> web.Response:
         """Handle HTTP GET /commands — list all available commands."""
@@ -222,6 +234,42 @@ class AgentServer:
             return web.Response(body=b64, content_type="text/plain")
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
+
+    # ─── Persistent Browser Endpoints ────────────────────────
+
+    async def _handle_persistent_health(self, request: web.Request) -> web.Response:
+        """Handle HTTP GET /persistent/health."""
+        if not self.persistent_manager:
+            return web.json_response({"error": "Persistent browser not enabled"}, status=404)
+        return web.json_response(self.persistent_manager.get_health())
+
+    async def _handle_persistent_users(self, request: web.Request) -> web.Response:
+        """Handle HTTP GET /persistent/users."""
+        if not self.persistent_manager:
+            return web.json_response({"error": "Persistent browser not enabled"}, status=404)
+        return web.json_response({"users": self.persistent_manager.list_users()})
+
+    async def _handle_persistent_command(self, request: web.Request) -> web.Response:
+        """Handle HTTP POST /persistent/command."""
+        if not self.persistent_manager:
+            return web.json_response({"error": "Persistent browser not enabled"}, status=404)
+        try:
+            data = await request.json()
+            token = data.get("token")
+            user_id = data.get("user_id")
+            command = data.get("command")
+
+            if not token:
+                return web.json_response({"status": "error", "error": "Missing 'token'"}, status=400)
+            if not user_id:
+                return web.json_response({"status": "error", "error": "Missing 'user_id'"}, status=400)
+            if not command:
+                return web.json_response({"status": "error", "error": "Missing 'command'"}, status=400)
+
+            result = await self.persistent_manager.execute_for_user(user_id, command, data)
+            return web.json_response(result)
+        except Exception as e:
+            return web.json_response({"status": "error", "error": str(e)}, status=400)
 
     async def _process_command(self, data: Dict) -> Dict[str, Any]:
         """Process any agent command."""

@@ -41,6 +41,15 @@ DEFAULT_CONFIG = {
         "max_concurrent_scans": 2,
         "allowed_domains": []
     },
+    "persistent": {
+        "enabled": False,
+        "max_instances": 5,
+        "max_contexts_per_instance": 50,
+        "health_check_interval_seconds": 30,
+        "idle_timeout_minutes": 60,
+        "memory_cap_mb": 4000,
+        "auto_restart": True,
+    },
     "transcription": {
         "model": "tiny",
         "language": "auto"
