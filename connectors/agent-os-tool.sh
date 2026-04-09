@@ -55,6 +55,8 @@ if [ -z "$1" ]; then
     echo "  get-dom                     Get DOM snapshot"
     echo "  get-links                   Get all links"
     echo "  get-images                  Get all images"
+    echo "  get-text <selector>         Get text of element"
+    echo "  get-attr <sel> <attr>       Get element attribute"
     echo "  screenshot [full-page]      Take screenshot"
     echo "  evaluate-js <script>        Execute JavaScript"
     echo "  scroll <direction> <amount> Scroll page"
@@ -238,6 +240,15 @@ case "$COMMAND" in
         ;;
     get-images)
         DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"get-images\"}"
+        ;;
+    get-text)
+        SELECTOR="${1:?Missing selector}"
+        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"get-text\",\"selector\":\"$SELECTOR\"}"
+        ;;
+    get-attr)
+        SELECTOR="${1:?Missing selector}"
+        ATTR="${2:?Missing attribute}"
+        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"get-attr\",\"selector\":\"$SELECTOR\",\"attribute\":\"$ATTR\"}"
         ;;
     screenshot)
         FULL="${1:-false}"

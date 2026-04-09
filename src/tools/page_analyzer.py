@@ -308,6 +308,8 @@ class PageAnalyzer:
 
         phones = await page.evaluate("""() => {
             const text = document.body.innerText;
+            // Remove IP addresses before matching phone numbers
+            const cleanedText = text.replace(/\\b\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\b/g, ' ');
             const patterns = [
                 /\\+?\\d{1,3}[-.\\s]?\\(?\\d{1,4}\\)?[-.\\s]?\\d{1,4}[-.\\s]?\\d{1,9}/g,
                 /\\(?\\d{3}\\)?[-.\\s]?\\d{3}[-.\\s]?\\d{4}/g,
@@ -315,7 +317,7 @@ class PageAnalyzer:
             ];
             const all = [];
             patterns.forEach(p => {
-                const m = text.match(p) || [];
+                const m = cleanedText.match(p) || [];
                 all.push(...m);
             });
             return [...new Set(all)].filter(n => n.replace(/\\D/g, '').length >= 7);

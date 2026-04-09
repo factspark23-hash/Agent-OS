@@ -1181,7 +1181,7 @@ class AgentBrowser:
         context_options = {
             "viewport": {"width": preset["width"], "height": preset["height"]},
             "device_scale_factor": preset["device_scale_factor"],
-            "is_mobile": preset["device_scale_factor"] > 1,
+            "is_mobile": preset["device_scale_factor"] > 1 and preset["width"] < 500,
             "has_touch": preset["device_scale_factor"] > 1,
             "user_agent": preset["user_agent"] or self.config.get("browser.user_agent"),
             "locale": "en-US",
@@ -1221,7 +1221,7 @@ class AgentBrowser:
             "device": device,
             "viewport": {"width": preset["width"], "height": preset["height"]},
             "device_scale_factor": preset["device_scale_factor"],
-            "is_mobile": preset["device_scale_factor"] > 1,
+            "is_mobile": preset["device_scale_factor"] > 1 and preset["width"] < 500,
             "user_agent": preset["user_agent"] or self.config.get("browser.user_agent"),
         }
 
@@ -1232,8 +1232,10 @@ class AgentBrowser:
             devices[name] = {
                 "viewport": f"{preset['width']}x{preset['height']}",
                 "device_scale_factor": preset["device_scale_factor"],
-                "type": "mobile" if preset["device_scale_factor"] > 1 and preset["width"] < 500 else
-                        "tablet" if preset["device_scale_factor"] > 1 else "desktop",
+                "type": "desktop" if preset["device_scale_factor"] <= 1 else
+                        "mobile" if preset["width"] < 500 else
+                        "tablet" if preset["width"] < 1920 else
+                        "desktop",
             }
         return {"status": "success", "devices": devices, "current": self._current_device}
 

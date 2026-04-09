@@ -381,4 +381,9 @@ class WorkflowEngine:
         if not handler:
             return {"status": "error", "error": f"Unknown workflow command: {command}"}
 
-        return await handler()
+        result = await handler()
+        if isinstance(result, dict):
+            if "status" not in result:
+                result["status"] = "success"
+            return result
+        return {"status": "success", "result": str(result)}
