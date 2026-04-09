@@ -20,6 +20,7 @@ Connect any AI (Claude, GPT-4, Codex, OpenClaw, Qwen, local LLMs) and give them 
 
 - 🛡️ **Anti-Detection** — Blocks reCAPTCHA, hCaptcha, Cloudflare Turnstile, PerimeterX, DataDome, Imperva, Akamai, Kasada at the network level
 - 🤖 **74+ CLI Commands / 38 Connector Tools** — Navigate, click, fill forms, screenshot, scroll, tabs, DOM analysis, smart finder, workflows, network capture, page analysis, and more
+- 🖥️ **Visual Debug UI** — Real-time web dashboard with live browser view, session manager, command log, network monitor, console viewer, DOM inspector, cookie manager, and command terminal
 - 🧠 **Human Mimicry** — Bezier mouse curves, realistic typing delays, natural scroll behavior, typo simulation
 - 🔍 **Security Scanners** — XSS, SQL injection, sensitive data exposure detection
 - 🔍 **Smart Element Finder** — Find elements by visible text — no CSS selector needed
@@ -51,6 +52,9 @@ docker compose up -d
 
 # Check it's running
 curl http://localhost:8001/status
+
+# Open the Visual Debug UI
+open http://localhost:8002
 ```
 
 ### Option 2: Manual Install
@@ -104,6 +108,62 @@ curl -X POST http://localhost:8001/command \
   -H "Content-Type: application/json" \
   -d '{"token":"my-agent-123","command":"get-content"}'
 ```
+
+## Visual Debug UI
+
+A real-time web dashboard for monitoring and debugging Agent-OS. Opens at `http://localhost:8002` by default.
+
+### Features
+
+| Panel | Description |
+|-------|-------------|
+| 🌐 **Live Browser** | Real-time screenshot streaming from the headless browser |
+| 🔗 **Sessions** | View, monitor, and kill active agent sessions |
+| ⚡ **Commands** | Full command execution history with status, params, and results |
+| 🌍 **Network** | Captured HTTP requests with filtering |
+| 🖥 **Console** | Browser console log viewer (log, warn, error) |
+| 🏗 **DOM Inspector** | Live DOM tree visualization |
+| 🍪 **Cookies** | Cookie viewer with full metadata |
+| 📊 **Pages** | Page analysis cards (elements, links, images, forms, scripts) |
+| ⌨ **Terminal** | Run commands directly from the browser with live output |
+
+### Quick Commands Bar
+
+One-click buttons for common actions:
+- 📷 Screenshot · 📄 Content · 🔗 Links · 📑 Tabs · 🍪 Cookies · 🖥 Console · ⬅ Back · ↻ Reload
+
+### Access
+
+```bash
+# Default URL
+http://localhost:8002
+
+# Custom port
+python3 main.py --port 9000  # Debug UI on 9002
+
+# Via config
+# server:
+#   debug_port: 8002
+```
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/status` | GET | System status, RAM, uptime |
+| `/api/sessions` | GET | Active sessions list |
+| `/api/tabs` | GET | Open browser tabs |
+| `/api/commands` | GET | Command execution history |
+| `/api/console` | GET | Browser console logs |
+| `/api/network` | GET | Captured network requests |
+| `/api/dom` | GET | DOM snapshot |
+| `/api/cookies` | GET | All cookies |
+| `/api/screenshot` | GET | Current screenshot |
+| `/api/page-info` | GET | Page analysis data |
+| `/api/health` | GET | Persistent browser health |
+| `/api/command` | POST | Execute a command |
+| `/api/session/destroy` | POST | Destroy a session |
+| `/ws` | WebSocket | Real-time screenshot + status stream |
 
 ## Connect Your AI Agent
 
@@ -337,14 +397,20 @@ Agent-OS/
 │   │   ├── captcha_bypass.py  # Detection script blocking engine
 │   │   ├── human_mimicry.py   # Bezier mouse, typing simulation
 │   │   └── auth_handler.py    # AES-256 encrypted credential vault
-│   └── tools/
-│       ├── scanner.py         # XSS, SQLi, sensitive data scanners
-│       ├── transcriber.py     # Video/audio transcription (Whisper)
-│       ├── form_filler.py     # Smart form detection & filling
-│       ├── smart_finder.py    # Find elements by visible text
-│       ├── workflow.py        # Multi-step workflow engine
-│       ├── network_capture.py # HTTP request capture & analysis
-│       └── page_analyzer.py   # Page summary, SEO, accessibility
+│   ├── tools/
+│   │   ├── scanner.py         # XSS, SQLi, sensitive data scanners
+│   │   ├── transcriber.py     # Video/audio transcription (Whisper)
+│   │   ├── form_filler.py     # Smart form detection & filling
+│   │   ├── smart_finder.py    # Find elements by visible text
+│   │   ├── workflow.py        # Multi-step workflow engine
+│   │   ├── network_capture.py # HTTP request capture & analysis
+│   │   └── page_analyzer.py   # Page summary, SEO, accessibility
+│   └── debug/
+│       ├── server.py          # Debug UI web server + WebSocket
+│       └── static/            # Frontend assets
+│           ├── index.html     # Dashboard HTML
+│           ├── style.css      # Dark theme styles
+│           └── app.js         # Real-time client app
 ├── connectors/
 │   ├── mcp_server.py          # MCP connector (38 tools)
 │   ├── openai_connector.py    # OpenAI + Claude connector (38 tools)
@@ -408,6 +474,8 @@ Options:
 | `/commands` | GET | List all available commands with params |
 | `/debug` | GET | Debug info (sessions, tabs, blocked requests) |
 | `/screenshot` | GET | Quick screenshot (base64 text) |
+| `/ws` | WebSocket | Real-time agent communication |
+| **Debug UI** | | `http://localhost:8002` — Visual dashboard (see [Visual Debug UI](#visual-debug-ui)) |
 
 ### Persistent Browser (when `--persistent` enabled)
 

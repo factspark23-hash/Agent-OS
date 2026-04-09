@@ -14,6 +14,7 @@ DEFAULT_CONFIG = {
         "host": "127.0.0.1",
         "ws_port": 8000,
         "http_port": 8001,
+        "debug_port": 8002,
         "max_connections": 10
     },
     "browser": {

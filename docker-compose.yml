@@ -13,6 +13,7 @@ services:
     ports:
       - "8000:8000"  # WebSocket
       - "8001:8001"  # HTTP REST API
+      - "8002:8002"  # Visual Debug UI
     environment:
       - AGENT_TOKEN=${AGENT_TOKEN:-}  # Set your token, or leave empty for auto-generated
     volumes:

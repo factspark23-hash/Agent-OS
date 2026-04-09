@@ -27,6 +27,7 @@ from src.core.browser import AgentBrowser
 from src.core.session import SessionManager
 from src.core.persistent_browser import PersistentBrowserManager
 from src.agents.server import AgentServer
+from src.debug.server import DebugServer
 
 # Setup logging
 logging.basicConfig(
@@ -47,6 +48,7 @@ class AgentOS:
         self.session_manager = SessionManager(self.config)
         self.persistent_manager = PersistentBrowserManager(self.config) if (self.config.get("persistent.enabled", False) or args.persistent) else None
         self.server = AgentServer(self.config, self.browser, self.session_manager, self.persistent_manager)
+        self.debug_server = DebugServer(self.config, self.browser, self.session_manager, self.server, self.persistent_manager)
         self._running = False
         self._ram_monitor_task = None
 
@@ -87,11 +89,16 @@ class AgentOS:
         logger.info("Starting agent server...")
         await self.server.start()
 
+        # Start debug UI server
+        logger.info("Starting debug UI server...")
+        await self.debug_server.start()
+
         # Start RAM monitor
         self._ram_monitor_task = asyncio.create_task(self._ram_monitor())
 
         ws_port = self.config.get("server.ws_port", 8000)
         http_port = self.config.get("server.http_port", 8001)
+        debug_port = self.config.get("server.debug_port", 8002)
         default_token = self.args.agent_token or self.config.generate_agent_token("agent")
 
         logger.info("")
@@ -99,6 +106,7 @@ class AgentOS:
         logger.info("  ─────────────────────────────────────────")
         logger.info(f"  WebSocket: ws://127.0.0.1:{ws_port}")
         logger.info(f"  HTTP API:  http://127.0.0.1:{http_port}")
+        logger.info(f"  Debug UI:  http://127.0.0.1:{debug_port}")
         logger.info(f"  Agent Token: {default_token}")
         logger.info("")
         logger.info("  Quick test:")
@@ -122,6 +130,8 @@ class AgentOS:
 
         if self._ram_monitor_task:
             self._ram_monitor_task.cancel()
+
+        await self.debug_server.stop()
 
         if self.persistent_manager:
             await self.persistent_manager.stop()

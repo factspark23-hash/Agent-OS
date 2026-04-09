@@ -59,7 +59,8 @@ RUN mkdir -p /root/.agent-os
 # Expose ports
 # 8000 = WebSocket (agents connect here)
 # 8001 = HTTP REST API (curl / any HTTP client)
-EXPOSE 8000 8001
+# 8002 = Visual Debug UI (browser dashboard)
+EXPOSE 8000 8001 8002
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

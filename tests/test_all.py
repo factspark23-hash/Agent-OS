@@ -16,6 +16,7 @@ from src.core.config import Config, DEFAULT_CONFIG
 from src.core.session import SessionManager, Session
 from src.security.human_mimicry import HumanMimicry
 from src.security.captcha_bypass import CaptchaBypass
+from src.debug.server import DebugServer
 
 
 # ─── Config Tests ─────────────────────────────────────────────
@@ -197,6 +198,49 @@ class TestIntegration:
         assert "webdriver" in ANTI_DETECTION_JS
         assert "plugins" in ANTI_DETECTION_JS
         assert "chrome" in ANTI_DETECTION_JS.lower()
+
+
+# ─── Debug Server Tests ───────────────────────────────────────
+
+class TestDebugServer:
+    def test_config_has_debug_port(self):
+        """Test that default config includes debug port."""
+        config = Config("/tmp/test-debug-config.yaml")
+        assert config.get("server.debug_port") == 8002
+
+    def test_command_history(self):
+        """Test command recording."""
+        config = Config("/tmp/test-debug-config2.yaml")
+        # Mock dependencies
+        debug = DebugServer(config, None, None, None)
+        debug.record_command("navigate", {"url": "https://example.com"}, {"status": "success"})
+        assert len(debug._command_history) == 1
+        assert debug._command_history[0]["command"] == "navigate"
+        assert debug._command_history[0]["status"] == "success"
+
+    def test_console_log_recording(self):
+        """Test console log recording."""
+        config = Config("/tmp/test-debug-config3.yaml")
+        debug = DebugServer(config, None, None, None)
+        debug.record_console_log("error", "Something went wrong", "main")
+        assert len(debug._console_logs) == 1
+        assert debug._console_logs[0]["level"] == "error"
+
+    def test_max_history_limit(self):
+        """Test that history respects max limit."""
+        config = Config("/tmp/test-debug-config4.yaml")
+        debug = DebugServer(config, None, None, None)
+        for i in range(250):
+            debug.record_command(f"cmd-{i}", {}, {"status": "success"})
+        assert len(debug._command_history) <= 200
+
+    def test_static_dir_exists(self):
+        """Test that static files exist."""
+        from pathlib import Path
+        static_dir = Path(__file__).parent.parent / "src" / "debug" / "static"
+        assert (static_dir / "index.html").exists()
+        assert (static_dir / "style.css").exists()
+        assert (static_dir / "app.js").exists()
 
 
 if __name__ == "__main__":
