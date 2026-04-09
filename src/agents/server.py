@@ -155,6 +155,53 @@ class AgentServer:
             "auto-login": {"params": {"url": "string", "domain": "string"}, "description": "Auto-login using saved credentials"},
             "fill-job": {"params": {"url": "string", "profile": "dict"}, "description": "Auto-fill job application form"},
             "tabs": {"params": {"action": "list|new|close|switch", "tab_id": "string (optional)"}, "description": "Manage browser tabs"},
+
+            # Smart Element Finder
+            "smart-find": {"params": {"description": "string", "tag": "string (optional)", "timeout": "int (ms)"}, "description": "Find element by visible text/label — no CSS selector needed"},
+            "smart-find-all": {"params": {"description": "string", "tag": "string (optional)"}, "description": "Find ALL matching elements by text, ranked by relevance"},
+            "smart-click": {"params": {"text": "string", "tag": "string (optional)", "timeout": "int (ms)"}, "description": "Click element by its visible text"},
+            "smart-fill": {"params": {"label": "string", "value": "string", "timeout": "int (ms)"}, "description": "Find input by label/placeholder and fill it"},
+
+            # Workflow Engine
+            "workflow": {"params": {"steps": "list[dict]", "variables": "dict (optional)", "on_error": "abort|skip|retry", "retry_count": "int", "step_delay_ms": "int"}, "description": "Execute multi-step workflow"},
+            "workflow-template": {"params": {"template_name": "string", "variables": "dict (optional)"}, "description": "Execute a saved workflow template"},
+            "workflow-json": {"params": {"json": "string"}, "description": "Execute workflow from JSON string"},
+            "workflow-save": {"params": {"name": "string", "steps": "list[dict]", "variables": "dict (optional)", "description": "string"}, "description": "Save workflow as reusable template"},
+            "workflow-list": {"params": {}, "description": "List all workflow templates"},
+            "workflow-status": {"params": {"workflow_id": "string"}, "description": "Get status of running workflow"},
+
+            # Network Capture
+            "network-start": {"params": {"page_id": "string (optional)", "url_pattern": "string (regex, optional)", "resource_types": "list (optional)", "methods": "list (optional)", "capture_body": "bool"}, "description": "Start capturing network requests"},
+            "network-stop": {"params": {"page_id": "string (optional)"}, "description": "Stop capturing and get summary"},
+            "network-get": {"params": {"page_id": "string (optional)", "url_pattern": "string", "resource_type": "string", "method": "string", "status_code": "int", "api_only": "bool", "limit": "int", "offset": "int"}, "description": "Get captured requests with filters"},
+            "network-apis": {"params": {"page_id": "string (optional)"}, "description": "Discover all API endpoints from captured traffic"},
+            "network-detail": {"params": {"request_id": "string"}, "description": "Get full details of a captured request"},
+            "network-stats": {"params": {"page_id": "string (optional)"}, "description": "Get network capture statistics"},
+            "network-export": {"params": {"page_id": "string (optional)", "format": "json|har", "filename": "string (optional)"}, "description": "Export captured requests to file"},
+            "network-clear": {"params": {"page_id": "string (optional)"}, "description": "Clear captured requests"},
+
+            # Page Analyzer
+            "page-summary": {"params": {"page_id": "string (optional)"}, "description": "Analyze page: title, headings, content, forms, links, tech stack"},
+            "page-tables": {"params": {"page_id": "string (optional)"}, "description": "Extract all tables as structured data"},
+            "page-structured": {"params": {"page_id": "string (optional)"}, "description": "Extract JSON-LD and Microdata structured data"},
+            "page-emails": {"params": {"page_id": "string (optional)"}, "description": "Find all email addresses on page"},
+            "page-phones": {"params": {"page_id": "string (optional)"}, "description": "Find all phone numbers on page"},
+            "page-accessibility": {"params": {"page_id": "string (optional)"}, "description": "Basic accessibility audit"},
+            "page-seo": {"params": {"page_id": "string (optional)"}, "description": "Basic SEO audit with score"},
+
+            # Proxy Support
+            "set-proxy": {"params": {"proxy_url": "string"}, "description": "Set proxy (http://user:pass@host:port or socks5://host:port)"},
+            "get-proxy": {"params": {}, "description": "Get current proxy configuration"},
+
+            # Mobile Emulation
+            "emulate-device": {"params": {"device": "string"}, "description": "Emulate mobile/tablet/desktop device"},
+            "list-devices": {"params": {}, "description": "List all available device presets"},
+
+            # Session Save/Restore
+            "save-session": {"params": {"name": "string (optional)"}, "description": "Save full browser state (cookies, localStorage, tabs)"},
+            "restore-session": {"params": {"name": "string (optional)"}, "description": "Restore previously saved browser state"},
+            "list-sessions": {"params": {}, "description": "List all saved sessions"},
+            "delete-session": {"params": {"name": "string"}, "description": "Delete a saved session"},
         }
         return web.json_response(commands)
 
@@ -245,6 +292,53 @@ class AgentServer:
             "save-creds": self._cmd_save_creds,
             "fill-job": self._cmd_fill_job,
             "tabs": self._cmd_tabs,
+
+            # Smart Element Finder
+            "smart-find": self._cmd_smart_find,
+            "smart-find-all": self._cmd_smart_find_all,
+            "smart-click": self._cmd_smart_click,
+            "smart-fill": self._cmd_smart_fill,
+
+            # Workflow Engine
+            "workflow": self._cmd_workflow,
+            "workflow-template": self._cmd_workflow_template,
+            "workflow-json": self._cmd_workflow_json,
+            "workflow-save": self._cmd_workflow_save,
+            "workflow-list": self._cmd_workflow_list,
+            "workflow-status": self._cmd_workflow_status,
+
+            # Network Capture
+            "network-start": self._cmd_network_start,
+            "network-stop": self._cmd_network_stop,
+            "network-get": self._cmd_network_get,
+            "network-apis": self._cmd_network_apis,
+            "network-detail": self._cmd_network_detail,
+            "network-stats": self._cmd_network_stats,
+            "network-export": self._cmd_network_export,
+            "network-clear": self._cmd_network_clear,
+
+            # Page Analyzer
+            "page-summary": self._cmd_page_summary,
+            "page-tables": self._cmd_page_tables,
+            "page-structured": self._cmd_page_structured,
+            "page-emails": self._cmd_page_emails,
+            "page-phones": self._cmd_page_phones,
+            "page-accessibility": self._cmd_page_accessibility,
+            "page-seo": self._cmd_page_seo,
+
+            # Proxy
+            "set-proxy": self._cmd_set_proxy,
+            "get-proxy": self._cmd_get_proxy,
+
+            # Mobile Emulation
+            "emulate-device": self._cmd_emulate_device,
+            "list-devices": self._cmd_list_devices,
+
+            # Session Save/Restore
+            "save-session": self._cmd_save_session,
+            "restore-session": self._cmd_restore_session,
+            "list-sessions": self._cmd_list_sessions,
+            "delete-session": self._cmd_delete_session,
         }
 
         handler = handlers.get(command)
@@ -527,3 +621,240 @@ class AgentServer:
                 return {"status": "success" if closed else "error", "closed": closed}
             return {"status": "error", "error": "Missing 'tab_id' for close"}
         return {"status": "error", "error": f"Unknown tab action: {action}"}
+
+    # ─── Smart Element Finder ───────────────────────────────
+
+    async def _cmd_smart_find(self, data: Dict, session) -> Dict:
+        from src.tools.smart_finder import SmartElementFinder
+        description = data.get("description")
+        if not description:
+            return {"status": "error", "error": "Missing 'description'"}
+        finder = SmartElementFinder(self.browser)
+        return await finder.find(
+            description,
+            tag=data.get("tag"),
+            timeout=data.get("timeout", 5000),
+        )
+
+    async def _cmd_smart_find_all(self, data: Dict, session) -> Dict:
+        from src.tools.smart_finder import SmartElementFinder
+        description = data.get("description")
+        if not description:
+            return {"status": "error", "error": "Missing 'description'"}
+        finder = SmartElementFinder(self.browser)
+        return await finder.find_all(description, tag=data.get("tag"))
+
+    async def _cmd_smart_click(self, data: Dict, session) -> Dict:
+        from src.tools.smart_finder import SmartElementFinder
+        text = data.get("text")
+        if not text:
+            return {"status": "error", "error": "Missing 'text'"}
+        finder = SmartElementFinder(self.browser)
+        return await finder.click_text(text, tag=data.get("tag"), timeout=data.get("timeout", 5000))
+
+    async def _cmd_smart_fill(self, data: Dict, session) -> Dict:
+        from src.tools.smart_finder import SmartElementFinder
+        label = data.get("label")
+        value = data.get("value")
+        if not label or value is None:
+            return {"status": "error", "error": "Missing 'label' or 'value'"}
+        finder = SmartElementFinder(self.browser)
+        return await finder.fill_text(label, value, timeout=data.get("timeout", 5000))
+
+    # ─── Workflow Engine ────────────────────────────────────
+
+    async def _cmd_workflow(self, data: Dict, session) -> Dict:
+        from src.tools.workflow import WorkflowEngine
+        steps = data.get("steps")
+        if not steps:
+            return {"status": "error", "error": "Missing 'steps'"}
+        engine = WorkflowEngine(self.browser)
+        return await engine.execute(
+            steps,
+            variables=data.get("variables"),
+            on_error=data.get("on_error", "abort"),
+            retry_count=data.get("retry_count", 0),
+            step_delay_ms=data.get("step_delay_ms", 0),
+        )
+
+    async def _cmd_workflow_template(self, data: Dict, session) -> Dict:
+        from src.tools.workflow import WorkflowEngine
+        template_name = data.get("template_name")
+        if not template_name:
+            return {"status": "error", "error": "Missing 'template_name'"}
+        engine = WorkflowEngine(self.browser)
+        return await engine.execute_template(template_name, data.get("variables"))
+
+    async def _cmd_workflow_json(self, data: Dict, session) -> Dict:
+        from src.tools.workflow import WorkflowEngine
+        json_str = data.get("json")
+        if not json_str:
+            return {"status": "error", "error": "Missing 'json'"}
+        engine = WorkflowEngine(self.browser)
+        return await engine.execute_from_json(json_str)
+
+    async def _cmd_workflow_save(self, data: Dict, session) -> Dict:
+        from src.tools.workflow import WorkflowEngine
+        name = data.get("name")
+        steps = data.get("steps")
+        if not name or not steps:
+            return {"status": "error", "error": "Missing 'name' or 'steps'"}
+        engine = WorkflowEngine(self.browser)
+        return engine.save_template(name, steps, data.get("variables"), data.get("description", ""))
+
+    async def _cmd_workflow_list(self, data: Dict, session) -> Dict:
+        from src.tools.workflow import WorkflowEngine
+        engine = WorkflowEngine(self.browser)
+        return {"status": "success", "templates": engine.list_templates()}
+
+    async def _cmd_workflow_status(self, data: Dict, session) -> Dict:
+        from src.tools.workflow import WorkflowEngine
+        workflow_id = data.get("workflow_id")
+        if not workflow_id:
+            return {"status": "error", "error": "Missing 'workflow_id'"}
+        engine = WorkflowEngine(self.browser)
+        return engine.get_status(workflow_id)
+
+    # ─── Network Capture ────────────────────────────────────
+
+    async def _cmd_network_start(self, data: Dict, session) -> Dict:
+        from src.tools.network_capture import NetworkCapture
+        if not hasattr(self, '_network_capture') or self._network_capture is None:
+            self._network_capture = NetworkCapture(self.browser)
+        return await self._network_capture.start_capture(
+            page_id=data.get("page_id", "main"),
+            url_pattern=data.get("url_pattern"),
+            resource_types=data.get("resource_types"),
+            methods=data.get("methods"),
+            capture_body=data.get("capture_body", False),
+        )
+
+    async def _cmd_network_stop(self, data: Dict, session) -> Dict:
+        if not hasattr(self, '_network_capture') or self._network_capture is None:
+            return {"status": "error", "error": "Network capture not started"}
+        return await self._network_capture.stop_capture(page_id=data.get("page_id", "main"))
+
+    async def _cmd_network_get(self, data: Dict, session) -> Dict:
+        if not hasattr(self, '_network_capture') or self._network_capture is None:
+            return {"status": "error", "error": "Network capture not started"}
+        return await self._network_capture.get_captured(
+            page_id=data.get("page_id", "main"),
+            url_pattern=data.get("url_pattern"),
+            resource_type=data.get("resource_type"),
+            method=data.get("method"),
+            status_code=data.get("status_code"),
+            api_only=data.get("api_only", False),
+            limit=data.get("limit", 100),
+            offset=data.get("offset", 0),
+        )
+
+    async def _cmd_network_apis(self, data: Dict, session) -> Dict:
+        if not hasattr(self, '_network_capture') or self._network_capture is None:
+            return {"status": "error", "error": "Network capture not started"}
+        return await self._network_capture.get_apis(page_id=data.get("page_id", "main"))
+
+    async def _cmd_network_detail(self, data: Dict, session) -> Dict:
+        request_id = data.get("request_id")
+        if not request_id:
+            return {"status": "error", "error": "Missing 'request_id'"}
+        if not hasattr(self, '_network_capture') or self._network_capture is None:
+            return {"status": "error", "error": "Network capture not started"}
+        return await self._network_capture.get_request_detail(request_id)
+
+    async def _cmd_network_stats(self, data: Dict, session) -> Dict:
+        if not hasattr(self, '_network_capture') or self._network_capture is None:
+            return {"status": "error", "error": "Network capture not started"}
+        return self._network_capture.get_stats(page_id=data.get("page_id", "main"))
+
+    async def _cmd_network_export(self, data: Dict, session) -> Dict:
+        if not hasattr(self, '_network_capture') or self._network_capture is None:
+            return {"status": "error", "error": "Network capture not started"}
+        fmt = data.get("format", "json")
+        page_id = data.get("page_id", "main")
+        filename = data.get("filename")
+        if fmt == "har":
+            return await self._network_capture.export_har(page_id=page_id, filename=filename)
+        return await self._network_capture.export_json(page_id=page_id, filename=filename)
+
+    async def _cmd_network_clear(self, data: Dict, session) -> Dict:
+        if not hasattr(self, '_network_capture') or self._network_capture is None:
+            return {"status": "error", "error": "Network capture not started"}
+        return await self._network_capture.clear(page_id=data.get("page_id", "main"))
+
+    # ─── Page Analyzer ─────────────────────────────────────
+
+    async def _cmd_page_summary(self, data: Dict, session) -> Dict:
+        from src.tools.page_analyzer import PageAnalyzer
+        analyzer = PageAnalyzer(self.browser)
+        return await analyzer.summarize(page_id=data.get("page_id", "main"))
+
+    async def _cmd_page_tables(self, data: Dict, session) -> Dict:
+        from src.tools.page_analyzer import PageAnalyzer
+        analyzer = PageAnalyzer(self.browser)
+        return await analyzer.extract_tables(page_id=data.get("page_id", "main"))
+
+    async def _cmd_page_structured(self, data: Dict, session) -> Dict:
+        from src.tools.page_analyzer import PageAnalyzer
+        analyzer = PageAnalyzer(self.browser)
+        return await analyzer.extract_structured_data(page_id=data.get("page_id", "main"))
+
+    async def _cmd_page_emails(self, data: Dict, session) -> Dict:
+        from src.tools.page_analyzer import PageAnalyzer
+        analyzer = PageAnalyzer(self.browser)
+        return await analyzer.find_emails(page_id=data.get("page_id", "main"))
+
+    async def _cmd_page_phones(self, data: Dict, session) -> Dict:
+        from src.tools.page_analyzer import PageAnalyzer
+        analyzer = PageAnalyzer(self.browser)
+        return await analyzer.find_phone_numbers(page_id=data.get("page_id", "main"))
+
+    async def _cmd_page_accessibility(self, data: Dict, session) -> Dict:
+        from src.tools.page_analyzer import PageAnalyzer
+        analyzer = PageAnalyzer(self.browser)
+        return await analyzer.accessibility_check(page_id=data.get("page_id", "main"))
+
+    async def _cmd_page_seo(self, data: Dict, session) -> Dict:
+        from src.tools.page_analyzer import PageAnalyzer
+        analyzer = PageAnalyzer(self.browser)
+        return await analyzer.seo_audit(page_id=data.get("page_id", "main"))
+
+    # ─── Proxy ─────────────────────────────────────────────
+
+    async def _cmd_set_proxy(self, data: Dict, session) -> Dict:
+        proxy_url = data.get("proxy_url")
+        if not proxy_url:
+            return {"status": "error", "error": "Missing 'proxy_url'"}
+        return await self.browser.set_proxy(proxy_url)
+
+    async def _cmd_get_proxy(self, data: Dict, session) -> Dict:
+        return await self.browser.get_proxy()
+
+    # ─── Mobile Emulation ──────────────────────────────────
+
+    async def _cmd_emulate_device(self, data: Dict, session) -> Dict:
+        device = data.get("device")
+        if not device:
+            return {"status": "error", "error": "Missing 'device'"}
+        return await self.browser.emulate_device(device)
+
+    async def _cmd_list_devices(self, data: Dict, session) -> Dict:
+        return await self.browser.list_devices()
+
+    # ─── Session Save/Restore ──────────────────────────────
+
+    async def _cmd_save_session(self, data: Dict, session) -> Dict:
+        name = data.get("name", "default")
+        return await self.browser.save_session(name)
+
+    async def _cmd_restore_session(self, data: Dict, session) -> Dict:
+        name = data.get("name", "default")
+        return await self.browser.restore_session(name)
+
+    async def _cmd_list_sessions(self, data: Dict, session) -> Dict:
+        return await self.browser.list_sessions()
+
+    async def _cmd_delete_session(self, data: Dict, session) -> Dict:
+        name = data.get("name")
+        if not name:
+            return {"status": "error", "error": "Missing 'name'"}
+        return await self.browser.delete_session(name)

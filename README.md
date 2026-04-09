@@ -125,17 +125,27 @@ subprocess.run(["./connectors/agent-os-tool.sh", "click", "button.submit"])
 execSync("./connectors/agent-os-tool.sh screenshot")
 ```
 
-## All 25 Tools
+## All 42 Tools
 
 | Category | Tools |
 |----------|-------|
 | **Navigation** | `navigate`, `back`, `forward`, `reload` |
-| **Interaction** | `click`, `type`, `press`, `hover`, `fill-form`, `wait` |
+| **Interaction** | `click`, `type`, `press`, `hover`, `fill-form`, `wait`, `double-click`, `right-click`, `context-action` |
 | **Content** | `get-content`, `get-dom`, `get-links`, `get-images`, `screenshot` |
-| **Control** | `scroll`, `evaluate-js`, `tabs`, `status` |
+| **Control** | `scroll`, `evaluate-js`, `tabs`, `status`, `viewport` |
+| **Drag & Drop** | `drag-drop`, `drag-offset` |
+| **Forms** | `fill-form`, `clear-input`, `checkbox`, `select`, `upload` |
+| **Cookies** | `get-cookies`, `set-cookie`, `console-logs` |
+| **Smart Finder** | `smart-find`, `smart-find-all`, `smart-click`, `smart-fill` |
+| **Workflows** | `workflow`, `workflow-template`, `workflow-json`, `workflow-save`, `workflow-list`, `workflow-status` |
+| **Network** | `network-start`, `network-stop`, `network-get`, `network-apis`, `network-detail`, `network-stats`, `network-export`, `network-clear` |
+| **Page Analysis** | `page-summary`, `page-tables`, `page-structured`, `page-emails`, `page-phones`, `page-accessibility`, `page-seo` |
 | **Security** | `scan-xss`, `scan-sqli`, `scan-sensitive` |
 | **Auth** | `save-credentials`, `auto-login` |
 | **Media** | `transcribe` |
+| **Proxy** | `set-proxy`, `get-proxy` |
+| **Mobile** | `emulate-device`, `list-devices` |
+| **Sessions** | `save-session`, `restore-session`, `list-sessions`, `delete-session` |
 
 ## How Anti-Detection Works
 
