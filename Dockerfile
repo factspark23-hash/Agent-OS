@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Install Playwright Chromium
 RUN playwright install chromium
-RUN playwright install-deps chromium
+RUN playwright install-deps chromium 2>/dev/null || true
 
 # ─── Final Image ──────────────────────────────────────────────
 FROM python:3.12-slim
@@ -44,6 +44,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 \
     libcairo2 \
     libasound2 \
+    libxfixes3 \
     fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
@@ -55,6 +56,9 @@ COPY qwen_bridge.py .
 
 # Create config directory
 RUN mkdir -p /root/.agent-os
+
+# Bind to 0.0.0.0 for Docker (not 127.0.0.1)
+ENV AGENT_OS_HOST=0.0.0.0
 
 # Expose ports
 # 8000 = WebSocket (agents connect here)

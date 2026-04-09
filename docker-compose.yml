@@ -15,6 +15,7 @@ services:
       - "8001:8001"  # HTTP REST API
     environment:
       - AGENT_TOKEN=${AGENT_TOKEN:-}  # Set your token, or leave empty for auto-generated
+    command: ["--port", "8000", "--agent-token", "${AGENT_TOKEN:-dude-compose-token}"]
     volumes:
       - agent-os-data:/root/.agent-os  # Persist credentials vault
     # Resource limits (adjust for your server)
