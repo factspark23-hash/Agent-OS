@@ -32,9 +32,10 @@ class AgentServer:
         self._http_runner = None
         self._start_time = time.time()
 
-        # Smart Wait + Auto Heal engines (lazy init)
+        # Smart Wait + Auto Heal + Auto Retry engines (lazy init)
         self._smart_wait = None
         self._auto_heal = None
+        self._auto_retry = None
 
     async def start(self):
         """Start both WebSocket and HTTP servers."""
@@ -239,6 +240,18 @@ class AgentServer:
             "heal-fingerprint-page": {"params": {"page_id": "string (optional)"}, "description": "Auto-fingerprint all interactive elements on the page"},
             "heal-stats": {"params": {}, "description": "Get auto-heal statistics and healing history"},
             "heal-clear": {"params": {}, "description": "Clear all healing caches"},
+
+            # Auto-Retry Engine
+            "retry-execute": {"params": {"inner_command": "string", "command_payload": "dict", "deduplicate": "bool (optional)"}, "description": "Execute any command with intelligent retry, error classification, circuit breaker, and budget"},
+            "retry-navigate": {"params": {"url": "string", "page_id": "string (optional)", "wait_until": "string (optional)"}, "description": "Navigate with intelligent retry + smart_wait post-check"},
+            "retry-click": {"params": {"selector": "string", "page_id": "string (optional)"}, "description": "Click with intelligent retry + auto-heal fallback"},
+            "retry-fill": {"params": {"selector": "string", "value": "string", "page_id": "string (optional)"}, "description": "Fill form with intelligent retry + auto-heal fallback"},
+            "retry-api-call": {"params": {"url": "string", "method": "string (default GET)", "headers": "dict (optional)", "body": "dict (optional)"}, "description": "API call with intelligent retry (respects Retry-After headers)"},
+            "retry-stats": {"params": {}, "description": "Get comprehensive retry statistics (per-operation, per-error-class, history)"},
+            "retry-health": {"params": {}, "description": "Quick health check — open circuits and budget status"},
+            "retry-circuit-breakers": {"params": {}, "description": "Get state of all circuit breakers"},
+            "retry-reset-circuit": {"params": {"operation": "string"}, "description": "Force-reset a specific circuit breaker"},
+            "retry-reset-all-circuits": {"params": {}, "description": "Force-reset all circuit breakers"},
         }
         return web.json_response(commands)
 
@@ -309,6 +322,12 @@ class AgentServer:
             from src.tools.auto_heal import AutoHeal
             self._auto_heal = AutoHeal(self.browser, smart_wait=self._get_smart_wait())
         return self._auto_heal
+
+    def _get_auto_retry(self):
+        if self._auto_retry is None:
+            from src.tools.auto_retry import AutoRetry
+            self._auto_retry = AutoRetry(self.browser, smart_wait=self._get_smart_wait(), auto_heal=self._get_auto_heal())
+        return self._auto_retry
 
     async def _process_command(self, data: Dict) -> Dict[str, Any]:
         """Process any agent command."""
@@ -447,6 +466,18 @@ class AgentServer:
             "heal-fingerprint-page": self._cmd_heal_fingerprint_page,
             "heal-stats": self._cmd_heal_stats,
             "heal-clear": self._cmd_heal_clear,
+
+            # Auto Retry
+            "retry-execute": self._cmd_retry_execute,
+            "retry-navigate": self._cmd_retry_navigate,
+            "retry-click": self._cmd_retry_click,
+            "retry-fill": self._cmd_retry_fill,
+            "retry-api-call": self._cmd_retry_api_call,
+            "retry-stats": self._cmd_retry_stats,
+            "retry-health": self._cmd_retry_health,
+            "retry-circuit-breakers": self._cmd_retry_circuit_breakers,
+            "retry-reset-circuit": self._cmd_retry_reset_circuit,
+            "retry-reset-all-circuits": self._cmd_retry_reset_all_circuits,
         }
 
         handler = handlers.get(command)
@@ -1150,3 +1181,103 @@ class AgentServer:
         heal = self._get_auto_heal()
         heal.clear_cache()
         return {"status": "success", "message": "Healing caches cleared"}
+
+    # ─── Auto Retry Commands ────────────────────────────────
+
+    async def _cmd_retry_execute(self, data: Dict, session) -> Dict:
+        """Execute any command with intelligent retry."""
+        command = data.get("inner_command") or data.get("command_payload", {}).get("command")
+        if not command:
+            return {"status": "error", "error": "Missing 'inner_command' or 'command_payload.command'"}
+
+        # Build the action callable from inner command
+        payload = data.get("command_payload", data)
+        payload["command"] = command
+
+        async def action():
+            return await self._execute_command(command, payload, session)
+
+        retry = self._get_auto_retry()
+        return await retry.execute(
+            operation=command,
+            action=action,
+            params=payload,
+            deduplicate=data.get("deduplicate", False),
+        )
+
+    async def _cmd_retry_navigate(self, data: Dict, session) -> Dict:
+        """Navigate with intelligent retry + smart_wait."""
+        url = data.get("url")
+        if not url:
+            return {"status": "error", "error": "Missing 'url'"}
+        retry = self._get_auto_retry()
+        return await retry.navigate(
+            url=url,
+            page_id=data.get("page_id", "main"),
+            wait_until=data.get("wait_until", "domcontentloaded"),
+        )
+
+    async def _cmd_retry_click(self, data: Dict, session) -> Dict:
+        """Click with intelligent retry + auto-heal."""
+        selector = data.get("selector")
+        if not selector:
+            return {"status": "error", "error": "Missing 'selector'"}
+        retry = self._get_auto_retry()
+        return await retry.click(
+            selector=selector,
+            page_id=data.get("page_id", "main"),
+        )
+
+    async def _cmd_retry_fill(self, data: Dict, session) -> Dict:
+        """Fill form field with intelligent retry + auto-heal."""
+        selector = data.get("selector")
+        value = data.get("value")
+        if not selector or value is None:
+            return {"status": "error", "error": "Missing 'selector' or 'value'"}
+        retry = self._get_auto_retry()
+        return await retry.fill(
+            selector=selector,
+            value=value,
+            page_id=data.get("page_id", "main"),
+        )
+
+    async def _cmd_retry_api_call(self, data: Dict, session) -> Dict:
+        """API call with intelligent retry."""
+        url = data.get("url")
+        if not url:
+            return {"status": "error", "error": "Missing 'url'"}
+        retry = self._get_auto_retry()
+        return await retry.api_call(
+            url=url,
+            method=data.get("method", "GET"),
+            headers=data.get("headers"),
+            body=data.get("body"),
+        )
+
+    async def _cmd_retry_stats(self, data: Dict, session) -> Dict:
+        """Get comprehensive retry statistics."""
+        retry = self._get_auto_retry()
+        return retry.get_stats()
+
+    async def _cmd_retry_health(self, data: Dict, session) -> Dict:
+        """Quick health check — circuit breakers + budget."""
+        retry = self._get_auto_retry()
+        return retry.get_health()
+
+    async def _cmd_retry_circuit_breakers(self, data: Dict, session) -> Dict:
+        """Get state of all circuit breakers."""
+        retry = self._get_auto_retry()
+        return {"status": "success", "circuit_breakers": retry.get_circuit_breakers()}
+
+    async def _cmd_retry_reset_circuit(self, data: Dict, session) -> Dict:
+        """Reset a specific circuit breaker."""
+        operation = data.get("operation")
+        if not operation:
+            return {"status": "error", "error": "Missing 'operation'"}
+        retry = self._get_auto_retry()
+        return retry.reset_circuit_breaker(operation)
+
+    async def _cmd_retry_reset_all_circuits(self, data: Dict, session) -> Dict:
+        """Reset all circuit breakers."""
+        retry = self._get_auto_retry()
+        return retry.reset_all_circuit_breakers()
