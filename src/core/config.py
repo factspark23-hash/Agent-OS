@@ -70,9 +70,21 @@ class Config:
         """Load existing config or create default."""
         if self.config_path.exists():
             with open(self.config_path, "r") as f:
-                return yaml.safe_load(f) or DEFAULT_CONFIG
+                loaded = yaml.safe_load(f) or {}
+            # Merge with defaults to ensure all keys exist
+            return self._deep_merge(DEFAULT_CONFIG, loaded)
         self.save(DEFAULT_CONFIG)
         return DEFAULT_CONFIG
+
+    def _deep_merge(self, base: Dict, override: Dict) -> Dict:
+        """Deep merge override into base dict. Override values win."""
+        result = base.copy()
+        for key, value in override.items():
+            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                result[key] = self._deep_merge(result[key], value)
+            else:
+                result[key] = value
+        return result
 
     def save(self, config: Optional[Dict] = None):
         """Save configuration to disk."""
@@ -98,7 +110,7 @@ class Config:
 
     def generate_agent_token(self, agent_name: str) -> str:
         """Generate a secure agent token."""
-        random_suffix = secrets.token_hex(3)
+        random_suffix = secrets.token_hex(16)
         return f"{agent_name}-{random_suffix}"
 
     def hash_token(self, token: str) -> str:

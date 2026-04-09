@@ -42,6 +42,11 @@ class AgentServer:
         self._agent_hub = None
         self._proxy_manager = None
 
+        # Rate limiting: {ip_or_token: (count, window_start)}
+        self._rate_limits: Dict[str, list] = {}
+        self._rate_max_requests = config.get("server.rate_limit_max", 60)
+        self._rate_window_seconds = config.get("server.rate_limit_window", 60)
+
     async def start(self):
         """Start both WebSocket and HTTP servers."""
         ws_host = self.config.get("server.host", "127.0.0.1")
@@ -73,8 +78,64 @@ class AgentServer:
             await self._http_runner.cleanup()
         logger.info("Agent servers stopped")
 
+    def _validate_token(self, token: str) -> bool:
+        """Validate agent token against configured token(s).
+
+        Supports multiple valid tokens via config 'server.allowed_tokens' list,
+        or falls back to the single agent_token. Empty config = accept all (dev mode).
+        """
+        if not token:
+            return False
+
+        # Check against allowed_tokens list
+        allowed = self.config.get("server.allowed_tokens", [])
+        if allowed:
+            return token in allowed
+
+        # Fallback: check against single agent_token
+        configured = self.config.get("server.agent_token")
+        if configured:
+            return token == configured
+
+        # No token configured = dev mode, accept anything (with warning)
+        return True
+
+    def _check_rate_limit(self, identifier: str) -> bool:
+        """Check if identifier (IP or token) is within rate limits. Returns True if allowed."""
+        now = time.time()
+        window = self._rate_window_seconds
+        max_req = self._rate_max_requests
+
+        if identifier not in self._rate_limits:
+            self._rate_limits[identifier] = []
+
+        # Clean old entries outside window
+        timestamps = self._rate_limits[identifier]
+        self._rate_limits[identifier] = [t for t in timestamps if now - t < window]
+
+        if len(self._rate_limits[identifier]) >= max_req:
+            return False
+
+        self._rate_limits[identifier].append(now)
+        return True
+
+    def _get_cors_headers(self) -> Dict[str, str]:
+        """Return CORS headers for API responses."""
+        return {
+            "Access-Control-Allow-Origin": self.config.get("server.cors_origin", "*"),
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "Access-Control-Max-Age": "86400",
+        }
+
     def _setup_routes(self):
         """Setup HTTP routes."""
+        # CORS preflight handler
+        async def _cors_preflight(request: web.Request) -> web.Response:
+            return web.Response(headers=self._get_cors_headers())
+
+        self._http_app.router.add_route("OPTIONS", "/{path:.*}", _cors_preflight)
+
         self._http_app.router.add_post("/command", self._handle_command)
         self._http_app.router.add_get("/status", self._handle_status)
         self._http_app.router.add_get("/commands", self._handle_commands_list)
@@ -87,6 +148,17 @@ class AgentServer:
             self._http_app.router.add_get("/persistent/users", self._handle_persistent_users)
             self._http_app.router.add_post("/persistent/command", self._handle_persistent_command)
 
+        # Add CORS middleware
+        self._http_app.middlewares.append(self._cors_middleware)
+
+    @web.middleware
+    async def _cors_middleware(self, request: web.Request, handler):
+        """Add CORS headers to all responses."""
+        response = await handler(request)
+        for key, value in self._get_cors_headers().items():
+            response.headers[key] = value
+        return response
+
     async def _ws_handler(self, websocket, path):
         """Handle WebSocket connections from agents."""
         client_id = f"ws-{id(websocket)}"
@@ -97,6 +169,24 @@ class AgentServer:
             async for message in websocket:
                 try:
                     data = json.loads(message)
+
+                    # Rate limit check
+                    token = data.get("token", "unknown")
+                    if not self._check_rate_limit(f"ws:{client_id}:{token}"):
+                        await websocket.send(json.dumps({
+                            "status": "error",
+                            "error": "Rate limit exceeded. Slow down."
+                        }))
+                        continue
+
+                    # Validate token
+                    if not self._validate_token(token):
+                        await websocket.send(json.dumps({
+                            "status": "error",
+                            "error": "Invalid authentication token"
+                        }))
+                        continue
+
                     result = await self._process_command(data)
                     await websocket.send(json.dumps(result))
                 except json.JSONDecodeError:
@@ -111,7 +201,34 @@ class AgentServer:
     async def _handle_command(self, request: web.Request) -> web.Response:
         """Handle HTTP POST /command."""
         try:
+            # Rate limit by IP
+            client_ip = request.remote or "unknown"
+            if not self._check_rate_limit(f"ip:{client_ip}"):
+                return web.json_response(
+                    {"status": "error", "error": "Rate limit exceeded. Slow down."},
+                    status=429,
+                    headers=self._get_cors_headers()
+                )
+
             data = await request.json()
+
+            # Validate token
+            token = data.get("token")
+            if not self._validate_token(token):
+                return web.json_response(
+                    {"status": "error", "error": "Invalid authentication token"},
+                    status=401,
+                    headers=self._get_cors_headers()
+                )
+
+            # Additional rate limit by token
+            if not self._check_rate_limit(f"token:{token}"):
+                return web.json_response(
+                    {"status": "error", "error": "Rate limit exceeded. Slow down."},
+                    status=429,
+                    headers=self._get_cors_headers()
+                )
+
             result = await self._process_command(data)
             return web.json_response(result)
         except Exception as e:
@@ -126,7 +243,7 @@ class AgentServer:
             "active_ws_clients": len(self._ws_clients),
             "browser_active": self.browser.browser is not None,
             "persistent_browser_enabled": self.persistent_manager is not None,
-            "version": "2.0.0"
+            "version": "2.1.0"
         }
         if self.persistent_manager:
             ph = self.persistent_manager.get_health()
@@ -368,10 +485,16 @@ class AgentServer:
 
             if not token:
                 return web.json_response({"status": "error", "error": "Missing 'token'"}, status=400)
+            if not self._validate_token(token):
+                return web.json_response({"status": "error", "error": "Invalid authentication token"}, status=401)
             if not user_id:
                 return web.json_response({"status": "error", "error": "Missing 'user_id'"}, status=400)
             if not command:
                 return web.json_response({"status": "error", "error": "Missing 'command'"}, status=400)
+
+            # Rate limit
+            if not self._check_rate_limit(f"persistent:{user_id}"):
+                return web.json_response({"status": "error", "error": "Rate limit exceeded"}, status=429)
 
             result = await self.persistent_manager.execute_for_user(user_id, command, data)
             return web.json_response(result)
@@ -429,7 +552,7 @@ class AgentServer:
         return self._proxy_manager
 
     async def _process_command(self, data: Dict) -> Dict[str, Any]:
-        """Process any agent command."""
+        """Process any agent command. Token must be pre-validated by caller."""
         token = data.get("token")
         command = data.get("command", "").lower()
 

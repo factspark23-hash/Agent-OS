@@ -40,7 +40,17 @@ class TestConfig:
         config = Config("/tmp/test-agent-os-config3.yaml")
         token = config.generate_agent_token("claude")
         assert token.startswith("claude-")
-        assert len(token) > 10
+        assert len(token) > 20  # Now uses 16 hex bytes = 32 chars suffix
+
+    def test_deep_merge(self):
+        """Test config deep merge preserves defaults."""
+        config = Config("/tmp/test-merge-config.yaml")
+        # Override a single value
+        config.set("browser.max_ram_mb", 999)
+        assert config.get("browser.max_ram_mb") == 999
+        # Default values should still exist
+        assert config.get("browser.headless") is True
+        assert config.get("server.ws_port") == 8000
 
 
 # ─── Session Tests ─────────────────────────────────────────────
@@ -241,6 +251,125 @@ class TestDebugServer:
         assert (static_dir / "index.html").exists()
         assert (static_dir / "style.css").exists()
         assert (static_dir / "app.js").exists()
+
+
+# ─── Stealth Module Tests ─────────────────────────────────────
+
+class TestStealthModule:
+    def test_imports(self):
+        """Test stealth module imports correctly."""
+        from src.core.stealth import (
+            ANTI_DETECTION_JS, BOT_DETECTION_URLS,
+            FAKE_RESPONSES, handle_request_interception
+        )
+        assert "webdriver" in ANTI_DETECTION_JS
+        assert len(BOT_DETECTION_URLS) > 0
+        assert len(FAKE_RESPONSES) > 0
+
+    def test_handle_interception_blocks_recaptcha(self):
+        """Test request interception blocks recaptcha."""
+        from src.core.stealth import handle_request_interception
+        blocked, resp = handle_request_interception("https://www.google.com/recaptcha/api2/verify", "xhr")
+        assert blocked is True
+        assert resp["success"] is True
+
+    def test_handle_interception_allows_normal(self):
+        """Test request interception allows normal URLs."""
+        from src.core.stealth import handle_request_interception
+        blocked, resp = handle_request_interception("https://github.com/login", "document")
+        assert blocked is False
+
+    def test_handle_interception_blocks_scripts(self):
+        """Test request interception blocks bot detection scripts."""
+        from src.core.stealth import handle_request_interception
+        # Scripts matching BOT_DETECTION_SCRIPT_PATTERNS but NOT BOT_DETECTION_URLS
+        blocked, resp = handle_request_interception("https://cdn.example.com/botdetect-v2.js", "script")
+        assert blocked is True
+        assert resp is None  # Empty body for script-only matches
+
+
+# ─── Server Security Tests ────────────────────────────────────
+
+class TestServerSecurity:
+    def test_token_validation_with_configured_token(self):
+        """Test token validation rejects wrong tokens."""
+        from src.core.config import Config
+        from src.agents.server import AgentServer
+
+        config = Config("/tmp/test-security-config.yaml")
+        config.set("server.agent_token", "my-secret-token")
+
+        # Mock browser and session_manager
+        server = AgentServer(config, None, None)
+
+        assert server._validate_token("my-secret-token") is True
+        assert server._validate_token("wrong-token") is False
+        assert server._validate_token("") is False
+        assert server._validate_token(None) is False
+
+    def test_token_validation_with_allowed_list(self):
+        """Test token validation with multiple allowed tokens."""
+        from src.core.config import Config
+        from src.agents.server import AgentServer
+
+        config = Config("/tmp/test-security-config2.yaml")
+        config.set("server.allowed_tokens", ["token-a", "token-b", "token-c"])
+
+        server = AgentServer(config, None, None)
+
+        assert server._validate_token("token-a") is True
+        assert server._validate_token("token-b") is True
+        assert server._validate_token("token-c") is True
+        assert server._validate_token("token-d") is False
+
+    def test_token_validation_dev_mode(self):
+        """Test token validation in dev mode (no token configured)."""
+        import os
+        from src.core.config import Config
+        from src.agents.server import AgentServer
+        cfg_path = "/tmp/test-security-config3-fresh.yaml"
+        if os.path.exists(cfg_path):
+            os.remove(cfg_path)
+        config = Config(cfg_path)
+        # Don't set any token - clean config
+        assert config.get("server.agent_token") is None
+        assert config.get("server.allowed_tokens") is None
+
+        server = AgentServer(config, None, None)
+
+        # Dev mode: any non-empty token works
+        assert server._validate_token("anything") is True
+        assert server._validate_token("") is False
+
+    def test_rate_limiting(self):
+        """Test rate limiter blocks excessive requests."""
+        from src.core.config import Config
+        from src.agents.server import AgentServer
+
+        config = Config("/tmp/test-security-config4.yaml")
+        config.set("server.rate_limit_max", 3)
+        config.set("server.rate_limit_window", 60)
+
+        server = AgentServer(config, None, None)
+
+        # First 3 should pass
+        assert server._check_rate_limit("test-user") is True
+        assert server._check_rate_limit("test-user") is True
+        assert server._check_rate_limit("test-user") is True
+        # 4th should fail
+        assert server._check_rate_limit("test-user") is False
+
+        # Different user should still work
+        assert server._check_rate_limit("other-user") is True
+
+
+# ─── Import Tests for New Modules ─────────────────────────────
+
+def test_stealth_import():
+    """Test that the shared stealth module imports correctly."""
+    from src.core.stealth import ANTI_DETECTION_JS, handle_request_interception
+    assert ANTI_DETECTION_JS is not None
+    assert callable(handle_request_interception)
 
 
 if __name__ == "__main__":

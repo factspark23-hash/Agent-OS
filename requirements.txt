@@ -2,7 +2,7 @@
 # All dependencies are open-source, no external API keys needed
 
 # Core browser automation
-playwright==1.49.1
+playwright>=1.49.0
 
 # WebSocket server for agent connections
 websockets==13.1

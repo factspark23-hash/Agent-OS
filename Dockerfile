@@ -22,13 +22,6 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Copy Playwright browsers from builder
-COPY --from=builder /root/.cache/ms-playwright /root/.cache/ms-playwright
-
-# Copy Python packages from builder
-COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
-
 # Install runtime system deps (smaller set)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libnss3 \
@@ -45,7 +38,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcairo2 \
     libasound2 \
     fonts-liberation \
+    curl \
     && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN groupadd -r agentos && useradd -r -g agentos -d /home/agentos -m agentos
+
+# Copy Playwright browsers from builder
+COPY --from=builder /root/.cache/ms-playwright /home/agentos/.cache/ms-playwright
+
+# Copy Python packages from builder
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy application code
 COPY main.py .
@@ -53,8 +57,15 @@ COPY src/ src/
 COPY connectors/ connectors/
 COPY qwen_bridge.py .
 
-# Create config directory
-RUN mkdir -p /root/.agent-os
+# Create config directory and set permissions
+RUN mkdir -p /home/agentos/.agent-os && \
+    chown -R agentos:agentos /app /home/agentos
+
+# Switch to non-root user
+USER agentos
+
+# Set Playwright cache path for non-root user
+ENV PLAYWRIGHT_BROWSERS_PATH=/home/agentos/.cache/ms-playwright
 
 # Expose ports
 # 8000 = WebSocket (agents connect here)

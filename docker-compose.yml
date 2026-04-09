@@ -17,15 +17,13 @@ services:
     environment:
       - AGENT_TOKEN=${AGENT_TOKEN:-}  # Set your token, or leave empty for auto-generated
     volumes:
-      - agent-os-data:/root/.agent-os  # Persist credentials vault
+      - agent-os-data:/home/agentos/.agent-os  # Persist credentials vault
     # Resource limits (adjust for your server)
     deploy:
       resources:
         limits:
           memory: 1G
           cpus: "2.0"
-    # Security: run as non-root
-    # user: "1000:1000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/status"]
       interval: 30s

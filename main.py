@@ -48,7 +48,7 @@ class AgentOS:
         self.session_manager = SessionManager(self.config)
         self.persistent_manager = PersistentBrowserManager(self.config) if (self.config.get("persistent.enabled", False) or args.persistent) else None
         self.server = AgentServer(self.config, self.browser, self.session_manager, self.persistent_manager)
-        self.debug_server = DebugServer(self.config, self.browser, self.session_manager, self.server, self.persistent_manager)
+        self.debug_server = None if args.no_debug else DebugServer(self.config, self.browser, self.session_manager, self.server, self.persistent_manager)
         self._running = False
         self._ram_monitor_task = None
 
@@ -58,6 +58,7 @@ class AgentOS:
         if args.port:
             self.config.set("server.ws_port", args.port)
             self.config.set("server.http_port", args.port + 1)
+            self.config.set("server.debug_port", args.port + 2)
         if args.max_ram:
             self.config.set("browser.max_ram_mb", args.max_ram)
         if args.proxy:
@@ -65,11 +66,18 @@ class AgentOS:
         if args.device:
             self.config.set("browser.device", args.device)
 
+        # Store token in config for server validation
+        if args.agent_token:
+            self.config.set("server.agent_token", args.agent_token)
+
+        # Rate limiting
+        self.config.set("server.rate_limit_max", args.rate_limit)
+
     async def start(self):
         """Start all components."""
         self._running = True
         logger.info("=" * 60)
-        logger.info("  🤖 Agent-OS — AI Agent Browser v1.0")
+        logger.info("  🤖 Agent-OS — AI Agent Browser v2.1")
         logger.info("=" * 60)
 
         # Start browser
@@ -90,8 +98,9 @@ class AgentOS:
         await self.server.start()
 
         # Start debug UI server
-        logger.info("Starting debug UI server...")
-        await self.debug_server.start()
+        if self.debug_server:
+            logger.info("Starting debug UI server...")
+            await self.debug_server.start()
 
         # Start RAM monitor
         self._ram_monitor_task = asyncio.create_task(self._ram_monitor())
@@ -106,7 +115,8 @@ class AgentOS:
         logger.info("  ─────────────────────────────────────────")
         logger.info(f"  WebSocket: ws://127.0.0.1:{ws_port}")
         logger.info(f"  HTTP API:  http://127.0.0.1:{http_port}")
-        logger.info(f"  Debug UI:  http://127.0.0.1:{debug_port}")
+        if self.debug_server:
+            logger.info(f"  Debug UI:  http://127.0.0.1:{debug_port}")
         logger.info(f"  Agent Token: {default_token}")
         logger.info("")
         logger.info("  Quick test:")
@@ -131,7 +141,8 @@ class AgentOS:
         if self._ram_monitor_task:
             self._ram_monitor_task.cancel()
 
-        await self.debug_server.stop()
+        if self.debug_server:
+            await self.debug_server.stop()
 
         if self.persistent_manager:
             await self.persistent_manager.stop()
@@ -164,12 +175,14 @@ def parse_args():
     )
     parser.add_argument("--headed", action="store_true", help="Show browser window")
     parser.add_argument("--agent-token", type=str, help="Set agent authentication token")
-    parser.add_argument("--port", type=int, help="WebSocket server port (HTTP = port+1)")
+    parser.add_argument("--port", type=int, help="WebSocket server port (HTTP = port+1, Debug = port+2)")
     parser.add_argument("--max-ram", type=int, help="Max RAM in MB")
     parser.add_argument("--config", type=str, help="Config file path")
     parser.add_argument("--proxy", type=str, help="Proxy URL (http://user:pass@host:port)")
     parser.add_argument("--device", type=str, help="Device preset (iphone_14, galaxy_s23, ipad, etc.)")
     parser.add_argument("--persistent", action="store_true", help="Enable persistent Chromium (production mode)")
+    parser.add_argument("--no-debug", action="store_true", help="Disable debug UI server")
+    parser.add_argument("--rate-limit", type=int, default=60, help="Max requests per minute per token (default: 60)")
     return parser.parse_args()
 
 

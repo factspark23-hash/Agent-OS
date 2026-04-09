@@ -34,90 +34,15 @@ from collections import defaultdict
 
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 
+from src.core.stealth import (
+    ANTI_DETECTION_JS,
+    BOT_DETECTION_URLS,
+    FAKE_RESPONSES,
+    BOT_DETECTION_SCRIPT_PATTERNS,
+    handle_request_interception,
+)
+
 logger = logging.getLogger("agent-os.persistent")
-
-# ─── Anti-Detection JS (same as browser.py) ──────────────────
-
-ANTI_DETECTION_JS = """
-// === AGENT-OS STEALTH MODE v2.0 ===
-Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-delete navigator.__proto__.webdriver;
-Object.defineProperty(navigator, 'plugins', {
-    get: () => {
-        const plugins = [
-            {name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format', length: 1, item: () => null, namedItem: () => null},
-            {name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '', length: 1, item: () => null, namedItem: () => null},
-            {name: 'Native Client', filename: 'internal-nacl-plugin', description: '', length: 2, item: () => null, namedItem: () => null}
-        ];
-        plugins.length = 3; plugins.item = (i) => plugins[i] || null;
-        plugins.namedItem = (n) => plugins.find(p => p.name === n) || null;
-        plugins.refresh = () => {};
-        return plugins;
-    }
-});
-Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
-Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
-Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
-window.chrome = {
-    app: {isInstalled: false, InstallState: {INSTALLED: 'installed', DISABLED: 'disabled', NOT_INSTALLED: 'not_installed'}, RunningState: {CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running'}},
-    runtime: {OnInstalledReason: {CHROME_UPDATE: 'chrome_update', INSTALL: 'install', SHARED_MODULE_UPDATE: 'shared_module_update', UPDATE: 'update'}, OnRestartRequiredReason: {APP_UPDATE: 'app_update', OS_UPDATE: 'os_update', PERIODIC: 'periodic'}, PlatformArch: {ARM: 'arm', X86_32: 'x86-32', X86_64: 'x86-64'}, PlatformOs: {ANDROID: 'android', CROS: 'cros', LINUX: 'linux', MAC: 'mac', WIN: 'win'}, connect: function(){}, sendMessage: function(){}},
-    csi: function() { return {onloadT: Date.now(), pageT: Date.now(), startE: Date.now()}; },
-    loadTimes: function() { return {commitLoadTime: Date.now()/1000, connectionInfo: 'h2', finishDocumentLoadTime: Date.now()/1000, finishLoadTime: Date.now()/1000, firstPaintTime: Date.now()/1000, npnNegotiatedProtocol: 'h2', requestTime: Date.now()/1000, startLoadTime: Date.now()/1000, wasFetchedViaSpdy: true, wasNpnNegotiated: true}; }
-};
-const getParameter = WebGLRenderingContext.prototype.getParameter;
-WebGLRenderingContext.prototype.getParameter = function(param) {
-    if (param === 37445) return 'Intel Inc.';
-    if (param === 37446) return 'Intel Iris OpenGL Engine';
-    return getParameter.call(this, param);
-};
-const toDataURL = HTMLCanvasElement.prototype.toDataURL;
-HTMLCanvasElement.prototype.toDataURL = function(type) {
-    const context = this.getContext('2d');
-    if (context && this.width > 0 && this.height > 0) {
-        const imageData = context.getImageData(0, 0, this.width, this.height);
-        for (let i = 0; i < imageData.data.length; i += 100) { imageData.data[i] = imageData.data[i] ^ 1; }
-        context.putImageData(imageData, 0, 0);
-    }
-    return toDataURL.apply(this, arguments);
-};
-const origRTCPeerConnection = window.RTCPeerConnection;
-if (origRTCPeerConnection) {
-    window.RTCPeerConnection = function(...args) {
-        const pc = new origRTCPeerConnection(...args);
-        const origCreateOffer = pc.createOffer;
-        pc.createOffer = function(options) {
-            return origCreateOffer.call(pc, options).then(offer => {
-                offer.sdp = offer.sdp.replace(/a=candidate:.*typ host.*/g, '');
-                return offer;
-            });
-        };
-        return pc;
-    };
-    window.RTCPeerConnection.prototype = origRTCPeerConnection.prototype;
-}
-Object.defineProperty(Notification, 'permission', {get: () => 'default'});
-console.log('[Agent-OS] Stealth patches loaded v2.0');
-"""
-
-# Bot detection patterns to block
-BOT_DETECTION_URLS = [
-    "recaptcha", "captcha", "hcaptcha", "turnstile",
-    "perimeterx", "datadome", "cloudflare-challenge",
-    "check-bot", "verify-human", "bot-detection",
-    "akamai-bot", "imperva", "f5-bot",
-    "distil", "shape-security", "kasada",
-    "botmanager", "radar", "fingerprint",
-]
-
-FAKE_RESPONSES = {
-    "recaptcha": {"success": True, "score": 0.95, "action": "login", "challenge_ts": "2026-04-08T12:00:00Z"},
-    "captcha": {"status": "verified", "human": True, "score": 0.92},
-    "perimeterx": {"status": 0, "uuid": "fake-uuid-agent-os", "vid": "fake-vid", "risk_score": 5},
-    "datadome": {"status": 200, "headers": {"x-datadome": "pass"}, "cookie": "human-verified"},
-    "cloudflare": {"success": True, "cf_clearance": "agent-os-clearance-token"},
-    "bot-detection": {"human": True, "verified": True, "timestamp": 1700000000},
-}
 
 
 class BrowserState(Enum):
@@ -341,18 +266,14 @@ class UserContext:
 
     async def _handle_request(self, route, request):
         """Intercept and block bot detection requests."""
-        url = request.url.lower()
-        for pattern in BOT_DETECTION_URLS:
-            if pattern in url:
-                self.blocked_requests += 1
-                fake = FAKE_RESPONSES.get(pattern, {"human": True})
-                await route.fulfill(status=200, content_type="application/json", body=json.dumps(fake))
-                return
-        if request.resource_type == "script":
-            for pattern in ["recaptcha", "captcha", "botdetect", "fingerprint", "kasada", "perimeterx"]:
-                if pattern in url:
-                    await route.fulfill(status=200, body="")
-                    return
+        should_block, fake_response = handle_request_interception(request.url, request.resource_type)
+        if should_block:
+            self.blocked_requests += 1
+            if fake_response:
+                await route.fulfill(status=200, content_type="application/json", body=json.dumps(fake_response))
+            else:
+                await route.fulfill(status=200, body="")
+            return
         await route.continue_()
 
     async def close(self):
