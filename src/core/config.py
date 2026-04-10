@@ -18,7 +18,7 @@ DEFAULT_CONFIG = {
         "http_port": 8001,
         "debug_port": 8002,
         "max_connections": 10,
-        "cors_origin": "http://127.0.0.1:8002",
+        "cors_origin": "http://127.0.0.1:8002",  # Strict: only debug UI origin
     },
     "browser": {
         "headless": True,

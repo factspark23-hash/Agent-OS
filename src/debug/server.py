@@ -87,9 +87,38 @@ class DebugServer:
             await self._http_runner.cleanup()
         logger.info("Debug server stopped")
 
+    @web.middleware
+    async def _auth_middleware(self, request: web.Request, handler):
+        """Authenticate all debug UI requests via token."""
+        # Allow static assets without auth (CSS, JS)
+        path = request.path
+        if path in ("/style.css", "/app.js"):
+            return await handler(request)
+
+        # Extract token from header, query param, or cookie
+        token = (
+            request.headers.get("Authorization", "").removeprefix("Bearer ")
+            or request.query.get("token")
+            or request.cookies.get("agent_token")
+        )
+
+        # Validate against agent server's token
+        if not token or not self.agent_server._validate_token(token):
+            if path == "/" or not path.startswith("/api/"):
+                return web.Response(
+                    text="Unauthorized — pass ?token=YOUR_TOKEN or Authorization: Bearer YOUR_TOKEN",
+                    status=401,
+                )
+            return web.json_response(
+                {"status": "error", "error": "Unauthorized — provide valid token"},
+                status=401,
+            )
+
+        return await handler(request)
+
     def _setup_routes(self):
         """Setup HTTP and WebSocket routes."""
-        # Static UI
+        # Static UI (protected by auth middleware)
         self._http_app.router.add_get("/", self._handle_index)
         self._http_app.router.add_get("/style.css", self._handle_css)
         self._http_app.router.add_get("/app.js", self._handle_js)
@@ -116,6 +145,9 @@ class DebugServer:
 
         # WebSocket for real-time updates
         self._http_app.router.add_get("/ws", self._handle_ws)
+
+        # Add auth middleware (protects all debug endpoints)
+        self._http_app.middlewares.append(self._auth_middleware)
 
     # ─── Static File Handlers ──────────────────────────────
 

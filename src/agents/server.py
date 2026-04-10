@@ -127,7 +127,7 @@ class AgentServer:
     def _get_cors_headers(self) -> Dict[str, str]:
         """Return CORS headers for API responses."""
         return {
-            "Access-Control-Allow-Origin": self.config.get("server.cors_origin", "*"),
+            "Access-Control-Allow-Origin": self.config.get("server.cors_origin", "http://127.0.0.1:8002"),
             "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
             "Access-Control-Allow-Headers": "Content-Type, Authorization",
             "Access-Control-Max-Age": "86400",
