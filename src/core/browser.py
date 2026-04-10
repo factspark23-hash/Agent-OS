@@ -13,6 +13,7 @@ import pickle
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 
+from cryptography.fernet import Fernet
 from playwright.async_api import async_playwright, Browser, Page, BrowserContext
 
 from src.core.config import Config
@@ -60,6 +61,19 @@ class AgentBrowser:
         self._proxy_config = None
         self._current_device = "desktop_1080"
         self._network_capture = None  # Set externally
+        self._cookie_key = self._get_or_create_cookie_key()
+        self._cookie_fernet = Fernet(self._cookie_key)
+
+    def _get_or_create_cookie_key(self) -> bytes:
+        """Get or create encryption key for cookie storage."""
+        key_path = Path(os.path.expanduser("~/.agent-os/.cookie_key"))
+        if key_path.exists():
+            return key_path.read_bytes()
+        key = Fernet.generate_key()
+        key_path.parent.mkdir(parents=True, exist_ok=True)
+        key_path.write_bytes(key)
+        key_path.chmod(0o600)
+        return key
 
     async def start(self):
         """Launch the browser with stealth settings."""
@@ -177,24 +191,26 @@ class AgentBrowser:
         page.on("pageerror", on_page_error)
 
     def _load_cookies(self, profile: str) -> Optional[Dict]:
-        """Load saved cookies for a profile."""
-        cookie_file = self._cookie_dir / f"{profile}.json"
+        """Load saved cookies for a profile (encrypted)."""
+        cookie_file = self._cookie_dir / f"{profile}.enc"
         if cookie_file.exists():
             try:
-                with open(cookie_file, "r") as f:
-                    return json.load(f)
-            except Exception:
-                pass
+                encrypted = cookie_file.read_bytes()
+                decrypted = self._cookie_fernet.decrypt(encrypted)
+                return json.loads(decrypted)
+            except Exception as e:
+                logger.warning(f"Failed to load encrypted cookies for {profile}: {e}")
         return None
 
     async def _save_cookies(self, profile: str = "default"):
-        """Save current cookies for persistence."""
+        """Save current cookies for persistence (encrypted)."""
         if self.context:
             state = await self.context.storage_state()
-            cookie_file = self._cookie_dir / f"{profile}.json"
-            with open(cookie_file, "w") as f:
-                json.dump(state, f)
-            logger.info(f"Cookies saved for profile: {profile}")
+            cookie_file = self._cookie_dir / f"{profile}.enc"
+            encrypted = self._cookie_fernet.encrypt(json.dumps(state).encode())
+            cookie_file.write_bytes(encrypted)
+            cookie_file.chmod(0o600)
+            logger.info(f"Cookies saved (encrypted) for profile: {profile}")
 
     async def _handle_download(self, download):
         """Handle file downloads."""
