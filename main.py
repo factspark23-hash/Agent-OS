@@ -130,7 +130,7 @@ class AgentOS:
         logger.info("  Quick test:")
         logger.info(f'  curl -X POST http://127.0.0.1:{http_port}/command \\')
         logger.info(f"    -H 'Content-Type: application/json' \\")
-        logger.info(f"    -d '{{\"token\": \"{default_token}\", \"command\": \"navigate\", \"url\": \"https://example.com\"}}'")
+        logger.info(f"    -d '{{\"token\": \"{display_token}\", \"command\": \"navigate\", \"url\": \"https://example.com\"}}'")
         logger.info("")
         logger.info("  Press Ctrl+C to stop")
         logger.info("  ─────────────────────────────────────────")
