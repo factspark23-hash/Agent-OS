@@ -819,19 +819,20 @@ class AutoHeal:
         }
         dom_attr = attr_map.get(attr_name, attr_name)
 
-        js = f"""(() => {{
-            const query = '{tag}' || '*';
+        # Use page.evaluate with arguments to avoid JS injection from attribute values
+        js = """(([tag, domAttr, attrValue]) => {
+            const query = tag || '*';
             const els = document.querySelectorAll(query);
-            for (const el of els) {{
-                if (el.getAttribute('{dom_attr}') === '{attr_value.replace("'", "\\'")}') {{
+            for (const el of els) {
+                if (el.getAttribute(domAttr) === attrValue) {
                     if (el.id) return '#' + CSS.escape(el.id);
                     if (el.name) return el.tagName.toLowerCase() + '[name="' + el.name + '"]';
                     return null;
-                }}
-            }}
+                }
+            }
             return null;
-        }})()"""
-        return await page.evaluate(js)
+        })"""
+        return await page.evaluate(js, [tag or "*", dom_attr, attr_value])
 
     async def _heal_by_attr_fingerprint(self, page, fingerprint: Dict) -> Optional[str]:
         """Find element by matching attribute fingerprint similarity."""

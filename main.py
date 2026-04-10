@@ -116,7 +116,7 @@ class AgentOS:
         ws_port = self.config.get("server.ws_port", 8000)
         http_port = self.config.get("server.http_port", 8001)
         debug_port = self.config.get("server.debug_port", 8002)
-        default_token = self.args.agent_token or self.config.generate_agent_token("agent")
+        display_token = self.config.get("server.agent_token", "NOT_CONFIGURED")
 
         logger.info("")
         logger.info("  ✅ Agent-OS is READY!")
@@ -125,7 +125,7 @@ class AgentOS:
         logger.info(f"  HTTP API:  http://127.0.0.1:{http_port}")
         if self.debug_server:
             logger.info(f"  Debug UI:  http://127.0.0.1:{debug_port}")
-        logger.info(f"  Agent Token: {default_token[:8]}...{default_token[-4:]}")
+        logger.info(f"  Agent Token: {display_token[:8]}...{display_token[-4:]}")
         logger.info("")
         logger.info("  Quick test:")
         logger.info(f'  curl -X POST http://127.0.0.1:{http_port}/command \\')

@@ -28,3 +28,12 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Test artifacts
+stress_test_results.json
+.coverage
+htmlcov/
+*.egg
+
+# Runtime
+~/.agent-os/

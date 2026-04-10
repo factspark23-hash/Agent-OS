@@ -326,14 +326,12 @@ class BrowserInstance:
             "--disable-extensions",
             "--disable-component-extensions-with-background-pages",
             "--window-size=1920,1080",
-            "--disable-web-security",
             "--disable-features=TranslateUI",
             "--disable-ipc-flooding-protection",
-            "--disable-gpu",
             "--no-sandbox",
             "--disable-setuid-sandbox",
             "--disable-dev-shm-usage",
-            "--single-process" if self.config.get("single_process", False) else "--process-per-site",
+            "--process-per-site",
         ]
         return [a for a in args if a]
 

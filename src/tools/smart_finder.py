@@ -199,12 +199,17 @@ class SmartElementFinder:
 
     def _build_search_js(self, description: str, tag_filter: str = None) -> str:
         """Build the JavaScript search function."""
+        # Escape description for safe JS injection
+        import json as _json
+        safe_desc = _json.dumps(description)
+        safe_tag = _json.dumps(tag_filter.lower()) if tag_filter else "null"
+
         tag_clause = ""
         if tag_filter:
-            tag_clause = f"el.tagName.toLowerCase() === '{tag_filter.lower()}' &&"
+            tag_clause = f"el.tagName.toLowerCase() === {safe_tag} &&"
 
         return f"""() => {{
-            const desc = "{description}";
+            const desc = {safe_desc};
             const results = [];
             const seen = new Set();
 
