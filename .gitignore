@@ -1,28 +1,13 @@
+# Agent-OS
+node_modules/
 __pycache__/
 *.pyc
-*.pyo
-.pytest_cache/
-*.egg-info/
-dist/
-build/
-
-# Virtual environment
 venv/
-.venv/
-
-# Agent-OS runtime
-.agent-os/
-~/.agent-os/
-
-# Security files
-*.enc
-.vault_key
-
-# IDE
-.vscode/
-.idea/
-
-# Environment
 .env
-.env.*
-!.env.example
+*.enc
+*.key
+.agent-os/
+dist/
+*.egg-info/
+.pytest_cache/
+.coverage

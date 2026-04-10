@@ -8,12 +8,12 @@ Usage:
     python main.py --agent-token "qwen-agent"
 
     # 2. Run this bridge (in another terminal)
-    DASHSCOPE_API_KEY="your-key" python qwen_bridge.py
+    DASHSCOPE_API_KEY="<YOUR_DASHSCOPE_KEY>" python qwen_bridge.py
 
     # 3. Chat with Qwen and it can browse!
 
     # Or use a different model:
-    DASHSCOPE_API_KEY="your-key" python qwen_bridge.py --model qwen-max
+    DASHSCOPE_API_KEY="<YOUR_DASHSCOPE_KEY>" python qwen_bridge.py --model qwen-max
 
 Environment:
     DASHSCOPE_API_KEY  — Your DashScope API key (from https://dashscope.console.aliyun.com/)
@@ -308,7 +308,7 @@ async def main():
     if not DASHSCOPE_API_KEY:
         print("❌ DASHSCOPE_API_KEY not set!")
         print("   Get your key from: https://dashscope.console.aliyun.com/")
-        print("   Then run: export DASHSCOPE_API_KEY='your-key'")
+        print("   Then run: export DASHSCOPE_API_KEY='<YOUR_KEY>'")
         sys.exit(1)
 
     # Check Agent-OS is running

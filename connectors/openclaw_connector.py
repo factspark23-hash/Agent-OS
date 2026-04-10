@@ -17,7 +17,7 @@ from typing import Dict, Any, Optional
 AGENT_OS_URL = os.environ.get("AGENT_OS_URL", "http://localhost:8001")
 AGENT_TOKEN = os.environ.get("AGENT_OS_TOKEN", "openclaw-agent")
 
-# All 25 tools — same set as MCP, OpenAI, and Claude connectors
+# All 38 tools — same set as MCP, OpenAI, and Claude connectors
 TOOLS_MANIFEST = {
     "name": "agent-os-browser",
     "version": "1.0.0",
@@ -185,6 +185,115 @@ TOOLS_MANIFEST = {
             "description": "Scan the current page for exposed sensitive data: API keys, tokens, emails, IPs, private keys.",
             "parameters": {},
         },
+        {
+            "name": "browser_smart_find",
+            "description": "Find an element by visible text or description. No CSS selector needed.",
+            "parameters": {
+                "description": {"type": "string", "required": True, "description": "What to find"},
+                "tag": {"type": "string", "required": False, "description": "Optional tag filter"},
+                "timeout": {"type": "integer", "required": False, "default": 5000, "description": "Max wait ms"},
+            },
+        },
+        {
+            "name": "browser_smart_click",
+            "description": "Click an element by its visible text. No CSS selector needed.",
+            "parameters": {
+                "text": {"type": "string", "required": True, "description": "Visible text of element"},
+                "tag": {"type": "string", "required": False, "description": "Optional tag filter"},
+                "timeout": {"type": "integer", "required": False, "default": 5000, "description": "Max wait ms"},
+            },
+        },
+        {
+            "name": "browser_smart_fill",
+            "description": "Find input by label/placeholder and fill it.",
+            "parameters": {
+                "label": {"type": "string", "required": True, "description": "Label or placeholder text"},
+                "value": {"type": "string", "required": True, "description": "Value to fill"},
+                "timeout": {"type": "integer", "required": False, "default": 5000, "description": "Max wait ms"},
+            },
+        },
+        {
+            "name": "browser_workflow",
+            "description": "Execute multi-step workflow. Supports variables, retries, error handling.",
+            "parameters": {
+                "steps": {"type": "array", "required": True, "description": "Array of step objects"},
+                "variables": {"type": "object", "required": False, "description": "Template variables"},
+                "on_error": {"type": "string", "required": False, "default": "abort", "description": "abort/skip/retry"},
+                "retry_count": {"type": "integer", "required": False, "default": 0},
+                "step_delay_ms": {"type": "integer", "required": False, "default": 0},
+            },
+        },
+        {
+            "name": "browser_network_start",
+            "description": "Start capturing network requests.",
+            "parameters": {
+                "url_pattern": {"type": "string", "required": False, "description": "Regex filter"},
+                "resource_types": {"type": "array", "required": False, "description": "Filter by type"},
+                "methods": {"type": "array", "required": False, "description": "Filter by method"},
+                "capture_body": {"type": "boolean", "required": False, "default": False},
+            },
+        },
+        {
+            "name": "browser_network_get",
+            "description": "Get captured network requests with filters.",
+            "parameters": {
+                "url_pattern": {"type": "string", "required": False},
+                "resource_type": {"type": "string", "required": False},
+                "method": {"type": "string", "required": False},
+                "status_code": {"type": "integer", "required": False},
+                "api_only": {"type": "boolean", "required": False, "default": False},
+                "limit": {"type": "integer", "required": False, "default": 100},
+                "offset": {"type": "integer", "required": False, "default": 0},
+            },
+        },
+        {
+            "name": "browser_network_apis",
+            "description": "Discover API endpoints from captured traffic.",
+            "parameters": {},
+        },
+        {
+            "name": "browser_page_summary",
+            "description": "Analyze page: title, headings, content, forms, links, tech stack.",
+            "parameters": {},
+        },
+        {
+            "name": "browser_page_tables",
+            "description": "Extract all HTML tables as structured data.",
+            "parameters": {},
+        },
+        {
+            "name": "browser_page_seo",
+            "description": "SEO audit with score and issues.",
+            "parameters": {},
+        },
+        {
+            "name": "browser_emulate_device",
+            "description": "Emulate mobile/tablet/desktop device.",
+            "parameters": {
+                "device": {"type": "string", "required": True, "description": "iphone_14, galaxy_s23, ipad, pixel_8, desktop_1080"},
+            },
+        },
+        {
+            "name": "browser_set_proxy",
+            "description": "Set proxy. HTTP, HTTPS, SOCKS5.",
+            "parameters": {
+                "proxy_url": {"type": "string", "required": True, "description": "Proxy URL"},
+            },
+        },
+        {
+            "name": "browser_save_session",
+            "description": "Save full browser state.",
+            "parameters": {
+                "name": {"type": "string", "required": False, "default": "default"},
+            },
+        },
+        {
+            "name": "browser_restore_session",
+            "description": "Restore saved browser state.",
+            "parameters": {
+                "name": {"type": "string", "required": False, "default": "default"},
+            },
+        },
     ],
 }
 
@@ -215,6 +324,20 @@ _COMMAND_MAP = {
     "browser_get_images": "get-images",
     "browser_wait": "wait",
     "browser_scan_sensitive": "scan-sensitive",
+    "browser_smart_find": "smart-find",
+    "browser_smart_click": "smart-click",
+    "browser_smart_fill": "smart-fill",
+    "browser_workflow": "workflow",
+    "browser_network_start": "network-start",
+    "browser_network_get": "network-get",
+    "browser_network_apis": "network-apis",
+    "browser_page_summary": "page-summary",
+    "browser_page_tables": "page-tables",
+    "browser_page_seo": "page-seo",
+    "browser_emulate_device": "emulate-device",
+    "browser_set_proxy": "set-proxy",
+    "browser_save_session": "save-session",
+    "browser_restore_session": "restore-session",
 }
 
 
@@ -229,7 +352,7 @@ def get_manifest() -> dict:
 
 
 def get_tool_names() -> list:
-    """Return the names of all 25 available tools."""
+    """Return the names of all 38 available tools."""
     return [t["name"] for t in TOOLS_MANIFEST["tools"]]
 
 

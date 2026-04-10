@@ -13,199 +13,39 @@ import pickle
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 
+from cryptography.fernet import Fernet
 from playwright.async_api import async_playwright, Browser, Page, BrowserContext
 
+from src.core.config import Config
+from src.core.stealth import (
+    ANTI_DETECTION_JS,
+    BOT_DETECTION_URLS,
+    FAKE_RESPONSES,
+    BOT_DETECTION_SCRIPT_PATTERNS,
+    handle_request_interception,
+)
+from src.security.human_mimicry import HumanMimicry
+
 logger = logging.getLogger("agent-os.browser")
-
-# ─── Advanced Anti-Detection JavaScript ───────────────────────
-# Injected into every page to fool bot detection systems
-
-ANTI_DETECTION_JS = """
-// === AGENT-OS STEALTH MODE v2.0 ===
-
-// 1. Remove ALL webdriver traces
-Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-delete navigator.__proto__.webdriver;
-
-// 2. Realistic plugins (Chrome's actual plugin list)
-Object.defineProperty(navigator, 'plugins', {
-    get: () => {
-        const plugins = [
-            {name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format', length: 1, item: () => null, namedItem: () => null},
-            {name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '', length: 1, item: () => null, namedItem: () => null},
-            {name: 'Native Client', filename: 'internal-nacl-plugin', description: '', length: 2, item: () => null, namedItem: () => null}
-        ];
-        plugins.length = 3;
-        plugins.item = (i) => plugins[i] || null;
-        plugins.namedItem = (n) => plugins.find(p => p.name === n) || null;
-        plugins.refresh = () => {};
-        return plugins;
-    }
-});
-
-// 3. Languages
-Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-Object.defineProperty(navigator, 'language', {get: () => 'en-US'});
-
-// 4. Platform
-Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
-
-// 5. Hardware info
-Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
-Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
-Object.defineProperty(navigator, 'maxTouchPoints', {get: () => 0});
-
-// 6. Connection
-Object.defineProperty(navigator, 'connection', {
-    get: () => ({rtt: 50, downlink: 10, effectiveType: '4g', saveData: false, type: 'wifi'})
-});
-
-// 7. Permissions override
-const originalQuery = window.navigator.permissions.query;
-window.navigator.permissions.query = (parameters) => (
-    parameters.name === 'notifications' ?
-        Promise.resolve({state: Notification.permission}) :
-        originalQuery(parameters)
-);
-
-// 8. Chrome runtime (must exist for real Chrome)
-window.chrome = {
-    app: {isInstalled: false, InstallState: {INSTALLED: 'installed', DISABLED: 'disabled', NOT_INSTALLED: 'not_installed'}, RunningState: {CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running'}},
-    runtime: {
-        OnInstalledReason: {CHROME_UPDATE: 'chrome_update', INSTALL: 'install', SHARED_MODULE_UPDATE: 'shared_module_update', UPDATE: 'update'},
-        OnRestartRequiredReason: {APP_UPDATE: 'app_update', OS_UPDATE: 'os_update', PERIODIC: 'periodic'},
-        PlatformArch: {ARM: 'arm', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64'},
-        PlatformNaclArch: {ARM: 'arm', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64'},
-        PlatformOs: {ANDROID: 'android', CROS: 'cros', LINUX: 'linux', MAC: 'mac', OPENBSD: 'openbsd', WIN: 'win'},
-        RequestUpdateCheckStatus: {NO_UPDATE: 'no_update', THROTTLED: 'throttled', UPDATE_AVAILABLE: 'update_available'},
-        connect: function() {},
-        sendMessage: function() {},
-    },
-    csi: function() { return {onloadT: Date.now(), pageT: Date.now(), startE: Date.now()}; },
-    loadTimes: function() {
-        return {
-            commitLoadTime: Date.now() / 1000,
-            connectionInfo: 'h2',
-            finishDocumentLoadTime: Date.now() / 1000,
-            finishLoadTime: Date.now() / 1000,
-            firstPaintAfterLoadTime: 0,
-            firstPaintTime: Date.now() / 1000,
-            npnNegotiatedProtocol: 'h2',
-            requestTime: Date.now() / 1000,
-            startLoadTime: Date.now() / 1000,
-            wasAlternateProtocolAvailable: false,
-            wasFetchedViaSpdy: true,
-            wasNpnNegotiated: true
-        };
-    }
-};
-
-// 9. WebGL fingerprint (real Intel GPU)
-const getParameter = WebGLRenderingContext.prototype.getParameter;
-WebGLRenderingContext.prototype.getParameter = function(param) {
-    if (param === 37445) return 'Intel Inc.';
-    if (param === 37446) return 'Intel Iris OpenGL Engine';
-    if (param === 35661) return 16;  // MAX_TEXTURE_IMAGE_UNITS
-    if (param === 34076) return 16384;  // MAX_TEXTURE_SIZE
-    if (param === 34921) return 16;  // MAX_VARYING_VECTORS
-    if (param === 36347) return 1024;  // MAX_VERTEX_UNIFORM_VECTORS
-    if (param === 36349) return 1024;  // MAX_FRAGMENT_UNIFORM_VECTORS
-    if (param === 34024) return 16384;  // MAX_RENDERBUFFER_SIZE
-    if (param === 3386) return [16384, 16384];  // MAX_VIEWPORT_DIMS
-    return getParameter.call(this, param);
-};
-
-// 10. Canvas fingerprint noise (subtle, not random each time)
-const toDataURL = HTMLCanvasElement.prototype.toDataURL;
-HTMLCanvasElement.prototype.toDataURL = function(type) {
-    const context = this.getContext('2d');
-    if (context && this.width > 0 && this.height > 0) {
-        // Add tiny noise to defeat canvas fingerprinting
-        const imageData = context.getImageData(0, 0, this.width, this.height);
-        for (let i = 0; i < imageData.data.length; i += 100) {
-            imageData.data[i] = imageData.data[i] ^ 1;  // XOR single bit
-        }
-        context.putImageData(imageData, 0, 0);
-    }
-    return toDataURL.apply(this, arguments);
-};
-
-// 11. Audio context fingerprint
-const audioContext = window.AudioContext || window.webkitAudioContext;
-if (audioContext) {
-    const origCreateOscillator = audioContext.prototype.createOscillator;
-    audioContext.prototype.createOscillator = function() {
-        const osc = origCreateOscillator.call(this);
-        const origConnect = osc.connect;
-        osc.connect = function(dest) {
-            // Add tiny noise to audio fingerprint
-            return origConnect.call(this, dest);
-        };
-        return osc;
-    };
-}
-
-// 12. Block WebRTC IP leak
-const origRTCPeerConnection = window.RTCPeerConnection;
-if (origRTCPeerConnection) {
-    window.RTCPeerConnection = function(...args) {
-        const pc = new origRTCPeerConnection(...args);
-        const origCreateOffer = pc.createOffer;
-        pc.createOffer = function(options) {
-            return origCreateOffer.call(pc, options).then(offer => {
-                // Remove local IP from SDP
-                offer.sdp = offer.sdp.replace(/a=candidate:.*typ host.*/g, '');
-                return offer;
-            });
-        };
-        return pc;
-    };
-    window.RTCPeerConnection.prototype = origRTCPeerConnection.prototype;
-}
-
-// 13. Notification permission
-Object.defineProperty(Notification, 'permission', {get: () => 'default'});
-
-// 14. Media devices (fake realistic list)
-if (navigator.mediaDevices) {
-    const origEnumerateDevices = navigator.mediaDevices.enumerateDevices;
-    navigator.mediaDevices.enumerateDevices = async function() {
-        const devices = await origEnumerateDevices.call(this);
-        // Return realistic device list
-        return [
-            {deviceId: 'default', kind: 'audioinput', label: 'Default - Microphone', groupId: 'group1'},
-            {deviceId: 'default', kind: 'audiooutput', label: 'Default - Speaker', groupId: 'group1'},
-            {deviceId: '', kind: 'videoinput', label: '', groupId: ''},
-        ];
-    };
-}
-
-console.log('[Agent-OS] Stealth patches loaded v2.0');
-"""
-
-# Bot detection patterns to block
-BOT_DETECTION_URLS = [
-    "recaptcha", "captcha", "hcaptcha", "turnstile",
-    "perimeterx", "datadome", "cloudflare-challenge",
-    "check-bot", "verify-human", "bot-detection",
-    "akamai-bot", "imperva", "f5-bot",
-    "distil", "shape-security", "kasada",
-    "botmanager", "radar", "fingerprint",
-]
-
-# Fake human responses for blocked bot detection endpoints
-FAKE_RESPONSES = {
-    "recaptcha": {"success": True, "score": 0.95, "action": "login", "challenge_ts": "2026-04-08T12:00:00Z"},
-    "captcha": {"status": "verified", "human": True, "score": 0.92},
-    "perimeterx": {"status": 0, "uuid": "fake-uuid-agent-os", "vid": "fake-vid", "risk_score": 5},
-    "datadome": {"status": 200, "headers": {"x-datadome": "pass"}, "cookie": "human-verified"},
-    "cloudflare": {"success": True, "cf_clearance": "agent-os-clearance-token"},
-    "bot-detection": {"human": True, "verified": True, "timestamp": 1700000000},
-}
 
 
 class AgentBrowser:
     """Core browser engine with advanced anti-detection for AI agents."""
+
+    # Mobile device presets
+    DEVICE_PRESETS = {
+        "iphone_se": {"width": 375, "height": 667, "device_scale_factor": 2, "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"},
+        "iphone_14": {"width": 390, "height": 844, "device_scale_factor": 3, "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"},
+        "iphone_14_pro_max": {"width": 430, "height": 932, "device_scale_factor": 3, "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"},
+        "ipad": {"width": 768, "height": 1024, "device_scale_factor": 2, "user_agent": "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"},
+        "ipad_pro": {"width": 1024, "height": 1366, "device_scale_factor": 2, "user_agent": "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"},
+        "galaxy_s23": {"width": 360, "height": 780, "device_scale_factor": 3, "user_agent": "Mozilla/5.0 (Linux; Android 14; SM-S911B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"},
+        "galaxy_tab_s9": {"width": 800, "height": 1280, "device_scale_factor": 2, "user_agent": "Mozilla/5.0 (Linux; Android 14; SM-X810) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"},
+        "pixel_8": {"width": 412, "height": 915, "device_scale_factor": 2.625, "user_agent": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"},
+        "desktop_1080": {"width": 1920, "height": 1080, "device_scale_factor": 1, "user_agent": None},
+        "desktop_1440": {"width": 2560, "height": 1440, "device_scale_factor": 1, "user_agent": None},
+        "desktop_4k": {"width": 3840, "height": 2160, "device_scale_factor": 2, "user_agent": None},
+    }
 
     def __init__(self, config):
         self.config = config
@@ -219,20 +59,47 @@ class AgentBrowser:
         self._console_logs: Dict[str, List[Dict]] = {}  # page_id → list of log entries
         self._cookie_dir = Path(os.path.expanduser("~/.agent-os/cookies"))
         self._download_dir = Path(os.path.expanduser("~/.agent-os/downloads"))
+        self._proxy_config = None
+        self._current_device = "desktop_1080"
+        self._network_capture = None  # Set externally
+        self._cookie_key = self._get_or_create_cookie_key()
+        self._cookie_fernet = Fernet(self._cookie_key)
+        self._crash_count = 0
+        self._max_crash_retries = 3
+        self._launch_args = None  # cached launch args
+        self._recovery_lock = asyncio.Lock()
+        # Import at class level to avoid repeated imports
+        self._mimicry = HumanMimicry()
+
+    def _get_or_create_cookie_key(self) -> bytes:
+        """Get or create encryption key for cookie storage."""
+        key_path = Path(os.path.expanduser("~/.agent-os/.cookie_key"))
+        if key_path.exists():
+            return key_path.read_bytes()
+        key = Fernet.generate_key()
+        key_path.parent.mkdir(parents=True, exist_ok=True)
+        key_path.write_bytes(key)
+        key_path.chmod(0o600)
+        return key
 
     async def start(self):
         """Launch the browser with stealth settings."""
         self._cookie_dir.mkdir(parents=True, exist_ok=True)
         self._download_dir.mkdir(parents=True, exist_ok=True)
 
+        await self._launch_browser()
+        logger.info("Browser started with stealth patches v2.0")
+
+    async def _launch_browser(self):
+        """Internal: launch browser and set up context."""
         self.playwright = await async_playwright().start()
 
         # Use headed or headless based on config
         headless = self.config.get("browser.headless", True)
 
-        self.browser = await self.playwright.chromium.launch(
-            headless=headless,
-            args=[
+        # Build launch args (cached for recovery)
+        if self._launch_args is None:
+            self._launch_args = [
                 "--disable-blink-features=AutomationControlled",
                 "--disable-features=IsolateOrigins,site-per-process",
                 "--disable-infobars",
@@ -245,11 +112,25 @@ class AgentBrowser:
                 "--disable-extensions",
                 "--disable-component-extensions-with-background-pages",
                 "--window-size=1920,1080",
-                "--disable-web-security",
                 "--disable-features=TranslateUI",
                 "--disable-ipc-flooding-protection",
             ]
-        )
+
+        # Build launch options
+        launch_options = {
+            "headless": headless,
+            "args": self._launch_args,
+        }
+
+        # Proxy support
+        proxy_url = self.config.get("browser.proxy")
+        if proxy_url:
+            proxy_config = self._parse_proxy_url(proxy_url)
+            launch_options["proxy"] = proxy_config
+            self._proxy_config = proxy_config
+            logger.info(f"Proxy configured: {proxy_config.get('server', 'N/A')}")
+
+        self.browser = await self.playwright.chromium.launch(**launch_options)
 
         # Create context with realistic settings
         storage_state = self._load_cookies("default")
@@ -257,8 +138,8 @@ class AgentBrowser:
         context_options = {
             "user_agent": self.config.get("browser.user_agent"),
             "viewport": self.config.get("browser.viewport", {"width": 1920, "height": 1080}),
-            "locale": "en-US",
-            "timezone_id": "America/New_York",
+            "locale": self.config.get("browser.locale", "en-US"),
+            "timezone_id": self.config.get("browser.timezone_id", "America/New_York"),
             "permissions": ["geolocation", "notifications"],
             "color_scheme": "light",
             "device_scale_factor": 1.0,
@@ -286,7 +167,64 @@ class AgentBrowser:
         self._pages["main"] = self.page
         self._attach_console_listener("main", self.page)
 
-        logger.info("Browser started with stealth patches v2.0")
+    async def recover(self):
+        """Recover from browser crash by relaunching."""
+        async with self._recovery_lock:
+            self._crash_count += 1
+            if self._crash_count > self._max_crash_retries:
+                logger.error(f"Browser exceeded max crash retries ({self._max_crash_retries})")
+                raise RuntimeError("Browser crashed too many times — manual restart required")
+
+            logger.warning(f"Browser recovering from crash (attempt {self._crash_count}/{self._max_crash_retries})...")
+
+            # Save cookies before closing
+            try:
+                await self._save_cookies("default")
+            except Exception:
+                pass
+
+            # Close old browser
+            try:
+                if self.context:
+                    await self.context.close()
+            except Exception:
+                pass
+            try:
+                if self.browser:
+                    await self.browser.close()
+            except Exception:
+                pass
+            try:
+                if self.playwright:
+                    await self.playwright.stop()
+            except Exception:
+                pass
+
+            # Clear state
+            self.browser = None
+            self.context = None
+            self.page = None
+            self._pages.clear()
+            self._console_logs.clear()
+
+            # Relaunch
+            await self._launch_browser()
+            self._crash_count = 0  # Reset on successful recovery
+            logger.info("Browser recovered successfully")
+
+    async def _safe_execute(self, coro, page_id: str = "main"):
+        """Execute a browser operation with crash recovery."""
+        try:
+            return await coro
+        except Exception as e:
+            error_str = str(e).lower()
+            if any(kw in error_str for kw in ["page crashed", "target closed", "context was destroyed",
+                                                   "browser has been closed", "frame was detached",
+                                                   "session deleted", "disconnected"]):
+                logger.warning(f"Browser crash detected: {e}")
+                await self.recover()
+                raise RuntimeError(f"Browser crashed, recovered. Retry the operation. Original: {e}")
+            raise
 
     def _attach_console_listener(self, page_id: str, page: Page):
         """Attach console and error listeners to a page."""
@@ -323,24 +261,26 @@ class AgentBrowser:
         page.on("pageerror", on_page_error)
 
     def _load_cookies(self, profile: str) -> Optional[Dict]:
-        """Load saved cookies for a profile."""
-        cookie_file = self._cookie_dir / f"{profile}.json"
+        """Load saved cookies for a profile (encrypted)."""
+        cookie_file = self._cookie_dir / f"{profile}.enc"
         if cookie_file.exists():
             try:
-                with open(cookie_file, "r") as f:
-                    return json.load(f)
-            except Exception:
-                pass
+                encrypted = cookie_file.read_bytes()
+                decrypted = self._cookie_fernet.decrypt(encrypted)
+                return json.loads(decrypted)
+            except Exception as e:
+                logger.warning(f"Failed to load encrypted cookies for {profile}: {e}")
         return None
 
     async def _save_cookies(self, profile: str = "default"):
-        """Save current cookies for persistence."""
+        """Save current cookies for persistence (encrypted)."""
         if self.context:
             state = await self.context.storage_state()
-            cookie_file = self._cookie_dir / f"{profile}.json"
-            with open(cookie_file, "w") as f:
-                json.dump(state, f)
-            logger.info(f"Cookies saved for profile: {profile}")
+            cookie_file = self._cookie_dir / f"{profile}.enc"
+            encrypted = self._cookie_fernet.encrypt(json.dumps(state).encode())
+            cookie_file.write_bytes(encrypted)
+            cookie_file.chmod(0o600)
+            logger.info(f"Cookies saved (encrypted) for profile: {profile}")
 
     async def _handle_download(self, download):
         """Handle file downloads."""
@@ -350,30 +290,18 @@ class AgentBrowser:
 
     async def _handle_request(self, route, request):
         """Intercept and block bot detection requests."""
-        url = request.url.lower()
-
-        # Check if this is a bot detection request
-        for pattern in BOT_DETECTION_URLS:
-            if pattern in url:
-                self._blocked_requests += 1
-                fake_response = FAKE_RESPONSES.get(pattern, {"human": True})
-                logger.debug(f"Blocked bot detection: {request.url}")
+        should_block, fake_response = handle_request_interception(request.url, request.resource_type)
+        if should_block:
+            self._blocked_requests += 1
+            if fake_response:
                 await route.fulfill(
                     status=200,
                     content_type="application/json",
                     body=json.dumps(fake_response)
                 )
-                return
-
-        # Check for bot detection JavaScript
-        if request.resource_type == "script":
-            for pattern in ["recaptcha", "captcha", "botdetect", "fingerprint", "kasada", "perimeterx"]:
-                if pattern in url:
-                    logger.debug(f"Blocked bot detection script: {request.url}")
-                    await route.fulfill(status=200, body="")
-                    return
-
-        # Allow all other requests
+            else:
+                await route.fulfill(status=200, body="")
+            return
         await route.continue_()
 
     async def navigate(self, url: str, page_id: str = "main", wait_until: str = "domcontentloaded") -> Dict[str, Any]:
@@ -421,9 +349,8 @@ class AgentBrowser:
 
     async def fill_form(self, fields: Dict[str, str], page_id: str = "main") -> Dict[str, Any]:
         """Fill form fields with human-like typing."""
-        from src.security.human_mimicry import HumanMimicry
         page = self._pages.get(page_id, self.page)
-        mimicry = HumanMimicry()
+        mimicry = self._mimicry
         filled = []
 
         for selector, value in fields.items():
@@ -458,9 +385,8 @@ class AgentBrowser:
 
     async def click(self, selector: str, page_id: str = "main") -> Dict[str, Any]:
         """Click an element with human-like mouse movement."""
-        from src.security.human_mimicry import HumanMimicry
         page = self._pages.get(page_id, self.page)
-        mimicry = HumanMimicry()
+        mimicry = self._mimicry
 
         try:
             element = await page.query_selector(selector)
@@ -487,9 +413,8 @@ class AgentBrowser:
 
     async def type_text(self, text: str, page_id: str = "main") -> Dict[str, Any]:
         """Type text with human-like delays (into focused element)."""
-        from src.security.human_mimicry import HumanMimicry
         page = self._pages.get(page_id, self.page)
-        mimicry = HumanMimicry()
+        mimicry = self._mimicry
 
         for char in text:
             await page.keyboard.type(char, delay=mimicry.typing_delay())
@@ -549,7 +474,6 @@ class AgentBrowser:
 
     async def scroll(self, direction: str = "down", amount: int = 500, page_id: str = "main") -> Dict[str, Any]:
         """Scroll with human-like behavior."""
-        from src.security.human_mimicry import HumanMimicry
         page = self._pages.get(page_id, self.page)
 
         y = amount if direction == "down" else -amount
@@ -620,9 +544,8 @@ class AgentBrowser:
 
     async def right_click(self, selector: str, page_id: str = "main") -> Dict[str, Any]:
         """Right-click an element (opens context menu)."""
-        from src.security.human_mimicry import HumanMimicry
         page = self._pages.get(page_id, self.page)
-        mimicry = HumanMimicry()
+        mimicry = self._mimicry
 
         try:
             element = await page.query_selector(selector)
@@ -699,9 +622,8 @@ class AgentBrowser:
 
     async def drag_and_drop(self, source_selector: str, target_selector: str, page_id: str = "main") -> Dict[str, Any]:
         """Drag an element and drop it on another element."""
-        from src.security.human_mimicry import HumanMimicry
         page = self._pages.get(page_id, self.page)
-        mimicry = HumanMimicry()
+        mimicry = self._mimicry
 
         try:
             source = await page.query_selector(source_selector)
@@ -795,9 +717,8 @@ class AgentBrowser:
 
     async def double_click(self, selector: str, page_id: str = "main") -> Dict[str, Any]:
         """Double-click an element (e.g., to edit a cell, open a file)."""
-        from src.security.human_mimicry import HumanMimicry
         page = self._pages.get(page_id, self.page)
-        mimicry = HumanMimicry()
+        mimicry = self._mimicry
 
         try:
             element = await page.query_selector(selector)
@@ -1075,6 +996,301 @@ class AgentBrowser:
             self._console_logs.pop(tab_id, None)
             return True
         return False
+
+    def _parse_proxy_url(self, proxy_url: str) -> Dict[str, Any]:
+        """Parse proxy URL into Playwright proxy config."""
+        from urllib.parse import urlparse
+        parsed = urlparse(proxy_url)
+
+        config = {
+            "server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port or 8080}",
+        }
+
+        if parsed.username:
+            config["username"] = parsed.username
+        if parsed.password:
+            config["password"] = parsed.password
+
+        return config
+
+    async def set_proxy(self, proxy_url: str) -> Dict[str, Any]:
+        """
+        Set proxy for browser. Requires browser restart to take effect.
+
+        Args:
+            proxy_url: Proxy URL — e.g. "http://user:pass@proxy.example.com:8080"
+                       or "socks5://proxy.example.com:1080"
+
+        Returns:
+            Status and proxy info
+        """
+        proxy_config = self._parse_proxy_url(proxy_url)
+        self._proxy_config = proxy_config
+
+        # Save to config
+        self.config.set("browser.proxy", proxy_url)
+
+        return {
+            "status": "success",
+            "proxy": proxy_config,
+            "note": "Proxy will be active after browser restart. Use restart command.",
+        }
+
+    async def get_proxy(self) -> Dict[str, Any]:
+        """Get current proxy configuration."""
+        if not self._proxy_config:
+            return {"status": "success", "proxy": None, "message": "No proxy configured"}
+        return {"status": "success", "proxy": self._proxy_config}
+
+    async def emulate_device(self, device: str) -> Dict[str, Any]:
+        """
+        Emulate a mobile/tablet/desktop device.
+
+        Available devices:
+            Mobile: iphone_se, iphone_14, iphone_14_pro_max, galaxy_s23, pixel_8
+            Tablet: ipad, ipad_pro, galaxy_tab_s9
+            Desktop: desktop_1080, desktop_1440, desktop_4k
+
+        Args:
+            device: Device preset name
+        """
+        if device not in self.DEVICE_PRESETS:
+            return {
+                "status": "error",
+                "error": f"Unknown device: {device}",
+                "available_devices": list(self.DEVICE_PRESETS.keys()),
+            }
+
+        preset = self.DEVICE_PRESETS[device]
+        self._current_device = device
+
+        # Create new context with device settings
+        old_context = self.context
+
+        context_options = {
+            "viewport": {"width": preset["width"], "height": preset["height"]},
+            "device_scale_factor": preset["device_scale_factor"],
+            "is_mobile": preset["device_scale_factor"] > 1 and preset["width"] < 500,
+            "has_touch": preset["device_scale_factor"] > 1,
+            "user_agent": preset["user_agent"] or self.config.get("browser.user_agent"),
+            "locale": "en-US",
+            "timezone_id": "America/New_York",
+            "ignore_https_errors": True,
+        }
+
+        self.context = await self.browser.new_context(**context_options)
+        await self.context.add_init_script(ANTI_DETECTION_JS)
+        await self.context.route("**/*", self._handle_request)
+
+        # Migrate pages
+        for page_id, old_page in list(self._pages.items()):
+            try:
+                url = old_page.url
+                new_page = await self.context.new_page()
+                self._pages[page_id] = new_page
+                if page_id == "main":
+                    self.page = new_page
+                if url and url != "about:blank":
+                    await new_page.goto(url, wait_until="domcontentloaded", timeout=15000)
+                await old_page.close()
+            except Exception as e:
+                logger.warning(f"Failed to migrate page {page_id}: {e}")
+
+        # Close old context
+        if old_context:
+            try:
+                await old_context.close()
+            except Exception:
+                pass
+
+        logger.info(f"Device emulation: {device} ({preset['width']}x{preset['height']})")
+
+        return {
+            "status": "success",
+            "device": device,
+            "viewport": {"width": preset["width"], "height": preset["height"]},
+            "device_scale_factor": preset["device_scale_factor"],
+            "is_mobile": preset["device_scale_factor"] > 1 and preset["width"] < 500,
+            "user_agent": preset["user_agent"] or self.config.get("browser.user_agent"),
+        }
+
+    async def list_devices(self) -> Dict[str, Any]:
+        """List all available device emulation presets."""
+        devices = {}
+        for name, preset in self.DEVICE_PRESETS.items():
+            devices[name] = {
+                "viewport": f"{preset['width']}x{preset['height']}",
+                "device_scale_factor": preset["device_scale_factor"],
+                "type": "desktop" if preset["device_scale_factor"] <= 1 else
+                        "mobile" if preset["width"] < 500 else
+                        "tablet" if preset["width"] < 1920 else
+                        "desktop",
+            }
+        return {"status": "success", "devices": devices, "current": self._current_device}
+
+    async def save_session(self, name: str = "default") -> Dict[str, Any]:
+        """
+        Save full browser session state: cookies, localStorage, sessionStorage.
+        Can be restored later with restore_session().
+        """
+        session_dir = Path(os.path.expanduser("~/.agent-os/sessions"))
+        session_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save storage state (cookies + localStorage)
+        state = await self.context.storage_state()
+        state_path = session_dir / f"{name}.json"
+
+        # Also capture sessionStorage from all pages
+        session_data = {}
+        for page_id, page in self._pages.items():
+            try:
+                storage = await page.evaluate("""() => {
+                    const data = {};
+                    for (let i = 0; i < sessionStorage.length; i++) {
+                        const key = sessionStorage.key(i);
+                        data[key] = sessionStorage.getItem(key);
+                    }
+                    return data;
+                }""")
+                if storage:
+                    session_data[page_id] = storage
+            except Exception:
+                pass
+
+        state["session_storage"] = session_data
+        state["saved_at"] = time.time()
+        state["device"] = self._current_device
+        state["urls"] = {pid: page.url for pid, page in self._pages.items() if page.url != "about:blank"}
+
+        with open(state_path, "w") as f:
+            json.dump(state, f, indent=2)
+
+        logger.info(f"Session saved: {name} ({state_path})")
+
+        return {
+            "status": "success",
+            "name": name,
+            "path": str(state_path),
+            "cookies": len(state.get("cookies", [])),
+            "pages": list(state.get("urls", {}).keys()),
+        }
+
+    async def restore_session(self, name: str = "default") -> Dict[str, Any]:
+        """
+        Restore a previously saved browser session.
+        Recreates cookies, localStorage, sessionStorage, and navigates to saved URLs.
+        """
+        session_dir = Path(os.path.expanduser("~/.agent-os/sessions"))
+        state_path = session_dir / f"{name}.json"
+
+        if not state_path.exists():
+            return {"status": "error", "error": f"Session not found: {name}"}
+
+        with open(state_path, "r") as f:
+            state = json.load(f)
+
+        # Close existing context
+        if self.context:
+            try:
+                await self.context.close()
+            except Exception:
+                pass
+
+        # Create new context with saved state
+        context_options = {
+            "user_agent": self.config.get("browser.user_agent"),
+            "viewport": self.config.get("browser.viewport", {"width": 1920, "height": 1080}),
+            "locale": "en-US",
+            "timezone_id": "America/New_York",
+            "ignore_https_errors": True,
+        }
+
+        # Remove session_storage from state before passing to Playwright
+        storage_state = {k: v for k, v in state.items() if k not in ("session_storage", "saved_at", "device", "urls")}
+        context_options["storage_state"] = storage_state
+
+        self.context = await self.browser.new_context(**context_options)
+        await self.context.add_init_script(ANTI_DETECTION_JS)
+        await self.context.route("**/*", self._handle_request)
+
+        # Recreate pages with saved URLs
+        saved_urls = state.get("urls", {})
+        self._pages = {}
+
+        for page_id, url in saved_urls.items():
+            try:
+                page = await self.context.new_page()
+                self._pages[page_id] = page
+                if page_id == "main":
+                    self.page = page
+                if url and url != "about:blank":
+                    await page.goto(url, wait_until="domcontentloaded", timeout=15000)
+
+                # Restore sessionStorage
+                session_storage = state.get("session_storage", {}).get(page_id, {})
+                if session_storage:
+                    for key, value in session_storage.items():
+                        try:
+                            await page.evaluate(
+                                f"(k, v) => sessionStorage.setItem(k, v)",
+                                key, value
+                            )
+                        except Exception:
+                            pass
+            except Exception as e:
+                logger.warning(f"Failed to restore page {page_id}: {e}")
+
+        # Ensure main page exists
+        if "main" not in self._pages:
+            self.page = await self.context.new_page()
+            self._pages["main"] = self.page
+
+        device = state.get("device", "desktop_1080")
+        self._current_device = device
+
+        logger.info(f"Session restored: {name}")
+
+        return {
+            "status": "success",
+            "name": name,
+            "cookies": len(state.get("cookies", [])),
+            "pages_restored": list(saved_urls.keys()),
+            "device": device,
+            "saved_at": state.get("saved_at"),
+        }
+
+    async def list_sessions(self) -> Dict[str, Any]:
+        """List all saved sessions."""
+        session_dir = Path(os.path.expanduser("~/.agent-os/sessions"))
+        sessions = []
+
+        if session_dir.exists():
+            for path in session_dir.glob("*.json"):
+                try:
+                    with open(path) as f:
+                        state = json.load(f)
+                    sessions.append({
+                        "name": path.stem,
+                        "cookies": len(state.get("cookies", [])),
+                        "pages": list(state.get("urls", {}).keys()),
+                        "device": state.get("device", "unknown"),
+                        "saved_at": state.get("saved_at"),
+                    })
+                except Exception:
+                    continue
+
+        return {"status": "success", "sessions": sessions}
+
+    async def delete_session(self, name: str) -> Dict[str, Any]:
+        """Delete a saved session."""
+        session_dir = Path(os.path.expanduser("~/.agent-os/sessions"))
+        state_path = session_dir / f"{name}.json"
+
+        if not state_path.exists():
+            return {"status": "error", "error": f"Session not found: {name}"}
+
+        state_path.unlink()
+        return {"status": "success", "deleted": name}
 
     async def stop(self):
         """Clean shutdown."""

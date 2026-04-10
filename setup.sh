@@ -18,7 +18,7 @@ if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" 
 fi
 echo "✅ Python $PYTHON_VERSION"
 
-# ─── Virtual Environment ─────────────────────────────────────
+# ─── Virtual Environment (required) ──────────────────────────
 VENV_DIR="$(dirname "$0")/venv"
 
 if [ ! -d "$VENV_DIR" ]; then
@@ -28,41 +28,31 @@ if [ ! -d "$VENV_DIR" ]; then
     if ! python3 -m venv --help > /dev/null 2>&1; then
         echo "⚠️  python3-venv not found. Attempting to install..."
         if command -v apt-get > /dev/null 2>&1; then
-            sudo apt-get update -qq && sudo apt-get install -y -qq "python${PYTHON_VERSION}-venv" 2>/dev/null || VENV_FAILED=1
+            sudo apt-get update -qq && sudo apt-get install -y -qq "python${PYTHON_VERSION}-venv"
         else
-            VENV_FAILED=1
+            echo "❌ Cannot install python3-venv. Install it manually and re-run."
+            exit 1
         fi
     fi
 
-    # Try creating venv
-    if [ "${VENV_FAILED:-0}" = "0" ]; then
-        python3 -m venv "$VENV_DIR" 2>/dev/null || VENV_FAILED=1
-    fi
-
-    if [ "${VENV_FAILED:-0}" = "1" ]; then
-        echo "⚠️  Could not create virtual environment."
-        echo "   Falling back to system-wide install (--break-system-packages)"
-        USE_VENV=0
-    else
-        echo "✅ Virtual environment created"
-        USE_VENV=1
-    fi
+    # Try normal venv first, fall back to --without-pip + manual pip install
+    python3 -m venv "$VENV_DIR" 2>/dev/null || {
+        echo "  ⚠️  ensurepip not available, using --without-pip fallback..."
+        python3 -m venv --without-pip "$VENV_DIR"
+        source "$VENV_DIR/bin/activate"
+        curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
+        python /tmp/get-pip.py -q
+        rm -f /tmp/get-pip.py
+    }
+    echo "✅ Virtual environment created"
 else
     echo "✅ Virtual environment already exists"
-    USE_VENV=1
 fi
 
-# Activate venv or use system python
-if [ "${USE_VENV:-1}" = "1" ]; then
-    source "$VENV_DIR/bin/activate"
-    PIP_CMD="pip"
-    PYTHON_CMD="python"
-    echo "✅ Using virtual environment: $(which python)"
-else
-    PIP_CMD="pip3 install --break-system-packages"
-    PYTHON_CMD="python3"
-    echo "✅ Using system Python: $(which python3)"
-fi
+source "$VENV_DIR/bin/activate"
+PIP_CMD="pip"
+PYTHON_CMD="python"
+echo "✅ Using virtual environment: $(which python)"
 
 # ─── System Dependencies (for Playwright Chromium) ───────────
 echo ""
@@ -93,12 +83,8 @@ fi
 # ─── Python Dependencies ─────────────────────────────────────
 echo ""
 echo "📦 Installing Python dependencies..."
-if [ "${USE_VENV:-1}" = "1" ]; then
-    pip install --upgrade pip -q
-    pip install -r "$(dirname "$0")/requirements.txt" -q
-else
-    pip3 install --break-system-packages -r "$(dirname "$0")/requirements.txt" -q
-fi
+pip install --upgrade pip -q
+pip install -r "$(dirname "$0")/requirements.txt" -q
 echo "✅ Python dependencies installed"
 
 # ─── Playwright Chromium ─────────────────────────────────────
@@ -155,14 +141,9 @@ $PYTHON_CMD -m pytest "$(dirname "$0")/tests/" -v --tb=short 2>&1 || {
 echo ""
 echo "🎉 Setup complete!"
 echo ""
-if [ "${USE_VENV:-1}" = "1" ]; then
-    echo "Quick start:"
-    echo "  source venv/bin/activate"
-    echo "  python main.py --agent-token 'my-agent'"
-else
-    echo "Quick start:"
-    echo "  python3 main.py --agent-token 'my-agent'"
-fi
+echo "Quick start:"
+echo "  source venv/bin/activate"
+echo "  python main.py --agent-token 'my-agent'"
 echo ""
 echo "Test with curl:"
 echo "  curl -X POST http://localhost:8001/command \\"

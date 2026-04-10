@@ -22,10 +22,35 @@ class AuthHandler:
         self._fernet = Fernet(self._key)
 
     def _get_or_create_key(self) -> bytes:
-        """Get or create encryption key for the vault."""
-        key_path = Path(os.path.expanduser("~/.agent-os/.vault_key"))
+        """Get or create encryption key for the vault.
+
+        Key is stored in XDG_DATA_HOME or ~/.local/share/agent-os/ to
+        separate it from the vault file in ~/.agent-os/.
+        Falls back to ~/.agent-os/.vault_key if XDG path unavailable.
+        """
+        # Prefer XDG data directory (separates key from config)
+        xdg_data = os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share"))
+        key_path = Path(xdg_data) / "agent-os" / ".vault_key"
+
         if key_path.exists():
             return key_path.read_bytes()
+
+        # Fallback: check legacy location
+        legacy_path = Path(os.path.expanduser("~/.agent-os/.vault_key"))
+        if legacy_path.exists():
+            # Migrate to new location
+            key = legacy_path.read_bytes()
+            key_path.parent.mkdir(parents=True, exist_ok=True)
+            key_path.write_bytes(key)
+            key_path.chmod(0o600)
+            try:
+                legacy_path.unlink()
+                logger.info("Migrated vault key from legacy location to XDG data dir")
+            except Exception:
+                pass
+            return key
+
+        # Generate new key
         key = Fernet.generate_key()
         key_path.parent.mkdir(parents=True, exist_ok=True)
         key_path.write_bytes(key)
@@ -77,21 +102,42 @@ class AuthHandler:
 
         await browser.navigate(url)
 
-        # Common login form selectors
+        # Common login form selectors - find email and password fields
         email_selectors = [
             'input[type="email"]', 'input[name="email"]', 'input[name="username"]',
-            'input[id="email"]', 'input[id="username"]', 'input[placeholder*="email"]',
-            'input[placeholder*="username"]', 'input[type="text"][name*="user"]',
-            'input[type="text"][name*="email"]',
+            'input[id="email"]', 'input[id="username"]', 'input[placeholder*="email" i]',
+            'input[placeholder*="username" i]', 'input[type="text"][name*="user"]',
+            'input[type="text"][name*="email"]', 'input[type="text"][name*="login"]',
         ]
         password_selectors = [
             'input[type="password"]', 'input[name="password"]',
-            'input[id="password"]', 'input[placeholder*="password"]',
+            'input[id="password"]', 'input[placeholder*="password" i]',
         ]
 
+        # Find the actual selectors that exist on the page
+        email_sel = None
+        password_sel = None
+        for sel in email_selectors:
+            el = await browser.evaluate_js(f"""(() => {{ return !!document.querySelector('{sel}'); }})()""")
+            if el:
+                email_sel = sel
+                break
+        for sel in password_selectors:
+            el = await browser.evaluate_js(f"""(() => {{ return !!document.querySelector('{sel}'); }})()""")
+            if el:
+                password_sel = sel
+                break
+
+        if not email_sel or not password_sel:
+            return {"status": "error", "error": "Could not find login form fields"}
+
+        # Fill using the found selectors
+        email_value = creds.get("username", creds.get("email", ""))
+        password_value = creds.get("password", "")
+
         result = await browser.fill_form({
-            "email": creds.get("username", creds.get("email", "")),
-            "password": creds.get("password", ""),
+            email_sel: email_value,
+            password_sel: password_value,
         })
 
         # Try to click submit
