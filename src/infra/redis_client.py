@@ -15,9 +15,24 @@ logger = logging.getLogger("agent-os.infra.redis")
 class InMemoryFallback:
     """In-memory fallback when Redis is unavailable. NOT distributed."""
 
+    MAX_KEYS = 10000  # Hard cap to prevent unbounded memory growth
+
     def __init__(self):
         self._data: Dict[str, Tuple[Any, float]] = {}  # key -> (value, expiry_timestamp)
         self._sorted_sets: Dict[str, Dict[str, float]] = defaultdict(dict)
+
+    def _evict_if_needed(self):
+        """Evict expired and oldest entries if over MAX_KEYS."""
+        now = time.time()
+        # First pass: remove expired
+        expired = [k for k, (_, exp) in self._data.items() if 0 < exp < now]
+        for k in expired:
+            del self._data[k]
+        # If still over limit, remove oldest entries
+        if len(self._data) > self.MAX_KEYS:
+            sorted_keys = sorted(self._data.keys(), key=lambda k: self._data[k][1] or 0)
+            for k in sorted_keys[:len(self._data) - self.MAX_KEYS]:
+                del self._data[k]
 
     async def get(self, key: str) -> Optional[str]:
         val = self._data.get(key)
@@ -32,6 +47,7 @@ class InMemoryFallback:
     async def set(self, key: str, value: str, ex: int = 0):
         expiry = time.time() + ex if ex > 0 else 0
         self._data[key] = (value, expiry)
+        self._evict_if_needed()
 
     async def delete(self, key: str):
         self._data.pop(key, None)

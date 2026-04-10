@@ -161,7 +161,7 @@ class AgentServer:
                 return {
                     "user_id": "legacy",
                     "api_key_id": None,
-                    "scopes": ["browser", "scanning", "workflows", "admin"],
+                    "scopes": ["browser"],
                     "auth_method": "legacy_token",
                 }
 
@@ -204,18 +204,31 @@ class AgentServer:
             except Exception as e:
                 logger.error(f"Rate limit cleanup error: {e}")
 
-    def _get_cors_headers(self) -> Dict[str, str]:
-        """Return CORS headers for API responses."""
-        _allowed_origins = self.config.get("server.cors_allowed_origins", [])
-        cors_origin = self.config.get("server.cors_origin", "*")
+    def _get_cors_headers(self, request=None) -> Dict[str, str]:
+        """Return CORS headers for API responses. Uses configured allowed origins."""
+        allowed_origins = self.config.get("server.cors_allowed_origins", [])
+        cors_origin = self.config.get("server.cors_origin", "")
 
-        return {
-            "Access-Control-Allow-Origin": cors_origin,
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        # If specific origins configured, validate against request Origin
+        if allowed_origins and request:
+            origin = request.headers.get("Origin", "")
+            if origin in allowed_origins:
+                cors_origin = origin
+            else:
+                cors_origin = ""  # Reject — no CORS header set
+        elif not cors_origin:
+            # Default: deny cross-origin if nothing configured
+            cors_origin = ""
+
+        headers = {
+            "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
             "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key",
             "Access-Control-Max-Age": "86400",
             "Access-Control-Expose-Headers": "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset",
         }
+        if cors_origin:
+            headers["Access-Control-Allow-Origin"] = cors_origin
+        return headers
 
     def _setup_routes(self):
         """Setup HTTP routes."""
@@ -252,9 +265,9 @@ class AgentServer:
 
     @web.middleware
     async def _cors_middleware(self, request: web.Request, handler):
-        """Add CORS headers to all responses."""
+        """Add CORS headers to all responses. Validates origin against config."""
         response = await handler(request)
-        for key, value in self._get_cors_headers().items():
+        for key, value in self._get_cors_headers(request).items():
             response.headers[key] = value
         return response
 
@@ -638,7 +651,7 @@ class AgentServer:
                     auth_context = {
                         "user_id": "legacy",
                         "api_key_id": None,
-                        "scopes": ["browser", "scanning", "workflows", "admin"],
+                        "scopes": ["browser"],
                         "auth_method": "legacy_token",
                     }
 
