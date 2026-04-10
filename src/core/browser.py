@@ -63,6 +63,12 @@ class AgentBrowser:
         self._network_capture = None  # Set externally
         self._cookie_key = self._get_or_create_cookie_key()
         self._cookie_fernet = Fernet(self._cookie_key)
+        self._crash_count = 0
+        self._max_crash_retries = 3
+        self._launch_args = None  # cached launch args
+        self._recovery_lock = asyncio.Lock()
+        # Import at class level to avoid repeated imports
+        self._mimicry = self._mimicry
 
     def _get_or_create_cookie_key(self) -> bytes:
         """Get or create encryption key for cookie storage."""
@@ -80,33 +86,39 @@ class AgentBrowser:
         self._cookie_dir.mkdir(parents=True, exist_ok=True)
         self._download_dir.mkdir(parents=True, exist_ok=True)
 
+        await self._launch_browser()
+        logger.info("Browser started with stealth patches v2.0")
+
+    async def _launch_browser(self):
+        """Internal: launch browser and set up context."""
         self.playwright = await async_playwright().start()
 
         # Use headed or headless based on config
         headless = self.config.get("browser.headless", True)
 
-        # Build launch args
-        launch_args = [
-            "--disable-blink-features=AutomationControlled",
-            "--disable-features=IsolateOrigins,site-per-process",
-            "--disable-infobars",
-            "--disable-background-timer-throttling",
-            "--disable-backgrounding-occluded-windows",
-            "--disable-renderer-backgrounding",
-            "--disable-dev-shm-usage",
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--disable-extensions",
-            "--disable-component-extensions-with-background-pages",
-            "--window-size=1920,1080",
-            "--disable-features=TranslateUI",
-            "--disable-ipc-flooding-protection",
-        ]
+        # Build launch args (cached for recovery)
+        if self._launch_args is None:
+            self._launch_args = [
+                "--disable-blink-features=AutomationControlled",
+                "--disable-features=IsolateOrigins,site-per-process",
+                "--disable-infobars",
+                "--disable-background-timer-throttling",
+                "--disable-backgrounding-occluded-windows",
+                "--disable-renderer-backgrounding",
+                "--disable-dev-shm-usage",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--disable-extensions",
+                "--disable-component-extensions-with-background-pages",
+                "--window-size=1920,1080",
+                "--disable-features=TranslateUI",
+                "--disable-ipc-flooding-protection",
+            ]
 
         # Build launch options
         launch_options = {
             "headless": headless,
-            "args": launch_args,
+            "args": self._launch_args,
         }
 
         # Proxy support
@@ -125,8 +137,8 @@ class AgentBrowser:
         context_options = {
             "user_agent": self.config.get("browser.user_agent"),
             "viewport": self.config.get("browser.viewport", {"width": 1920, "height": 1080}),
-            "locale": "en-US",
-            "timezone_id": "America/New_York",
+            "locale": self.config.get("browser.locale", "en-US"),
+            "timezone_id": self.config.get("browser.timezone_id", "America/New_York"),
             "permissions": ["geolocation", "notifications"],
             "color_scheme": "light",
             "device_scale_factor": 1.0,
@@ -154,7 +166,63 @@ class AgentBrowser:
         self._pages["main"] = self.page
         self._attach_console_listener("main", self.page)
 
-        logger.info("Browser started with stealth patches v2.0")
+    async def recover(self):
+        """Recover from browser crash by relaunching."""
+        async with self._recovery_lock:
+            self._crash_count += 1
+            if self._crash_count > self._max_crash_retries:
+                logger.error(f"Browser exceeded max crash retries ({self._max_crash_retries})")
+                raise RuntimeError("Browser crashed too many times — manual restart required")
+
+            logger.warning(f"Browser recovering from crash (attempt {self._crash_count}/{self._max_crash_retries})...")
+
+            # Save cookies before closing
+            try:
+                await self._save_cookies("default")
+            except Exception:
+                pass
+
+            # Close old browser
+            try:
+                if self.context:
+                    await self.context.close()
+            except Exception:
+                pass
+            try:
+                if self.browser:
+                    await self.browser.close()
+            except Exception:
+                pass
+            try:
+                if self.playwright:
+                    await self.playwright.stop()
+            except Exception:
+                pass
+
+            # Clear state
+            self.browser = None
+            self.context = None
+            self.page = None
+            self._pages.clear()
+            self._console_logs.clear()
+
+            # Relaunch
+            await self._launch_browser()
+            logger.info(f"Browser recovered successfully (crash #{self._crash_count})")
+
+    async def _safe_execute(self, coro, page_id: str = "main"):
+        """Execute a browser operation with crash recovery."""
+        try:
+            return await coro
+        except Exception as e:
+            error_str = str(e).lower()
+            if any(kw in error_str for kw in ["page crashed", "target closed", "context was destroyed",
+                                                   "browser has been closed", "frame was detached",
+                                                   "session deleted", "disconnected"]):
+                logger.warning(f"Browser crash detected: {e}")
+                await self.recover()
+                raise RuntimeError(f"Browser crashed, recovered. Retry the operation. Original: {e}")
+            raise
 
     def _attach_console_listener(self, page_id: str, page: Page):
         """Attach console and error listeners to a page."""
@@ -279,9 +347,8 @@ class AgentBrowser:
 
     async def fill_form(self, fields: Dict[str, str], page_id: str = "main") -> Dict[str, Any]:
         """Fill form fields with human-like typing."""
-        from src.security.human_mimicry import HumanMimicry
         page = self._pages.get(page_id, self.page)
-        mimicry = HumanMimicry()
+        mimicry = self._mimicry
         filled = []
 
         for selector, value in fields.items():
@@ -316,9 +383,8 @@ class AgentBrowser:
 
     async def click(self, selector: str, page_id: str = "main") -> Dict[str, Any]:
         """Click an element with human-like mouse movement."""
-        from src.security.human_mimicry import HumanMimicry
         page = self._pages.get(page_id, self.page)
-        mimicry = HumanMimicry()
+        mimicry = self._mimicry
 
         try:
             element = await page.query_selector(selector)
@@ -345,9 +411,8 @@ class AgentBrowser:
 
     async def type_text(self, text: str, page_id: str = "main") -> Dict[str, Any]:
         """Type text with human-like delays (into focused element)."""
-        from src.security.human_mimicry import HumanMimicry
         page = self._pages.get(page_id, self.page)
-        mimicry = HumanMimicry()
+        mimicry = self._mimicry
 
         for char in text:
             await page.keyboard.type(char, delay=mimicry.typing_delay())
@@ -407,7 +472,6 @@ class AgentBrowser:
 
     async def scroll(self, direction: str = "down", amount: int = 500, page_id: str = "main") -> Dict[str, Any]:
         """Scroll with human-like behavior."""
-        from src.security.human_mimicry import HumanMimicry
         page = self._pages.get(page_id, self.page)
 
         y = amount if direction == "down" else -amount
@@ -478,9 +542,8 @@ class AgentBrowser:
 
     async def right_click(self, selector: str, page_id: str = "main") -> Dict[str, Any]:
         """Right-click an element (opens context menu)."""
-        from src.security.human_mimicry import HumanMimicry
         page = self._pages.get(page_id, self.page)
-        mimicry = HumanMimicry()
+        mimicry = self._mimicry
 
         try:
             element = await page.query_selector(selector)
@@ -557,9 +620,8 @@ class AgentBrowser:
 
     async def drag_and_drop(self, source_selector: str, target_selector: str, page_id: str = "main") -> Dict[str, Any]:
         """Drag an element and drop it on another element."""
-        from src.security.human_mimicry import HumanMimicry
         page = self._pages.get(page_id, self.page)
-        mimicry = HumanMimicry()
+        mimicry = self._mimicry
 
         try:
             source = await page.query_selector(source_selector)
@@ -653,9 +715,8 @@ class AgentBrowser:
 
     async def double_click(self, selector: str, page_id: str = "main") -> Dict[str, Any]:
         """Double-click an element (e.g., to edit a cell, open a file)."""
-        from src.security.human_mimicry import HumanMimicry
         page = self._pages.get(page_id, self.page)
-        mimicry = HumanMimicry()
+        mimicry = self._mimicry
 
         try:
             element = await page.query_selector(selector)

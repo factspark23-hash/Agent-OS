@@ -257,10 +257,76 @@ class SQLiScanner:
 
         # Test forms
         await self.browser.navigate(url)
-        content = await self.browser.get_content()
-        html = content.get("html", "")
+        forms = await self.browser.evaluate_js("""() => {
+            const forms = [];
+            document.querySelectorAll('form').forEach((form, i) => {
+                const inputs = [];
+                form.querySelectorAll('input, textarea').forEach(inp => {
+                    if (inp.type === 'hidden' || inp.type === 'submit') return;
+                    inputs.push({
+                        name: inp.name || inp.id || '',
+                        type: inp.type || 'text',
+                        id: inp.id || '',
+                        selector: inp.id ? '#' + inp.id : (inp.name ? 'input[name="' + inp.name + '"]' : '')
+                    });
+                });
+                if (inputs.length > 0) {
+                    forms.push({
+                        action: form.action || window.location.href,
+                        method: form.method || 'GET',
+                        inputs: inputs,
+                        submit_selector: 'button[type="submit"], input[type="submit"]'
+                    });
+                }
+            });
+            return forms;
+        }""")
+
+        for form in (forms or []):
+            for inp in form.get("inputs", []):
+                selector = inp.get("selector")
+                if not selector:
+                    continue
+                vuln = await self._test_sqli_input(url, form, inp)
+                if vuln:
+                    self.vulnerabilities.append(vuln)
 
         return self._format_results()
+
+    async def _test_sqli_input(self, url: str, form: dict, input_field: dict) -> Optional[Vulnerability]:
+        """Test a form input for SQL injection."""
+        selector = input_field.get("selector")
+        if not selector:
+            return None
+
+        for payload in self.PAYLOADS:
+            try:
+                await self.browser.navigate(url)
+                await self.browser.fill_form({selector: payload})
+
+                # Try to submit
+                submit_sel = form.get("submit_selector", 'button[type="submit"]')
+                await self.browser.click(submit_sel)
+
+                await asyncio.sleep(1)
+                content = await self.browser.get_content()
+                html = content.get("html", "")
+
+                for pattern in self.ERROR_PATTERNS:
+                    if re.search(pattern, html, re.IGNORECASE):
+                        return Vulnerability(
+                            type="SQLi",
+                            url=url,
+                            parameter=input_field.get("name", "unknown"),
+                            payload=payload,
+                            confidence=0.85,
+                            evidence=f"SQL error in form response: {pattern[:60]}",
+                            severity="critical"
+                        )
+            except Exception:
+                continue
+
+        return None
 
     async def _test_sqli_param(self, url: str, param: str) -> Optional[Vulnerability]:
         """Test a URL parameter for SQL injection."""
