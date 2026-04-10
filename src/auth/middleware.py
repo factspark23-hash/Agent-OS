@@ -150,11 +150,11 @@ def create_auth_middleware(auth_mw: AuthMiddleware):
         # Skip auth for health/status endpoints
         skip_paths = {"/status", "/health", "/commands", "/favicon.ico"}
         if request.path in skip_paths:
-            return await handler
+            return await handler(request)
 
         # Skip auth for OPTIONS (CORS preflight)
         if request.method == "OPTIONS":
-            return await handler
+            return await handler(request)
 
         # Parse body for POST requests
         body = None
