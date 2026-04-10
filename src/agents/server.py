@@ -7,6 +7,7 @@ import hmac as _hmac
 import json
 import logging
 import time
+from collections import defaultdict, deque
 from typing import Dict, Optional, Any
 from aiohttp import web
 
@@ -43,11 +44,10 @@ class AgentServer:
         self._agent_hub = None
         self._proxy_manager = None
 
-        # Rate limiting: {ip_or_token: [timestamp, ...]}
-        self._rate_limits: Dict[str, list] = {}
+        # Rate limiting: {ip_or_token: deque of timestamps}
+        self._rate_limits: Dict[str, deque] = defaultdict(lambda: deque(maxlen=200))
         self._rate_max_requests = config.get("server.rate_limit_max", 60)
         self._rate_window_seconds = config.get("server.rate_limit_window", 60)
-        self._rate_max_entries = config.get("server.rate_limit_max_entries", 10000)
         self._rate_cleanup_task = None
 
     async def start(self):
@@ -118,17 +118,17 @@ class AgentServer:
         window = self._rate_window_seconds
         max_req = self._rate_max_requests
 
-        if identifier not in self._rate_limits:
-            self._rate_limits[identifier] = []
-
-        # Clean old entries outside window
         timestamps = self._rate_limits[identifier]
-        self._rate_limits[identifier] = [t for t in timestamps if now - t < window]
 
-        if len(self._rate_limits[identifier]) >= max_req:
+        # Remove expired entries from the left of the deque (O(1) amortized)
+        cutoff = now - window
+        while timestamps and timestamps[0] < cutoff:
+            timestamps.popleft()
+
+        if len(timestamps) >= max_req:
             return False
 
-        self._rate_limits[identifier].append(now)
+        timestamps.append(now)
         return True
 
     async def _rate_limit_cleanup_loop(self):
@@ -138,23 +138,25 @@ class AgentServer:
                 await asyncio.sleep(120)  # Cleanup every 2 minutes
                 now = time.time()
                 window = self._rate_window_seconds
+                cutoff = now - window
 
                 # Remove entries with empty or fully-expired timestamps
                 stale_keys = [
                     k for k, timestamps in self._rate_limits.items()
-                    if not timestamps or (now - max(timestamps)) > window
+                    if not timestamps or timestamps[-1] < cutoff
                 ]
                 for k in stale_keys:
                     del self._rate_limits[k]
 
-                # If still over max entries, evict oldest
-                if len(self._rate_limits) > self._rate_max_entries:
-                    # Sort by oldest last-access time, evict bottom 20%
+                # Cap total entries to prevent unbounded growth
+                max_entries = 50000
+                if len(self._rate_limits) > max_entries:
+                    # Evict oldest 20%
                     sorted_keys = sorted(
                         self._rate_limits.keys(),
-                        key=lambda k: max(self._rate_limits[k]) if self._rate_limits[k] else 0
+                        key=lambda k: self._rate_limits[k][-1] if self._rate_limits[k] else 0
                     )
-                    evict_count = len(sorted_keys) - self._rate_max_entries + (self._rate_max_entries // 5)
+                    evict_count = len(sorted_keys) - max_entries + (max_entries // 5)
                     for k in sorted_keys[:evict_count]:
                         del self._rate_limits[k]
 
@@ -208,8 +210,33 @@ class AgentServer:
     async def _ws_handler(self, websocket, path):
         """Handle WebSocket connections from agents."""
         client_id = f"ws-{id(websocket)}"
-        self._ws_clients[client_id] = websocket
-        logger.info(f"Agent connected via WebSocket: {client_id}")
+
+        # Authenticate on connect — first message must be auth
+        try:
+            first_msg = await asyncio.wait_for(websocket.recv(), timeout=10.0)
+            data = json.loads(first_msg)
+            token = data.get("token", "")
+
+            if not self._validate_token(token):
+                await websocket.send(json.dumps({
+                    "status": "error",
+                    "error": "Invalid authentication token"
+                }))
+                await websocket.close()
+                return
+
+            # Auth OK
+            self._ws_clients[client_id] = websocket
+            logger.info(f"Agent connected via WebSocket: {client_id}")
+            await websocket.send(json.dumps({"status": "authenticated", "client_id": client_id}))
+
+        except (asyncio.TimeoutError, json.JSONDecodeError, Exception) as e:
+            logger.warning(f"WebSocket auth failed: {e}")
+            try:
+                await websocket.close()
+            except Exception:
+                pass
+            return
 
         try:
             async for message in websocket:
@@ -225,7 +252,7 @@ class AgentServer:
                         }))
                         continue
 
-                    # Validate token
+                    # Re-validate token on each message
                     if not self._validate_token(token):
                         await websocket.send(json.dumps({
                             "status": "error",
@@ -241,7 +268,7 @@ class AgentServer:
                     logger.error(f"WS error: {e}")
                     await websocket.send(json.dumps({"status": "error", "error": str(e)}))
         finally:
-            del self._ws_clients[client_id]
+            self._ws_clients.pop(client_id, None)
             logger.info(f"Agent disconnected: {client_id}")
 
     async def _handle_command(self, request: web.Request) -> web.Response:

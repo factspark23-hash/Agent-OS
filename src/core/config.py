@@ -28,6 +28,8 @@ DEFAULT_CONFIG = {
         "page_timeout_ms": 30000,
         "proxy": None,
         "device": "desktop_1080",
+        "locale": "en-US",
+        "timezone_id": "America/New_York",
     },
     "session": {
         "timeout_minutes": 15,

@@ -147,8 +147,8 @@ class UserContext:
         context_options = {
             "user_agent": config.get("user_agent"),
             "viewport": config.get("viewport", {"width": 1920, "height": 1080}),
-            "locale": "en-US",
-            "timezone_id": "America/New_York",
+            "locale": config.get("locale", "en-US"),
+            "timezone_id": config.get("timezone_id", "America/New_York"),
             "permissions": ["geolocation", "notifications"],
             "color_scheme": "light",
             "device_scale_factor": 1.0,
@@ -1091,14 +1091,51 @@ class PersistentBrowserManager:
         if not selector or not action_text:
             return {"status": "error", "error": "Missing 'selector' or 'action_text'"}
         page = ctx.get_page()
-        await page.click(selector, button="right")
+
+        # Right-click to open context menu
+        el = await page.query_selector(selector)
+        if not el:
+            return {"status": "error", "error": f"Element not found: {selector}"}
+        await el.click(button="right")
         await asyncio.sleep(random.uniform(0.3, 0.8))
-        shortcuts = {"copy": "Control+c", "paste": "Control+v", "cut": "Control+x", "select all": "Control+a", "save": "Control+s"}
+
+        # Try to find and click the menu item by text
+        menu_selectors = [
+            f'text="{action_text}"',
+            f'role=menuitem[name="{action_text}"]',
+            f'[role="menuitem"]:has-text("{action_text}")',
+            f'li:has-text("{action_text}")',
+            f'div:has-text("{action_text}")',
+        ]
+
+        for sel in menu_selectors:
+            try:
+                item = await page.query_selector(sel)
+                if item:
+                    await item.click()
+                    await asyncio.sleep(random.uniform(0.2, 0.5))
+                    return {"status": "success", "action": action_text, "selector": selector}
+            except Exception:
+                continue
+
+        # Fallback to keyboard shortcuts
+        shortcuts = {
+            "copy": "Control+c",
+            "paste": "Control+v",
+            "cut": "Control+x",
+            "select all": "Control+a",
+            "save": "Control+s",
+            "inspect": "F12",
+            "view source": "Control+u",
+            "reload": "F5",
+        }
+
         shortcut = shortcuts.get(action_text.lower())
         if shortcut:
             await page.keyboard.press(shortcut)
             return {"status": "success", "action": action_text, "method": "keyboard_shortcut"}
-        return {"status": "error", "error": f"Action '{action_text}' not found"}
+
+        return {"status": "error", "error": f"Context menu action '{action_text}' not found"}
 
     async def _cmd_tabs(self, ctx: UserContext, params: Dict) -> Dict:
         action = params.get("action", "list")

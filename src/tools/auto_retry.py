@@ -157,7 +157,11 @@ def classify_error(error: str, status_code: int = None, headers: Dict = None) ->
         if status_code >= 500:
             return ErrorClass.TRANSIENT
 
-    # Check error message patterns
+    # Check error message patterns — browser crash first (recoverable)
+    for pattern in _BROWSER_PATTERNS:
+        if re.search(pattern, error_lower):
+            return ErrorClass.BROWSER
+
     for pattern in _PERMANENT_PATTERNS:
         if re.search(pattern, error_lower):
             return ErrorClass.PERMANENT
@@ -173,10 +177,6 @@ def classify_error(error: str, status_code: int = None, headers: Dict = None) ->
     for pattern in _NETWORK_PATTERNS:
         if re.search(pattern, error_lower):
             return ErrorClass.NETWORK
-
-    for pattern in _BROWSER_PATTERNS:
-        if re.search(pattern, error_lower):
-            return ErrorClass.BROWSER
 
     for pattern in _TRANSIENT_PATTERNS:
         if re.search(pattern, error_lower):

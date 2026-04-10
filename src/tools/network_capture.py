@@ -370,7 +370,7 @@ class NetworkCapture:
             if request.method.upper() not in filters["methods"]:
                 return
 
-        req_id = hashlib.md5(f"{request.url}{time.time()}".encode()).hexdigest()[:12]
+        req_id = hashlib.md5(f"{request.url}{time.time()}{id(request)}".encode()).hexdigest()[:12]
 
         req = NetworkRequest(
             id=req_id,
@@ -393,9 +393,10 @@ class NetworkCapture:
         if not self._active.get(page_id):
             return
 
-        # Find matching request
+        # Find matching request by URL + method + unresolved status
+        # Prioritize requests that match both URL and method and haven't been resolved
         for req in reversed(self._captures.get(page_id, deque())):
-            if req.url == response.url and req.response_status is None:
+            if req.url == response.url and req.method == response.request.method and req.response_status is None:
                 req.response_status = response.status
                 req.response_headers = dict(response.headers)
                 req.duration_ms = int((time.time() - req.timestamp) * 1000)
@@ -418,7 +419,7 @@ class NetworkCapture:
             return
 
         for req in reversed(self._captures.get(page_id, deque())):
-            if req.url == request.url and not req.failed:
+            if req.url == request.url and req.method == request.method and not req.failed:
                 req.failed = True
                 req.error = request.failure
                 req.duration_ms = int((time.time() - req.timestamp) * 1000)
