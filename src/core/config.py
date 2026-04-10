@@ -6,6 +6,7 @@ import os
 import yaml
 import secrets
 import hashlib
+import hmac
 import copy
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -102,14 +103,15 @@ class Config:
             val = val.get(k, {}) if isinstance(val, dict) else default
         return val if val != {} else default
 
-    def set(self, dotted_key: str, value: Any):
-        """Set config value by dotted path."""
+    def set(self, dotted_key: str, value: Any, save: bool = False):
+        """Set config value by dotted path. Only saves to disk if save=True."""
         keys = dotted_key.split(".")
         target = self.config
         for k in keys[:-1]:
             target = target.setdefault(k, {})
         target[keys[-1]] = value
-        self.save()
+        if save:
+            self.save()
 
     def generate_agent_token(self, agent_name: str) -> str:
         """Generate a secure agent token."""
@@ -119,3 +121,8 @@ class Config:
     def hash_token(self, token: str) -> str:
         """Hash token for secure storage."""
         return hashlib.sha256(token.encode()).hexdigest()
+
+    def verify_token(self, provided_token: str, stored_hash: str) -> bool:
+        """Constant-time token verification to prevent timing attacks."""
+        provided_hash = self.hash_token(provided_token)
+        return hmac.compare_digest(provided_hash, stored_hash)

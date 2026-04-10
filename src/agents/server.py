@@ -3,6 +3,7 @@ Agent-OS Agent Server
 WebSocket + REST API for any AI agent to connect and control the browser.
 """
 import asyncio
+import hmac as _hmac
 import json
 import logging
 import time
@@ -81,21 +82,25 @@ class AgentServer:
     def _validate_token(self, token: str) -> bool:
         """Validate agent token against configured token(s).
 
+        Uses constant-time comparison to prevent timing attacks.
         Supports multiple valid tokens via config 'server.allowed_tokens' list,
         or falls back to the single agent_token. Requires a token to be configured.
         """
         if not token:
             return False
 
-        # Check against allowed_tokens list
+        # Check against allowed_tokens list (constant-time per token)
         allowed = self.config.get("server.allowed_tokens", [])
         if allowed:
-            return token in allowed
+            for allowed_token in allowed:
+                if _hmac.compare_digest(token, allowed_token):
+                    return True
+            return False
 
         # Fallback: check against single agent_token
         configured = self.config.get("server.agent_token")
         if configured:
-            return token == configured
+            return _hmac.compare_digest(token, configured)
 
         # No token configured = reject (production safety)
         return False

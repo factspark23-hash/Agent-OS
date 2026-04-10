@@ -52,7 +52,7 @@ class AgentOS:
         self._running = False
         self._ram_monitor_task = None
 
-        # Apply CLI overrides
+        # Apply CLI overrides (batched — no disk writes yet)
         if args.headed:
             self.config.set("browser.headless", False)
         if args.port:
@@ -69,9 +69,17 @@ class AgentOS:
         # Store token in config for server validation
         if args.agent_token:
             self.config.set("server.agent_token", args.agent_token)
+        elif not self.config.get("server.agent_token"):
+            # Auto-generate and persist a token if none configured
+            auto_token = self.config.generate_agent_token("agent")
+            self.config.set("server.agent_token", auto_token)
+            logger.info(f"Auto-generated agent token (saved to config)")
 
         # Rate limiting
         self.config.set("server.rate_limit_max", args.rate_limit)
+
+        # Persist all config changes in one write
+        self.config.save()
 
     async def start(self):
         """Start all components."""
