@@ -7,7 +7,7 @@ import hashlib
 import logging
 import secrets
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import bcrypt
@@ -74,7 +74,7 @@ class APIKeyManager:
 
         expires_at = None
         if expires_in_days:
-            expires_at = datetime.now(timezone.utc) + __import__("datetime").timedelta(days=expires_in_days)
+            expires_at = datetime.now(timezone.utc) + timedelta(days=expires_in_days)
 
         key_data = {
             "id": secrets.token_hex(16),

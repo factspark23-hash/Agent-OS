@@ -908,11 +908,11 @@ class AutoHeal:
             tag = parts[0] if parts[0] else "div"
             cls = parts[1] if len(parts) > 1 else ""
         elif "[" in selector and "]" in selector:
-            # attribute selector like input[name="email"]
+            # attribute selector like input[name="email"] or input[name*="email"]
             import re
-            m = re.match(r'^(\w+)\[(\w+)="([^"]+)"\]$', selector)
+            m = re.match(r'^([\w-]+)\[([\w-]+)([=*^$~|]?=)"([^"]+)"\]$', selector)
             if m:
-                tag, attr_name, attr_value = m.groups()
+                tag, attr_name, operator, attr_value = m.groups()
                 # Try finding by attribute
                 js = f"""(() => {{
                     const el = document.querySelector('{tag}[{attr_name}*="{attr_value}"]');

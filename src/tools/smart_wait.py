@@ -573,7 +573,7 @@ class SmartWait:
 
             tasks = []
             for cond in conditions:
-                tasks.append(self._run_condition(cond, remaining, page_id))
+                tasks.append(asyncio.create_task(self._run_condition(cond, remaining, page_id)))
 
             done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED, timeout=remaining / 1000)
 

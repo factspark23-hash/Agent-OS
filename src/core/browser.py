@@ -24,6 +24,7 @@ from src.core.stealth import (
     BOT_DETECTION_SCRIPT_PATTERNS,
     handle_request_interception,
 )
+from src.security.human_mimicry import HumanMimicry
 
 logger = logging.getLogger("agent-os.browser")
 
@@ -68,7 +69,7 @@ class AgentBrowser:
         self._launch_args = None  # cached launch args
         self._recovery_lock = asyncio.Lock()
         # Import at class level to avoid repeated imports
-        self._mimicry = self._mimicry
+        self._mimicry = HumanMimicry()
 
     def _get_or_create_cookie_key(self) -> bytes:
         """Get or create encryption key for cookie storage."""
@@ -208,7 +209,8 @@ class AgentBrowser:
 
             # Relaunch
             await self._launch_browser()
-            logger.info(f"Browser recovered successfully (crash #{self._crash_count})")
+            self._crash_count = 0  # Reset on successful recovery
+            logger.info("Browser recovered successfully")
 
     async def _safe_execute(self, coro, page_id: str = "main"):
         """Execute a browser operation with crash recovery."""
