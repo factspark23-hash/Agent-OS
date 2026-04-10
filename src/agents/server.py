@@ -43,10 +43,12 @@ class AgentServer:
         self._agent_hub = None
         self._proxy_manager = None
 
-        # Rate limiting: {ip_or_token: (count, window_start)}
+        # Rate limiting: {ip_or_token: [timestamp, ...]}
         self._rate_limits: Dict[str, list] = {}
         self._rate_max_requests = config.get("server.rate_limit_max", 60)
         self._rate_window_seconds = config.get("server.rate_limit_window", 60)
+        self._rate_max_entries = config.get("server.rate_limit_max_entries", 10000)
+        self._rate_cleanup_task = None
 
     async def start(self):
         """Start both WebSocket and HTTP servers."""
@@ -70,8 +72,13 @@ class AgentServer:
         await site.start()
         logger.info(f"HTTP server listening on http://{ws_host}:{http_port}")
 
+        # Start rate limit cleanup task
+        self._rate_cleanup_task = asyncio.create_task(self._rate_limit_cleanup_loop())
+
     async def stop(self):
         """Stop both servers."""
+        if self._rate_cleanup_task:
+            self._rate_cleanup_task.cancel()
         if self._ws_server:
             self._ws_server.close()
             await self._ws_server.wait_closed()
@@ -123,6 +130,40 @@ class AgentServer:
 
         self._rate_limits[identifier].append(now)
         return True
+
+    async def _rate_limit_cleanup_loop(self):
+        """Periodically clean up stale rate limit entries to bound memory usage."""
+        while True:
+            try:
+                await asyncio.sleep(120)  # Cleanup every 2 minutes
+                now = time.time()
+                window = self._rate_window_seconds
+
+                # Remove entries with empty or fully-expired timestamps
+                stale_keys = [
+                    k for k, timestamps in self._rate_limits.items()
+                    if not timestamps or (now - max(timestamps)) > window
+                ]
+                for k in stale_keys:
+                    del self._rate_limits[k]
+
+                # If still over max entries, evict oldest
+                if len(self._rate_limits) > self._rate_max_entries:
+                    # Sort by oldest last-access time, evict bottom 20%
+                    sorted_keys = sorted(
+                        self._rate_limits.keys(),
+                        key=lambda k: max(self._rate_limits[k]) if self._rate_limits[k] else 0
+                    )
+                    evict_count = len(sorted_keys) - self._rate_max_entries + (self._rate_max_entries // 5)
+                    for k in sorted_keys[:evict_count]:
+                        del self._rate_limits[k]
+
+                if stale_keys:
+                    logger.debug(f"Rate limiter cleanup: removed {len(stale_keys)} stale entries, {len(self._rate_limits)} active")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Rate limit cleanup error: {e}")
 
     def _get_cors_headers(self) -> Dict[str, str]:
         """Return CORS headers for API responses."""
