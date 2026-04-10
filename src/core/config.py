@@ -13,7 +13,7 @@ from typing import Optional, Dict, Any
 
 DEFAULT_CONFIG = {
     "server": {
-        "host": "0.0.0.0",  # Changed from 127.0.0.1 for production
+        "host": os.environ.get("AGENT_OS_HOST", "0.0.0.0"),
         "ws_port": 8000,
         "http_port": 8001,
         "debug_port": 8002,

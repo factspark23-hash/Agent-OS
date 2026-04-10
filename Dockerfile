@@ -11,7 +11,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 RUN playwright install chromium
-RUN playwright install-deps chromium
+RUN playwright install-deps chromium 2>/dev/null || true
 
 # ─── Final Image ──────────────────────────────────────────────
 FROM python:3.12-slim
@@ -21,7 +21,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
     libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
-    libpango-1.0-0 libcairo2 libasound2 fonts-liberation \
+    libpango-1.0-0 libcairo2 libasound2 libxfixes3 fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd -r agentos && useradd -r -g agentos -d /home/agentos -m agentos
@@ -30,6 +30,7 @@ COPY --from=builder /root/.cache/ms-playwright /home/agentos/.cache/ms-playwrigh
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
+# Copy application code
 COPY main.py .
 COPY src/ src/
 COPY connectors/ connectors/
@@ -43,7 +44,12 @@ RUN mkdir -p /home/agentos/.agent-os && \
 USER agentos
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/home/agentos/.cache/ms-playwright
+# Bind to 0.0.0.0 for Docker (not 127.0.0.1)
+ENV AGENT_OS_HOST=0.0.0.0
 
+# Expose ports
+# 8000 = WebSocket (agents connect here)
+# 8001 = HTTP REST API (curl / any HTTP client)
 EXPOSE 8000 8001 8002
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

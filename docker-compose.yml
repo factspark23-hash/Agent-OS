@@ -64,7 +64,8 @@ services:
       - "127.0.0.1:8002:8002" # Debug UI (localhost only)
     environment:
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-}
-      - AGENT_TOKEN=${AGENT_TOKEN:-}
+      - AGENT_TOKEN=${AGENT_TOKEN:-}  # Set your token, or leave empty for auto-generated
+    command: ["--port", "8000"]
     volumes:
       - agent-os-data:/home/agentos/.agent-os
     deploy:
