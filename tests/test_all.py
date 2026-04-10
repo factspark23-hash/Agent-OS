@@ -323,10 +323,10 @@ class TestServerSecurity:
         # Mock browser and session_manager
         server = AgentServer(config, None, None)
 
-        assert server._validate_token("my-secret-token") is True
-        assert server._validate_token("wrong-token") is False
-        assert server._validate_token("") is False
-        assert server._validate_token(None) is False
+        assert server._validate_token_legacy("my-secret-token") is True
+        assert server._validate_token_legacy("wrong-token") is False
+        assert server._validate_token_legacy("") is False
+        assert server._validate_token_legacy(None) is False
 
     def test_token_validation_with_allowed_list(self):
         """Test token validation with multiple allowed tokens."""
@@ -338,10 +338,10 @@ class TestServerSecurity:
 
         server = AgentServer(config, None, None)
 
-        assert server._validate_token("token-a") is True
-        assert server._validate_token("token-b") is True
-        assert server._validate_token("token-c") is True
-        assert server._validate_token("token-d") is False
+        assert server._validate_token_legacy("token-a") is True
+        assert server._validate_token_legacy("token-b") is True
+        assert server._validate_token_legacy("token-c") is True
+        assert server._validate_token_legacy("token-d") is False
 
     def test_token_validation_rejects_when_no_token_configured(self):
         """Test token validation rejects all tokens when none configured (production safety)."""
@@ -356,13 +356,13 @@ class TestServerSecurity:
         config = Config(cfg_path)
         # Don't set any token - clean config
         assert config.get("server.agent_token") is None
-        assert config.get("server.allowed_tokens") is None
+        assert config.get("server.allowed_tokens") == []
 
         server = AgentServer(config, None, None)
 
         # Production safety: reject all when no token configured
-        assert server._validate_token("anything") is False
-        assert server._validate_token("") is False
+        assert server._validate_token_legacy("anything") is False
+        assert server._validate_token_legacy("") is False
         # Cleanup (file may not exist since Config doesn't auto-save)
         if os.path.exists(cfg_path):
             os.remove(cfg_path)
