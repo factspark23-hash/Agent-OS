@@ -75,7 +75,32 @@ Local Whisper integration. Transcribe any video or audio. No cloud APIs, no data
 
 ## Quick Start
 
-### Docker (Recommended)
+### ⚡ One Command (All Features)
+
+```bash
+curl -sSL https://raw.githubusercontent.com/factspark23-hash/Agent-OS/main/install.sh | bash
+```
+
+**With options:**
+```bash
+# Custom token
+curl -sSL ... | bash -s -- --token my-secret-token
+
+# Show browser window
+curl -sSL ... | bash -s -- --headed
+
+# Custom port + RAM limit
+curl -sSL ... | bash -s -- --port 9000 --max-ram 1024
+
+# Install without starting
+curl -sSL ... | bash -s -- --no-start
+```
+
+Done. Server starts automatically. Token printed on screen.
+
+---
+
+### 🐳 Docker (Recommended)
 
 ```bash
 docker run -d \
