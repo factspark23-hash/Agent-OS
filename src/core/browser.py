@@ -9,19 +9,14 @@ import random
 import time
 import logging
 import os
-import pickle
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 
 from cryptography.fernet import Fernet
 from playwright.async_api import async_playwright, Browser, Page, BrowserContext
 
-from src.core.config import Config
 from src.core.stealth import (
     ANTI_DETECTION_JS,
-    BOT_DETECTION_URLS,
-    FAKE_RESPONSES,
-    BOT_DETECTION_SCRIPT_PATTERNS,
     handle_request_interception,
 )
 from src.security.human_mimicry import HumanMimicry
@@ -525,7 +520,7 @@ class AgentBrowser:
         try:
             await page.wait_for_selector(selector, timeout=timeout)
             return {"status": "success", "selector": selector}
-        except Exception as e:
+        except Exception:
             return {"status": "error", "error": f"Timeout waiting for: {selector}"}
 
     async def go_back(self, page_id: str = "main") -> Dict[str, Any]:
@@ -596,7 +591,7 @@ class AgentBrowser:
                     await item.click()
                     await asyncio.sleep(random.uniform(0.2, 0.5))
                     return {"status": "success", "action": action_text, "selector": selector}
-            except:
+            except Exception:
                 continue
 
         # If no menu item found, try keyboard shortcut based on common actions
@@ -827,7 +822,7 @@ class AgentBrowser:
                 ext_info = json.load(f)
             ext_name = ext_info.get("name", "Unknown")
             ext_version = ext_info.get("version", "Unknown")
-        except:
+        except Exception:
             ext_name = "Unknown"
             ext_version = "Unknown"
 
@@ -870,7 +865,7 @@ class AgentBrowser:
 
     async def get_cookies(self, page_id: str = "main") -> Dict[str, Any]:
         """Get all cookies for the current page."""
-        page = self._pages.get(page_id, self.page)
+        page = self._pages.get(page_id, self.page)  # noqa: F841
         cookies = await self.context.cookies()
         return {"status": "success", "cookies": cookies, "count": len(cookies)}
 
@@ -1232,7 +1227,7 @@ class AgentBrowser:
                     for key, value in session_storage.items():
                         try:
                             await page.evaluate(
-                                f"(k, v) => sessionStorage.setItem(k, v)",
+                                "(k, v) => sessionStorage.setItem(k, v)",
                                 key, value
                             )
                         except Exception:

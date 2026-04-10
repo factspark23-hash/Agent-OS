@@ -22,16 +22,12 @@ Use cases:
   - Supervisor agent monitors and guides worker agents
 """
 import asyncio
-import json
 import logging
-import os
 import time
 import uuid
-from collections import defaultdict
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger("agent-os.multi_agent")
 
@@ -1014,7 +1010,7 @@ class AgentHub:
         if entry.owner_agent_id != agent_id:
             agent = self._agents.get(agent_id)
             if not agent or agent.role not in (AgentRole.SUPERVISOR, AgentRole.ADMIN):
-                return {"status": "error", "error": f"Only owner or supervisor can delete"}
+                return {"status": "error", "error": "Only owner or supervisor can delete"}
 
         del self._memory[key]
         return {"status": "success", "deleted": key}
@@ -1163,8 +1159,8 @@ class AgentHub:
     def get_status(self) -> Dict[str, Any]:
         """Get hub status and statistics."""
         alive_agents = [a for a in self._agents.values() if a.is_alive(self.AGENT_TIMEOUT)]
-        active_locks = [l for l in self._locks.values() if not l.is_expired()]
-        pending_tasks = [t for t in self._tasks.values() if t.status in (TaskStatus.PENDING, TaskStatus.ASSIGNED)]
+        active_locks = [lk for lk in self._locks.values() if not lk.is_expired()]
+        pending_tasks = [t for t in self._tasks.values() if t.status in (TaskStatus.PENDING, TaskStatus.ASSIGNED)]  # noqa: F841
 
         return {
             "status": "success",
@@ -1187,7 +1183,7 @@ class AgentHub:
                 "locks": {
                     "active": len(active_locks),
                     "by_type": {
-                        lt.value: len([l for l in active_locks if l.lock_type == lt])
+                        lt.value: len([lk for lk in active_locks if lk.lock_type == lt])
                         for lt in LockType
                     },
                 },

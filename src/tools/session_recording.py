@@ -22,11 +22,10 @@ import logging
 import os
 import time
 import uuid
-import bisect
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 from collections import defaultdict
 
 logger = logging.getLogger("agent-os.session_recording")

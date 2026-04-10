@@ -24,10 +24,8 @@ import json
 import logging
 import os
 import time
-import hashlib
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional
 from pathlib import Path
-from difflib import SequenceMatcher
 
 logger = logging.getLogger("agent-os.auto_heal")
 
@@ -898,7 +896,7 @@ class AutoHeal:
         tag = ""
         cls = ""
         elem_id = ""
-        name = ""
+        _name = ""
 
         # Parse common selector patterns
         if selector.startswith("#"):

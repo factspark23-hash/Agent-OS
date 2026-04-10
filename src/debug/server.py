@@ -4,17 +4,15 @@ Serves the debug UI dashboard and provides real-time WebSocket streams
 for browser screenshots, console logs, network traffic, and command history.
 """
 import asyncio
-import base64
 import json
 import logging
 import os
 import time
 from collections import deque
 from pathlib import Path
-from typing import Dict, List, Set, Optional, Any
+from typing import Dict, Set, Optional
 
 from aiohttp import web
-import websockets
 
 logger = logging.getLogger("agent-os.debug")
 

@@ -3,13 +3,9 @@ Agent-OS Page Analyzer
 Extracts structured information from web pages for AI agents.
 Summarizes content, finds key data, extracts tables, forms, and metadata.
 """
-import asyncio
-import json
 import logging
 import re
-import time
-from typing import Dict, List, Any, Optional
-from collections import Counter
+from typing import Dict, Any
 
 logger = logging.getLogger("agent-os.page_analyzer")
 

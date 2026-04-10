@@ -146,7 +146,6 @@ class AgentServer:
 
         # Try JWT
         if self.auth_middleware and not token.startswith("aos_"):
-            from src.auth.jwt_handler import JWTHandler
             payload = self.auth_middleware.jwt.verify_token(token, token_type="access")
             if payload:
                 return {
@@ -207,7 +206,7 @@ class AgentServer:
 
     def _get_cors_headers(self) -> Dict[str, str]:
         """Return CORS headers for API responses."""
-        allowed_origins = self.config.get("server.cors_allowed_origins", [])
+        _allowed_origins = self.config.get("server.cors_allowed_origins", [])
         cors_origin = self.config.get("server.cors_origin", "*")
 
         return {

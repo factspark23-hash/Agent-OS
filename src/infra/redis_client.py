@@ -3,14 +3,11 @@ Agent-OS Redis Layer
 Distributed rate limiting, session caching, pub/sub for multi-instance coordination.
 Falls back gracefully to in-memory when Redis is unavailable.
 """
-import asyncio
-import hashlib
 import json
 import logging
 import time
 from collections import defaultdict
 from typing import Any, Dict, Optional, Tuple
-from dataclasses import dataclass, field
 
 logger = logging.getLogger("agent-os.infra.redis")
 

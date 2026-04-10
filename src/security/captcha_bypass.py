@@ -4,11 +4,10 @@ Blocks bot-detection queries at the network level and returns fake human respons
 This is the core anti-detection technology.
 """
 import re
-import json
 import random
 import logging
-from typing import Dict, List, Optional, Set
-from dataclasses import dataclass, field
+from typing import List, Optional
+from dataclasses import dataclass
 
 logger = logging.getLogger("agent-os.captcha-bypass")
 
@@ -25,7 +24,7 @@ class BlockedEndpoint:
 class CaptchaBypass:
     """
     CAPTCHA prevention engine.
-    
+
     Strategy: Don't SOLVE CAPTCHAs — PREVENT them from loading.
     We intercept bot-detection scripts and queries, returning fake "human verified" responses.
     """

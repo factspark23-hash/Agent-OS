@@ -17,15 +17,12 @@ import asyncio
 import hashlib
 import json
 import logging
-import os
 import random
 import re
 import time
-from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
-from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("agent-os.auto_retry")
 
@@ -700,8 +697,8 @@ class AutoRetry:
 
         start_time = time.time()
         attempt = 0
-        last_error = None
-        last_error_class = None
+        last_error = None  # noqa: F841
+        last_error_class = None  # noqa: F841
         heal_attempted = False
 
         while True:
@@ -791,8 +788,8 @@ class AutoRetry:
 
             # Classify the error
             error_class = classify_error(error_msg, status_code, headers)
-            last_error = error_msg
-            last_error_class = error_class
+            _last_error = error_msg
+            _last_error_class = error_class
 
             # Track error class stats
             class_key = error_class.value

@@ -38,9 +38,9 @@ def setup_logging(level: str = "INFO", json_logs: bool = True, service_name: str
     ]
 
     if json_logs:
-        renderer = structlog.processors.JSONRenderer()
+        _renderer = structlog.processors.JSONRenderer()  # noqa: F841
     else:
-        renderer = structlog.dev.ConsoleRenderer(colors=True)
+        _renderer = structlog.dev.ConsoleRenderer(colors=True)  # noqa: F841
 
     structlog.configure(
         processors=shared_processors + [

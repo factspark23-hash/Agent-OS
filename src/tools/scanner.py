@@ -67,8 +67,8 @@ class XSSScanner:
             return {"status": "error", "error": f"Failed to navigate: {result.get('error')}"}
 
         # Get DOM snapshot to find input fields
-        dom = await self.browser.get_dom_snapshot()
-        content = await self.browser.get_content()
+        dom = await self.browser.get_dom_snapshot()  # noqa: F841
+        content = await self.browser.get_content()  # noqa: F841
 
         # Find all forms and input fields
         forms = await self.browser.evaluate_js("""() => {

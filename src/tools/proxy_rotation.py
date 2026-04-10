@@ -20,13 +20,12 @@ import json
 import logging
 import os
 import random
-import re
 import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from collections import defaultdict
 from urllib.parse import urlparse
 
@@ -483,9 +482,12 @@ class ProxyPool:
                     url = parts[0].strip()
                     if url:
                         kwargs = {}
-                        if len(parts) >= 2: kwargs["username"] = parts[1].strip()
-                        if len(parts) >= 3: kwargs["password"] = parts[2].strip()
-                        if len(parts) >= 4: kwargs["country"] = parts[3].strip()
+                        if len(parts) >= 2:
+                            kwargs["username"] = parts[1].strip()
+                        if len(parts) >= 3:
+                            kwargs["password"] = parts[2].strip()
+                        if len(parts) >= 4:
+                            kwargs["country"] = parts[3].strip()
                         self.add(url, **kwargs)
                         count += 1
 
@@ -1084,13 +1086,13 @@ class ProxyManager:
     def enable_proxy(self, proxy_id: str) -> Dict[str, Any]:
         """Re-enable a dead/disabled proxy."""
         if self.rotator.enable(proxy_id):
-            return {"status": "success", "proxy_id": proxy_id, "status": "active"}
+            return {"status": "success", "proxy_id": proxy_id, "proxy_status": "active"}
         return {"status": "error", "error": f"Proxy not found: {proxy_id}"}
 
     def disable_proxy(self, proxy_id: str) -> Dict[str, Any]:
         """Disable a proxy."""
         if self.rotator.disable(proxy_id):
-            return {"status": "success", "proxy_id": proxy_id, "status": "disabled"}
+            return {"status": "success", "proxy_id": proxy_id, "proxy_status": "disabled"}
         return {"status": "error", "error": f"Proxy not found: {proxy_id}"}
 
     def list_proxies(self, status: str = None, country: str = None) -> Dict[str, Any]:

@@ -8,7 +8,7 @@ import logging
 import secrets
 from typing import Dict, Optional, Any
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 
 logger = logging.getLogger("agent-os.session")
 

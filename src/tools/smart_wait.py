@@ -15,8 +15,7 @@ Handles SPAs, lazy-loaded content, infinite scroll, AJAX-heavy pages.
 import asyncio
 import logging
 import time
-import re
-from typing import Dict, List, Any, Optional, Callable, Union
+from typing import Dict, List, Any
 
 logger = logging.getLogger("agent-os.smart_wait")
 
@@ -252,13 +251,13 @@ class SmartWait:
         while True:
             elapsed_ms = (time.time() - start) * 1000
             if elapsed_ms >= timeout_ms:
+                result = await page.evaluate(_CHECK_NETWORK_IDLE_JS)
                 return self._timeout_result("network_idle", elapsed_ms, {
                     "idle_required_ms": idle_ms,
-                    "last_check": last_check,
+                    "last_check": result,
                 })
 
             result = await page.evaluate(_CHECK_NETWORK_IDLE_JS)
-            last_check = result
 
             if result["idle"] and result["pending"] == 0:
                 if idle_start is None:

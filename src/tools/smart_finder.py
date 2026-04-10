@@ -5,10 +5,8 @@ No CSS selector needed — works like a human looking at the page.
 """
 import asyncio
 import logging
-import re
 import time
-from typing import Dict, List, Any, Optional
-from difflib import SequenceMatcher
+from typing import Dict, List, Any
 
 logger = logging.getLogger("agent-os.smart_finder")
 

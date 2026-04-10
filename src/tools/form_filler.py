@@ -2,10 +2,8 @@
 Agent-OS Form Filler
 Automates job applications and complex multi-step forms.
 """
-import asyncio
 import logging
-import random
-from typing import Dict, List, Optional, Any
+from typing import Dict, Optional
 
 logger = logging.getLogger("agent-os.form-filler")
 
@@ -39,7 +37,7 @@ class FormFiller:
     async def fill_job_application(self, url: str, profile: Dict[str, str]) -> Dict:
         """
         Fill a job application form automatically.
-        
+
         profile should contain:
         - email, first_name, last_name, phone, address, city, state, zip
         - cover_letter (optional), salary (optional), linkedin (optional)
@@ -64,7 +62,7 @@ class FormFiller:
                     placeholder: el.placeholder || '',
                     label: el.labels?.[0]?.textContent?.trim() || '',
                     required: el.required,
-                    options: el.tagName === 'SELECT' 
+                    options: el.tagName === 'SELECT'
                         ? Array.from(el.options).map(o => ({value: o.value, text: o.text}))
                         : []
                 });

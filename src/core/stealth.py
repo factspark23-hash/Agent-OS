@@ -3,10 +3,6 @@ Agent-OS Shared Stealth Constants
 Single source of truth for anti-detection JS, bot-blocking patterns, and fake responses.
 Used by both browser.py and persistent_browser.py.
 """
-import re
-import json
-import random
-from typing import Dict, List, Optional
 
 # ─── Anti-Detection JavaScript ──────────────────────────────
 # Injected into every page via context.add_init_script()

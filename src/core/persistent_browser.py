@@ -23,22 +23,17 @@ import logging
 import os
 import psutil
 import random
-import shutil
 import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Callable, Tuple
-from collections import defaultdict
+from typing import Any, Dict, List, Optional, Callable
 
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 
 from src.core.stealth import (
     ANTI_DETECTION_JS,
-    BOT_DETECTION_URLS,
-    FAKE_RESPONSES,
-    BOT_DETECTION_SCRIPT_PATTERNS,
     handle_request_interception,
 )
 
@@ -409,7 +404,7 @@ class BrowserInstance:
         try:
             if self.browser:
                 # Try a simple operation to verify browser is alive
-                contexts = self.browser.contexts
+                contexts = self.browser.contexts  # noqa: F841
                 self.health.state = BrowserState.RUNNING
         except Exception as e:
             self.health.state = BrowserState.DEGRADED
@@ -462,7 +457,7 @@ class BrowserInstance:
         failed_contexts = []
         for user_id, ctx in list(self.user_contexts.items()):
             try:
-                old_state = ctx._load_state()
+                old_state = ctx._load_state()  # noqa: F841
                 new_ctx = UserContext(user_id, str(ctx.profile_dir), self)
                 await new_ctx.initialize(self.config)
                 self.user_contexts[user_id] = new_ctx

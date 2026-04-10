@@ -9,9 +9,9 @@ import logging
 import time
 import re
 import hashlib
-from typing import Dict, List, Any, Optional, Callable
+from typing import Dict, List, Any, Optional
 from collections import deque
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from pathlib import Path
 
 logger = logging.getLogger("agent-os.network_capture")

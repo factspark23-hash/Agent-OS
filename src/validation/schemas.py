@@ -5,7 +5,6 @@ Prevents injection attacks, path traversal, and malformed data.
 """
 import re
 import logging
-from typing import Any, Dict, List, Optional, Union
 from urllib.parse import urlparse
 
 logger = logging.getLogger("agent-os.validation")

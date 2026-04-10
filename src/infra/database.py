@@ -3,7 +3,6 @@ Agent-OS Database Layer
 Production-grade async SQLAlchemy with connection pooling, health checks,
 and automatic retry on transient failures.
 """
-import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -16,7 +15,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy.pool import NullPool, AsyncAdaptedQueuePool
 
 logger = logging.getLogger("agent-os.infra.database")
 

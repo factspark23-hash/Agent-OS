@@ -3,10 +3,8 @@ Agent-OS API Key Manager
 Full lifecycle management for API keys with secure storage,
 scoped permissions, and usage tracking.
 """
-import hashlib
 import logging
 import secrets
-import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -144,7 +142,7 @@ class APIKeyManager:
                 result = await session.execute(
                     select(APIKeyModel).where(
                         APIKeyModel.key_prefix == key_prefix,
-                        APIKeyModel.is_active == True,
+                        APIKeyModel.is_active.is_(True),
                     )
                 )
                 db_key = result.scalar_one_or_none()
@@ -205,7 +203,7 @@ class APIKeyManager:
         """Revoke (deactivate) an API key."""
         if self._db_factory:
             from src.infra.models import APIKey as APIKeyModel
-            from sqlalchemy import select, update
+            from sqlalchemy import update
             async with self._db_factory() as session:
                 result = await session.execute(
                     update(APIKeyModel)

@@ -3,16 +3,15 @@ Agent-OS Database Models
 All SQLAlchemy ORM models for production deployment.
 """
 import uuid
-import time
 from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import (
-    String, Text, Integer, Float, Boolean, DateTime,
-    ForeignKey, Index, UniqueConstraint, CheckConstraint,
+    String, Text, Integer, Boolean, DateTime,
+    ForeignKey, Index, CheckConstraint,
     func, text,
 )
-from sqlalchemy.dialects.postgresql import UUID, JSONB, INET
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.infra.database import Base

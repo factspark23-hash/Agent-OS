@@ -7,9 +7,8 @@ import hashlib
 import hmac
 import logging
 import secrets
-import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 import jwt as pyjwt
 

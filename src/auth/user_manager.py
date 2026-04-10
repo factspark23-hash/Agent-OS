@@ -4,7 +4,6 @@ Full user lifecycle: registration, authentication, quota enforcement.
 """
 import logging
 import secrets
-import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -128,7 +127,7 @@ class UserManager:
                     select(UserModel).where(
                         ((UserModel.email == username_or_email.lower()) |
                          (UserModel.username == username_or_email)) &
-                        (UserModel.is_active == True)
+                        (UserModel.is_active.is_(True))
                     )
                 )
                 db_user = result.scalar_one_or_none()

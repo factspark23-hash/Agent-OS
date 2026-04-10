@@ -6,7 +6,7 @@ Provides per-user rate limiting, scope checking, and audit logging.
 import logging
 import time
 from functools import wraps
-from typing import Callable, List, Optional
+from typing import Optional
 
 from aiohttp import web
 
