@@ -1,6 +1,11 @@
 # Agent-OS Production Stack
 # docker compose up -d
 # docker compose logs -f agent-os
+#
+# REQUIRED: Set these environment variables before starting:
+#   export POSTGRES_PASSWORD="<strong-password>"
+#   export JWT_SECRET_KEY="<generate-with: python -c 'import secrets; print(secrets.token_urlsafe(48))'>"
+#   export AGENT_TOKEN="<your-agent-token>"
 
 services:
   # ─── PostgreSQL ───────────────────────────────────────
@@ -10,7 +15,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: agent_os
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-in-production}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD env var}
       POSTGRES_DB: agent_os
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -32,7 +37,7 @@ services:
     image: redis:7-alpine
     container_name: agent-os-redis
     restart: unless-stopped
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --appendonly yes
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --appendonly yes --requirepass ${REDIS_PASSWORD:-}
     volumes:
       - redis-data:/data
     ports:
@@ -59,13 +64,12 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "0.0.0.0:8000:8000"   # WebSocket
-      - "0.0.0.0:8001:8001"   # HTTP REST API
-      - "127.0.0.1:8002:8002" # Debug UI (localhost only)
+      - "127.0.0.1:8000:8000"   # WebSocket
+      - "127.0.0.1:8001:8001"   # HTTP REST API
     environment:
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-}
-      - AGENT_TOKEN=${AGENT_TOKEN:-}  # Set your token, or leave empty for auto-generated
-    command: ["--port", "8000"]
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?Set JWT_SECRET_KEY env var}
+      - AGENT_TOKEN=${AGENT_TOKEN:-}
+      - AGENT_OS_HOST=0.0.0.0
     volumes:
       - agent-os-data:/home/agentos/.agent-os
     deploy:
@@ -81,13 +85,12 @@ services:
       start_period: 15s
     command: >
       --port 8000
-      --no-debug
-      --database postgresql+asyncpg://agent_os:${POSTGRES_PASSWORD:-change-me-in-production}@postgres:5432/agent_os
+      --database postgresql+asyncpg://agent_os:${POSTGRES_PASSWORD}@postgres:5432/agent_os
       --redis redis://redis:6379/0
       --json-logs
       --create-tables
 
-  # ─── Nginx Reverse Proxy (optional) ──────────────────
+  # ─── Nginx Reverse Proxy ─────────────────────────────
   nginx:
     image: nginx:alpine
     container_name: agent-os-nginx
@@ -100,8 +103,6 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./certs:/etc/nginx/certs:ro
-    profiles:
-      - with-nginx
 
 volumes:
   postgres-data:

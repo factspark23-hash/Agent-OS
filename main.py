@@ -75,9 +75,9 @@ class AgentOS:
             from src.auth.jwt_handler import JWTHandler
             jwt_secret = self.config.get("jwt.secret_key") or os.environ.get("JWT_SECRET_KEY")
             if not jwt_secret:
-                jwt_secret = self.config.generate_agent_token("jwt-secret")
-                self.config.set("jwt.secret_key", jwt_secret, save=True)
-                self.logger.warning("Auto-generated JWT secret key — set jwt.secret_key in config for production")
+                self.logger.error("JWT_SECRET_KEY not set. Set it via environment variable or config jwt.secret_key")
+                self.logger.error("Generate one with: python -c 'import secrets; print(secrets.token_urlsafe(48))'")
+                sys.exit(1)
 
             self.jwt_handler = JWTHandler(
                 secret_key=jwt_secret,
@@ -125,7 +125,7 @@ class AgentOS:
 
         # Debug server
         self.debug_server = None
-        if not args.no_debug:
+        if args.debug:
             from src.debug.server import DebugServer
             self.debug_server = DebugServer(
                 self.config, self.browser, self.session_manager,
@@ -163,8 +163,12 @@ class AgentOS:
         self.config.save()
 
     async def start(self):
-        """Start all components."""
+        """Start all components after validating configuration."""
         self._running = True
+
+        # ─── Startup Validation ──────────────────────────────
+        self._validate_production_config()
+
         self.logger.info("=" * 60)
         self.logger.info("  Agent-OS — AI Agent Browser v3.0 (Production)")
         self.logger.info("=" * 60)
@@ -234,7 +238,8 @@ class AgentOS:
 
         legacy_token = self.config.get("server.agent_token")
         if legacy_token:
-            self.logger.info(f"    Legacy Token: {legacy_token[:8]}...{legacy_token[-4:]}")
+            masked = f"{legacy_token[:4]}****{legacy_token[-4:]}" if len(legacy_token) > 12 else "****"
+            self.logger.info(f"    Legacy Token: {masked}")
         self.logger.info("")
         self.logger.info("  Press Ctrl+C to stop")
 
@@ -243,6 +248,47 @@ class AgentOS:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
             pass
+
+    def _validate_production_config(self):
+        """Validate critical config at startup. Warn or fail on dangerous defaults."""
+        issues = []
+        warnings = []
+
+        # CORS must not be wildcard
+        cors = self.config.get("server.cors_origin")
+        if cors == "*":
+            issues.append("server.cors_origin is '*' — set to empty string and use cors_allowed_origins")
+
+        # Must have some form of auth
+        has_jwt = bool(self.jwt_handler)
+        has_api_key = bool(self.api_key_manager)
+        has_legacy = bool(self.config.get("server.agent_token"))
+        allow_legacy = self.config.get("security.allow_legacy_token_auth", False)
+
+        if not has_jwt and not has_api_key and not has_legacy:
+            issues.append("No authentication configured. Set JWT_SECRET_KEY or --agent-token")
+
+        if allow_legacy:
+            warnings.append("Legacy token auth is enabled — disable for production (security.allow_legacy_token_auth)")
+
+        # Debug UI should be off
+        if self.debug_server:
+            warnings.append("Debug UI server is enabled — disable in production (use --debug only for development)")
+
+        # Browser bound to 0.0.0.0
+        host = self.config.get("server.host", "127.0.0.1")
+        if host == "0.0.0.0":
+            warnings.append("Server bound to 0.0.0.0 — ensure firewall rules are in place")
+
+        # Log all issues
+        for issue in issues:
+            self.logger.error(f"CONFIG ERROR: {issue}")
+        for warning in warnings:
+            self.logger.warning(f"CONFIG WARNING: {warning}")
+
+        if issues:
+            self.logger.error(f"Found {len(issues)} critical config issue(s). Fix before deploying.")
+            sys.exit(1)
 
     async def stop(self):
         """Graceful shutdown."""
@@ -296,7 +342,7 @@ def parse_args():
     parser.add_argument("--proxy", type=str, help="Proxy URL (http://user:pass@host:port)")
     parser.add_argument("--device", type=str, help="Device preset (iphone_14, galaxy_s23, ipad, etc.)")
     parser.add_argument("--persistent", action="store_true", help="Enable persistent Chromium (production mode)")
-    parser.add_argument("--no-debug", action="store_true", help="Disable debug UI server")
+    parser.add_argument("--debug", action="store_true", help="Enable debug UI server (disabled by default)")
     parser.add_argument("--rate-limit", type=int, default=60, help="Max requests per minute per token (default: 60)")
 
     # Production options

@@ -46,8 +46,9 @@ class Session:
 class SessionManager:
     """Manages agent sessions with auto-cleanup and sandboxing."""
 
-    def __init__(self, config):
+    def __init__(self, config, browser=None):
         self.config = config
+        self.browser = browser
         self.sessions: Dict[str, Session] = {}
         self._cleanup_task = None
         self._max_sessions = config.get("session.max_concurrent", 3)
@@ -102,10 +103,18 @@ class SessionManager:
         return None
 
     async def destroy_session(self, session_id: str):
-        """Destroy a session and wipe all its data."""
+        """Destroy a session and wipe all its data, including browser tabs."""
         session = self.sessions.get(session_id)
         if session:
             session.active = False
+            # Close associated browser tabs
+            if self.browser and hasattr(session, 'data') and session.data:
+                tab_ids = session.data.get("tab_ids", [])
+                for tab_id in tab_ids:
+                    try:
+                        await self.browser.close_tab(tab_id)
+                    except Exception:
+                        pass
             # Wipe session data (security)
             session.data.clear()
             session.pages.clear()

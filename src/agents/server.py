@@ -273,22 +273,26 @@ class AgentServer:
 
     @web.middleware
     async def _timing_middleware(self, request: web.Request, handler):
-        """Add request timing and correlation ID."""
+        """Add request timing, correlation ID, and structured logging."""
+        import uuid
         start = time.time()
+        request_id = str(uuid.uuid4())
+        request["request_id"] = request_id
         try:
             response = await handler(request)
         except Exception as e:
             elapsed = (time.time() - start) * 1000
-            logger.error(f"Request error: {request.method} {request.path} ({elapsed:.0f}ms): {e}")
+            logger.error(f"Request error: {request.method} {request.path} ({elapsed:.0f}ms) [{request_id}]: {e}")
             return web.json_response(
-                {"status": "error", "error": "Internal server error"},
+                {"status": "error", "error": "Internal server error", "request_id": request_id},
                 status=500,
                 headers=self._get_cors_headers(),
             )
         elapsed = (time.time() - start) * 1000
         response.headers["X-Response-Time"] = f"{elapsed:.0f}ms"
+        response.headers["X-Request-ID"] = request_id
         if elapsed > 5000:
-            logger.warning(f"Slow request: {request.method} {request.path} ({elapsed:.0f}ms)")
+            logger.warning(f"Slow request: {request.method} {request.path} ({elapsed:.0f}ms) [{request_id}]")
         return response
 
     # ─── WebSocket Handler ───────────────────────────────────
@@ -461,8 +465,19 @@ class AgentServer:
                     status=400, headers=self._get_cors_headers(),
                 )
 
+            # Brute-force protection
+            client_ip = request.remote or "unknown"
+            identifier = f"{client_ip}:{login}"
+            if not self.auth_middleware.check_login_attempts(identifier):
+                lockout = self.auth_middleware.get_lockout_remaining(identifier)
+                return web.json_response(
+                    {"status": "error", "error": f"Too many failed attempts. Try again in {lockout} seconds."},
+                    status=429, headers=self._get_cors_headers(),
+                )
+
             user = await self.user_manager.authenticate_user(login, password)
             if not user:
+                self.auth_middleware.record_login_failure(identifier)
                 await self.user_manager.log_audit(
                     user_id=None, action="user.login_failed",
                     success=False, client_ip=request.remote,
@@ -472,6 +487,9 @@ class AgentServer:
                     {"status": "error", "error": "Invalid credentials"},
                     status=401, headers=self._get_cors_headers(),
                 )
+
+            # Successful login
+            self.auth_middleware.record_login_success(identifier)
 
             tokens = self.auth_middleware.jwt.create_token_pair(
                 user_id=user["user_id"],
@@ -731,8 +749,17 @@ class AgentServer:
         else:
             checks["redis"] = "not_configured"
 
-        # Browser health
-        checks["browser"] = "healthy" if self.browser.browser else "not_running"
+        # Browser health — verify actual browser is responsive
+        if self.browser.browser:
+            try:
+                # Quick check: can we get the current page?
+                if self.browser.page:
+                    await self.browser.page.title()
+                checks["browser"] = "healthy"
+            except Exception as e:
+                checks["browser"] = f"degraded: {e}"
+        else:
+            checks["browser"] = "not_running"
 
         overall = "healthy" if all(
             v in ("healthy", "not_configured") for v in checks.values()

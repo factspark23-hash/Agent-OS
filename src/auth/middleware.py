@@ -5,8 +5,9 @@ Provides per-user rate limiting, scope checking, and audit logging.
 """
 import logging
 import time
+from collections import defaultdict
 from functools import wraps
-from typing import Optional
+from typing import Dict, Optional
 
 from aiohttp import web
 
@@ -29,6 +30,7 @@ class AuthMiddleware:
     - Scope-based authorization
     - Request context injection (user_id, api_key_id, scopes)
     - Audit logging
+    - Brute-force protection on login endpoints
     """
 
     def __init__(self, jwt_handler: JWTHandler, api_key_manager: APIKeyManager,
@@ -36,6 +38,10 @@ class AuthMiddleware:
         self.jwt = jwt_handler
         self.api_keys = api_key_manager
         self.redis = redis_client
+        # Brute-force protection: in-memory failed attempt tracking
+        self._login_attempts: Dict[str, list] = defaultdict(list)  # ip -> [timestamps]
+        self._max_attempts = 5
+        self._lockout_seconds = 15 * 60  # 15 minutes
 
     async def authenticate_request(self, request: web.Request,
                                    body: dict = None) -> Optional[dict]:
@@ -111,6 +117,33 @@ class AuthMiddleware:
         }
 
         return allowed, headers
+
+    def check_login_attempts(self, identifier: str) -> bool:
+        """Check if login is allowed for this identifier (IP or username)."""
+        now = time.time()
+        cutoff = now - self._lockout_seconds
+        attempts = self._login_attempts.get(identifier, [])
+        # Clean old attempts
+        recent = [t for t in attempts if t > cutoff]
+        self._login_attempts[identifier] = recent
+        return len(recent) < self._max_attempts
+
+    def record_login_failure(self, identifier: str):
+        """Record a failed login attempt."""
+        self._login_attempts[identifier].append(time.time())
+
+    def record_login_success(self, identifier: str):
+        """Clear failed attempts on successful login."""
+        self._login_attempts.pop(identifier, None)
+
+    def get_lockout_remaining(self, identifier: str) -> int:
+        """Get seconds remaining in lockout, or 0 if not locked out."""
+        attempts = self._login_attempts.get(identifier, [])
+        if len(attempts) < self._max_attempts:
+            return 0
+        oldest_relevant = max(attempts[-self._max_attempts:])
+        remaining = int(oldest_relevant + self._lockout_seconds - time.time())
+        return max(0, remaining)
 
     def require_scope(self, scope: str):
         """Decorator to require a specific scope for an endpoint."""

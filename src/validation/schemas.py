@@ -54,6 +54,29 @@ class ValidationError(Exception):
         super().__init__(message)
 
 
+def _shallow_validate(obj, depth: int = 0, max_depth: int = 3):
+    """Recursively validate nested structures with depth limit."""
+    if depth > max_depth:
+        raise ValidationError(f"Object nesting exceeds max depth of {max_depth}")
+    if isinstance(obj, dict):
+        return {
+            str(k)[:200]: _shallow_validate(v, depth + 1, max_depth)
+            for k, v in list(obj.items())[:100]
+        }
+    elif isinstance(obj, list):
+        return [
+            _shallow_validate(item, depth + 1, max_depth)
+            for item in obj[:200]
+        ]
+    elif isinstance(obj, str):
+        # Strip null bytes and limit length
+        return obj.replace("\x00", "")[:10000]
+    elif isinstance(obj, (int, float, bool)) or obj is None:
+        return obj
+    else:
+        return str(obj)[:10000]
+
+
 def sanitize_string(value: str, max_length: int = 10000, field_name: str = "value") -> str:
     """Sanitize a string input."""
     if not isinstance(value, str):
@@ -121,16 +144,19 @@ def validate_selector(selector: str, field_name: str = "selector") -> str:
 
 
 def validate_javascript(script: str, field_name: str = "script") -> str:
-    """Validate JavaScript code with security checks."""
+    """Validate JavaScript code with security checks. Rejects dangerous patterns."""
     script = sanitize_string(script, MAX_JS_LENGTH, field_name)
 
     if not script.strip():
         raise ValidationError(f"{field_name} cannot be empty", field_name)
 
-    # Check for dangerous patterns
+    # Check for dangerous patterns — reject, don't just log
     for pattern in COMPILED_JS_PATTERNS:
         if pattern.search(script):
-            logger.warning(f"Dangerous JS pattern detected in {field_name}: {pattern.pattern}")
+            raise ValidationError(
+                f"Dangerous pattern detected in {field_name}: {pattern.pattern}",
+                field_name
+            )
 
     return script
 
@@ -251,13 +277,33 @@ def validate_command_payload(data: dict) -> dict:
         if bool_field in data:
             validated[bool_field] = bool(data[bool_field])
 
-    # Pass through steps, variables, conditions (validated recursively if needed)
-    for passthrough in ["steps", "variables", "conditions", "fields", "headers",
-                        "body", "tags", "capabilities", "metadata", "dependencies",
-                        "profile", "result", "context", "command_payload",
-                        "resource_types", "methods"]:
+    # Pass through steps, variables, conditions with recursive validation
+    if "steps" in data and isinstance(data["steps"], list):
+        validated["steps"] = [
+            validate_command_payload(step) if isinstance(step, dict) else step
+            for step in data["steps"][:MAX_STEPS_COUNT]
+        ]
+
+    if "conditions" in data and isinstance(data["conditions"], list):
+        validated["conditions"] = [
+            validate_command_payload(cond) if isinstance(cond, dict) else cond
+            for cond in data["conditions"][:20]
+        ]
+
+    if "command_payload" in data and isinstance(data["command_payload"], dict):
+        validated["command_payload"] = validate_command_payload(data["command_payload"])
+
+    # Simple pass-through for non-nested data structures
+    for passthrough in ["variables", "headers", "tags", "capabilities",
+                        "metadata", "dependencies", "profile", "result",
+                        "context", "resource_types", "methods"]:
         if passthrough in data:
-            validated[passthrough] = data[passthrough]
+            val = data[passthrough]
+            if isinstance(val, (dict, list)):
+                # Limit depth to prevent deeply nested abuse
+                validated[passthrough] = _shallow_validate(val, depth=0, max_depth=3)
+            else:
+                validated[passthrough] = val
 
     # String fields that don't need special validation
     for str_field in ["page_id", "action", "tab_id", "direction", "device",

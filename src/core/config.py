@@ -13,13 +13,13 @@ from typing import Optional, Dict, Any
 
 DEFAULT_CONFIG = {
     "server": {
-        "host": os.environ.get("AGENT_OS_HOST", "0.0.0.0"),
+        "host": os.environ.get("AGENT_OS_HOST", "127.0.0.1"),
         "ws_port": 8000,
         "http_port": 8001,
         "debug_port": 8002,
         "max_connections": 100,
-        "cors_origin": "*",  # Configurable for production
-        "cors_allowed_origins": [],  # List of allowed origins
+        "cors_origin": "",
+        "cors_allowed_origins": [],
         "agent_token": None,
         "allowed_tokens": [],
         "rate_limit_max": 60,
@@ -70,7 +70,9 @@ DEFAULT_CONFIG = {
         "session_encryption": True,
         "enable_api_key_auth": True,
         "enable_jwt_auth": True,
-        "allow_legacy_token_auth": True,  # Backward compat during migration
+        "allow_legacy_token_auth": False,
+        "max_login_attempts": 5,
+        "lockout_duration_minutes": 15,
     },
     "scanner": {
         "max_requests_per_second": 5,

@@ -289,7 +289,7 @@ python main.py --database "postgresql+asyncpg://..." --redis "redis://..."
 --proxy URL       Proxy
 --device NAME     Mobile emulation preset
 --persistent      Long-running Chromium mode
---no-debug        Disable debug UI
+--debug           Enable debug UI (disabled by default)
 --database DSN    PostgreSQL connection
 --redis URL       Redis connection
 --agent-token     Custom auth token
