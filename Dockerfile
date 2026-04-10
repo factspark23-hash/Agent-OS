@@ -21,7 +21,8 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
     libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
-    libpango-1.0-0 libcairo2 libasound2t64 libxfixes3 fonts-liberation \
+    libpango-1.0-0 libcairo2 libxfixes3 fonts-liberation \
+    && (apt-get install -y --no-install-recommends libasound2t64 2>/dev/null || apt-get install -y --no-install-recommends libasound2 2>/dev/null || true) \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd -r agentos && useradd -r -g agentos -d /home/agentos -m agentos

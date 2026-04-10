@@ -222,7 +222,7 @@ def validate_command_payload(data: dict) -> dict:
         validated["text"] = sanitize_string(str(data["text"]), MAX_TEXT_LENGTH, "text")
 
     if "key" in data:
-        key = sanitize_string(str(data["key"]), 50, "key")
+        sanitized_key = sanitize_string(str(data["key"]), 50, "key")
         # Whitelist keyboard keys
         allowed_keys = {
             "Enter", "Tab", "Escape", "Backspace", "Delete", "Space",
@@ -233,13 +233,13 @@ def validate_command_payload(data: dict) -> dict:
             "Control+s", "Control+f", "Control+g",
             "Shift+Tab",
         }
-        if key not in allowed_keys and not re.match(r'^[a-zA-Z0-9]$', key):
-            if "+" in key:
-                parts = key.split("+")
+        if sanitized_key not in allowed_keys and not re.match(r'^[a-zA-Z0-9]$', sanitized_key):
+            if "+" in sanitized_key:
+                parts = sanitized_key.split("+")
                 valid_modifiers = {"Control", "Shift", "Alt", "Meta"}
                 if not all(p in valid_modifiers or re.match(r'^[a-zA-Z0-9]$', p) for p in parts):
-                    raise ValidationError(f"Invalid key combination: {key}")
-        validated["key"] = key
+                    raise ValidationError(f"Invalid key combination: {sanitized_key}")
+        validated["key"] = sanitized_key
 
     if "script" in data:
         validated["script"] = validate_javascript(str(data["script"]))

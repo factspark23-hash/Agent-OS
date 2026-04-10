@@ -29,6 +29,9 @@ from src.core.session import SessionManager
 from src.infra.logging import setup_logging, get_logger
 
 
+__version__ = "3.0.1"
+
+
 class AgentOS:
     """Main Agent-OS application with production infrastructure."""
 
@@ -334,6 +337,7 @@ class AgentOS:
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Agent-OS — AI Agent Browser")
+    parser.add_argument("--version", action="version", version=f"Agent-OS {__version__}")
     parser.add_argument("--headed", action="store_true", help="Show browser window")
     parser.add_argument("--agent-token", type=str, help="Set legacy agent authentication token")
     parser.add_argument("--port", type=int, help="WebSocket server port (HTTP = port+1, Debug = port+2)")

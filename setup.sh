@@ -3,6 +3,33 @@
 # Installs dependencies, Playwright, and verifies everything works.
 set -e
 
+# ─── Flags ────────────────────────────────────────────────
+NO_SUDO=false
+for arg in "$@"; do
+    case $arg in
+        --no-sudo) NO_SUDO=true ;;
+        --help|-h)
+            echo "Usage: ./setup.sh [--no-sudo]"
+            echo "  --no-sudo   Skip sudo-dependent steps (system packages)"
+            exit 0
+            ;;
+    esac
+done
+
+# ─── Sudo Helper ──────────────────────────────────────────
+run_privileged() {
+    if $NO_SUDO; then
+        echo "⚠️  --no-sudo flag set. Skipping: $*"
+        return 0
+    fi
+    if command -v sudo > /dev/null 2>&1; then
+        sudo "$@"
+    else
+        echo "⚠️  sudo not found. Trying without sudo..."
+        "$@"
+    fi
+}
+
 echo "🤖 Agent-OS Setup"
 echo "================="
 echo ""
@@ -28,7 +55,7 @@ if [ ! -d "$VENV_DIR" ]; then
     if ! python3 -m venv --help > /dev/null 2>&1; then
         echo "⚠️  python3-venv not found. Attempting to install..."
         if command -v apt-get > /dev/null 2>&1; then
-            sudo apt-get update -qq && sudo apt-get install -y -qq "python${PYTHON_VERSION}-venv"
+            run_privileged apt-get update -qq && run_privileged apt-get install -y -qq "python${PYTHON_VERSION}-venv"
         else
             echo "❌ Cannot install python3-venv. Install it manually and re-run."
             exit 1
@@ -54,6 +81,25 @@ PIP_CMD="pip"
 PYTHON_CMD="python"
 echo "✅ Using virtual environment: $(which python)"
 
+# ─── Environment File ─────────────────────────────────────
+ENV_FILE="$(dirname "$0")/.env"
+ENV_EXAMPLE="$(dirname "$0")/.env.example"
+if [ ! -f "$ENV_FILE" ] && [ -f "$ENV_EXAMPLE" ]; then
+    echo "📄 Creating .env from .env.example..."
+    cp "$ENV_EXAMPLE" "$ENV_FILE"
+    # Auto-generate JWT_SECRET_KEY if not set
+    if ! grep -q "^JWT_SECRET_KEY=.\+" "$ENV_FILE" 2>/dev/null; then
+        GENERATED_KEY=$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')
+        if command -v sed > /dev/null 2>&1; then
+            sed -i "s|^JWT_SECRET_KEY=.*|JWT_SECRET_KEY=${GENERATED_KEY}|" "$ENV_FILE"
+        fi
+        echo "✅ Generated JWT_SECRET_KEY"
+    fi
+    echo "✅ .env created (edit it to customize settings)"
+elif [ -f "$ENV_FILE" ]; then
+    echo "✅ .env already exists"
+fi
+
 # ─── System Dependencies (for Playwright Chromium) ───────────
 echo ""
 echo "🔍 Checking system dependencies for Chromium..."
@@ -70,8 +116,8 @@ if [ -n "$MISSING_DEPS" ]; then
     echo "⚠️  Missing system libraries:$MISSING_DEPS"
     echo "   Attempting to install..."
     if command -v apt-get > /dev/null 2>&1; then
-        sudo apt-get update -qq 2>/dev/null || true
-        sudo apt-get install -y -qq $MISSING_DEPS 2>/dev/null || {
+        run_privileged apt-get update -qq 2>/dev/null || true
+        run_privileged apt-get install -y -qq $MISSING_DEPS 2>/dev/null || {
             echo "⚠️  Could not install some system deps. Chromium may fail to launch."
             echo "   Try manually: sudo apt install$MISSING_DEPS"
         }
@@ -81,10 +127,14 @@ else
 fi
 
 # ─── Python Dependencies ─────────────────────────────────────
+REQUIREMENTS_FILE="$(dirname "$0")/requirements.lock"
+if [ ! -f "$REQUIREMENTS_FILE" ]; then
+    REQUIREMENTS_FILE="$(dirname "$0")/requirements.txt"
+fi
 echo ""
-echo "📦 Installing Python dependencies..."
+echo "📦 Installing Python dependencies from $(basename $REQUIREMENTS_FILE)..."
 pip install --upgrade pip -q
-pip install -r "$(dirname "$0")/requirements.txt" -q
+pip install -r "$REQUIREMENTS_FILE" -q
 echo "✅ Python dependencies installed"
 
 # ─── Playwright Chromium ─────────────────────────────────────

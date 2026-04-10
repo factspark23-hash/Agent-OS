@@ -711,7 +711,7 @@ class AgentServer:
         """Handle HTTP GET /status."""
         status = {
             "status": "running",
-            "version": "3.0.0",
+            "version": "3.0.1",
             "uptime_seconds": int(time.time() - self._start_time),
             "active_sessions": len(self.session_manager.list_active_sessions()),
             "active_ws_clients": len(self._ws_clients),
@@ -1160,6 +1160,10 @@ class AgentServer:
         script = data.get("script")
         if not script:
             return {"status": "error", "error": "Missing 'script'"}
+        logger.warning(
+            "evaluate-js executing arbitrary JavaScript. "
+            "This has full page access — use with caution."
+        )
         result = await self.browser.evaluate_js(script)
         return {"status": "success", "result": result}
 

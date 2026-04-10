@@ -63,6 +63,16 @@ Local Whisper integration. Transcribe any video or audio. No cloud APIs, no data
 
 ---
 
+## Prerequisites
+
+- **Python 3.10+** (check with `python3 --version`)
+- **pip** (comes with Python)
+- **Linux or macOS** (Windows: use WSL2)
+- **~2GB free disk space** (for Chromium + dependencies)
+- **sudo access** (for installing system libraries, or use `--no-sudo` flag)
+
+---
+
 ## Quick Start
 
 ### Docker (Recommended)
@@ -74,10 +84,15 @@ docker run -d \
   --name agent-os \
   agent-os
 
-# Or with Docker Compose
+# Or with Docker Compose (includes PostgreSQL + Redis)
 git clone https://github.com/factspark23-hash/Agent-OS.git
 cd Agent-OS
+# Set required env vars
+export POSTGRES_PASSWORD="your-strong-password"
+export JWT_SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
 docker compose up -d
+
+# Access: http://localhost:8080 (nginx) or http://localhost:8001 (direct API)
 ```
 
 ### Manual Install
@@ -85,7 +100,9 @@ docker compose up -d
 ```bash
 git clone https://github.com/factspark23-hash/Agent-OS.git
 cd Agent-OS
-chmod +x setup.sh && ./setup.sh
+chmod +x setup.sh && ./setup.sh          # With sudo (recommended)
+# or
+./setup.sh --no-sudo                      # Skip sudo-dependent steps
 python3 main.py --agent-token "my-agent-123"
 ```
 
