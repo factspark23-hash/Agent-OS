@@ -22,10 +22,35 @@ class AuthHandler:
         self._fernet = Fernet(self._key)
 
     def _get_or_create_key(self) -> bytes:
-        """Get or create encryption key for the vault."""
-        key_path = Path(os.path.expanduser("~/.agent-os/.vault_key"))
+        """Get or create encryption key for the vault.
+
+        Key is stored in XDG_DATA_HOME or ~/.local/share/agent-os/ to
+        separate it from the vault file in ~/.agent-os/.
+        Falls back to ~/.agent-os/.vault_key if XDG path unavailable.
+        """
+        # Prefer XDG data directory (separates key from config)
+        xdg_data = os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share"))
+        key_path = Path(xdg_data) / "agent-os" / ".vault_key"
+
         if key_path.exists():
             return key_path.read_bytes()
+
+        # Fallback: check legacy location
+        legacy_path = Path(os.path.expanduser("~/.agent-os/.vault_key"))
+        if legacy_path.exists():
+            # Migrate to new location
+            key = legacy_path.read_bytes()
+            key_path.parent.mkdir(parents=True, exist_ok=True)
+            key_path.write_bytes(key)
+            key_path.chmod(0o600)
+            try:
+                legacy_path.unlink()
+                logger.info("Migrated vault key from legacy location to XDG data dir")
+            except Exception:
+                pass
+            return key
+
+        # Generate new key
         key = Fernet.generate_key()
         key_path.parent.mkdir(parents=True, exist_ok=True)
         key_path.write_bytes(key)
