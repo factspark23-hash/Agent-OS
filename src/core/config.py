@@ -1,6 +1,6 @@
 """
-Agent-OS Configuration Management
-Handles all settings, API tokens, and runtime configuration.
+Agent-OS Configuration Management — Production Edition
+Handles all settings, with database/Redis/JWT config support.
 """
 import os
 import yaml
@@ -13,12 +13,39 @@ from typing import Optional, Dict, Any
 
 DEFAULT_CONFIG = {
     "server": {
-        "host": "127.0.0.1",
+        "host": "0.0.0.0",  # Changed from 127.0.0.1 for production
         "ws_port": 8000,
         "http_port": 8001,
         "debug_port": 8002,
-        "max_connections": 10,
-        "cors_origin": "http://127.0.0.1:8002",  # Strict: only debug UI origin
+        "max_connections": 100,
+        "cors_origin": "*",  # Configurable for production
+        "cors_allowed_origins": [],  # List of allowed origins
+        "agent_token": None,
+        "allowed_tokens": [],
+        "rate_limit_max": 60,
+        "rate_limit_window": 60,
+        "request_timeout_seconds": 120,
+        "max_request_body_kb": 1024,
+    },
+    "database": {
+        "enabled": False,
+        "dsn": "postgresql+asyncpg://agent_os:agent_os@localhost:5432/agent_os",
+        "pool_size": 20,
+        "max_overflow": 10,
+        "pool_timeout": 30,
+        "pool_recycle": 3600,
+    },
+    "redis": {
+        "enabled": False,
+        "url": "redis://localhost:6379/0",
+        "fallback_on_failure": True,
+    },
+    "jwt": {
+        "secret_key": None,  # Auto-generated if not set
+        "algorithm": "HS256",
+        "access_token_expire_minutes": 15,
+        "refresh_token_expire_days": 30,
+        "issuer": "agent-os",
     },
     "browser": {
         "headless": True,
@@ -40,7 +67,10 @@ DEFAULT_CONFIG = {
         "captcha_bypass": True,
         "human_mimicry": True,
         "block_bot_queries": True,
-        "session_encryption": True
+        "session_encryption": True,
+        "enable_api_key_auth": True,
+        "enable_jwt_auth": True,
+        "allow_legacy_token_auth": True,  # Backward compat during migration
     },
     "scanner": {
         "max_requests_per_second": 5,
@@ -59,7 +89,12 @@ DEFAULT_CONFIG = {
     "transcription": {
         "model": "tiny",
         "language": "auto"
-    }
+    },
+    "logging": {
+        "level": "INFO",
+        "json_logs": True,
+        "service_name": "agent-os",
+    },
 }
 
 
@@ -76,10 +111,7 @@ class Config:
         if self.config_path.exists():
             with open(self.config_path, "r") as f:
                 loaded = yaml.safe_load(f) or {}
-            # Merge with defaults to ensure all keys exist
             return self._deep_merge(DEFAULT_CONFIG, loaded)
-        # Return defaults in memory — don't auto-save to disk
-        # (call save() explicitly if persistence is needed)
         return copy.deepcopy(DEFAULT_CONFIG)
 
     def _deep_merge(self, base: Dict, override: Dict) -> Dict:

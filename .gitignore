@@ -1,39 +1,13 @@
-# Python
+# Agent-OS
+node_modules/
 __pycache__/
 *.pyc
-*.pyo
-.pytest_cache/
-*.egg-info/
-dist/
-build/
-
-# Virtual environment
 venv/
-.venv/
-
-# Agent-OS runtime data
-.agent-os/
-*.enc
-.vault_key
-
-# IDE
-.vscode/
-.idea/
-
-# Environment
 .env
-.env.*
-!.env.example
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Test artifacts
-stress_test_results.json
+*.enc
+*.key
+.agent-os/
+dist/
+*.egg-info/
+.pytest_cache/
 .coverage
-htmlcov/
-*.egg
-
-# Runtime
-~/.agent-os/
