@@ -30,7 +30,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Callable
 
-from playwright.async_api import async_playwright, Browser, BrowserContext, Page
+from patchright.async_api import async_playwright, Browser, BrowserContext, Page
 
 from src.core.stealth import (
     ANTI_DETECTION_JS,

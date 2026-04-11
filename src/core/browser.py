@@ -16,7 +16,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet
-from playwright.async_api import async_playwright, Browser, Page, BrowserContext
+from patchright.async_api import async_playwright, Browser, Page, BrowserContext
 
 from src.core.stealth import (
     ANTI_DETECTION_JS,
@@ -474,6 +474,9 @@ class AgentBrowser:
 
         self.browser = await self.playwright.chromium.launch(**launch_options)
 
+        # Log browser engine version (patchright manages its own binary)
+        await self._get_browser_version()
+
         # Create context with profile-driven realistic settings
         storage_state = self._load_cookies("default")
 
@@ -562,6 +565,21 @@ class AgentBrowser:
             except Exception as e:
                 logger.warning(f"Firefox engine failed to start: {e}")
                 self._firefox_engine = None
+
+    async def _get_browser_version(self) -> str:
+        """Get and log the browser engine version after launch.
+
+        Returns:
+            Version string from the browser (e.g. 'HeadlessChrome/131.0.6778.204')
+            or 'unknown' if the version cannot be determined.
+        """
+        try:
+            version = await self.browser.version()
+            logger.info(f"Browser engine: {version}")
+            return version
+        except Exception as exc:
+            logger.warning(f"Could not determine browser version: {exc}")
+            return "unknown"
 
     async def recover(self):
         """Recover from browser crash by relaunching."""

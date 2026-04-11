@@ -152,12 +152,12 @@ pip install -r "$REQUIREMENTS_FILE" --no-cache-dir 2>&1 | tail -5 || {
 }
 echo "✅ Python dependencies installed"
 
-# ─── Playwright Chromium ─────────────────────────────────────
+# ─── Patchright Chromium ─────────────────────────────────────
 echo ""
-echo "🌐 Installing Playwright Chromium..."
-$PYTHON_CMD -m playwright install chromium 2>&1 | tail -1
-$PYTHON_CMD -m playwright install-deps chromium 2>&1 | tail -1 || true
-echo "✅ Chromium installed"
+echo "🌐 Installing Patchright Chromium..."
+$PYTHON_CMD -m patchright install chromium 2>&1 | tail -1
+$PYTHON_CMD -c "from patchright.async_api import async_playwright; print('Patchright OK')"
+echo "✅ Patchright browser installed"
 
 # ─── Verify Installation ─────────────────────────────────────
 echo ""
@@ -169,7 +169,7 @@ errors = []
 
 # Module name -> actual import name
 modules = {
-    'playwright': 'playwright',
+    'patchright': 'patchright',
     'websockets': 'websockets',
     'aiohttp': 'aiohttp',
     'httpx': 'httpx',
@@ -206,14 +206,15 @@ if errors:
 print('✅ All imports successful')
 "
 
-# Verify Playwright browser
+# Verify Patchright browser
 $PYTHON_CMD -c "
-from playwright.sync_api import sync_playwright
+from patchright.sync_api import sync_playwright
 p = sync_playwright().start()
 browser = p.chromium.launch(headless=True)
+version = browser.version
 browser.close()
 p.stop()
-print('✅ Playwright Chromium launches correctly')
+print(f'✅ Patchright Chromium launches correctly ({version})')
 "
 
 # Run tests

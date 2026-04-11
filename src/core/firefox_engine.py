@@ -24,7 +24,7 @@ from typing import Optional, Dict, Any, List
 from pathlib import Path
 from urllib.parse import urlparse
 
-from playwright.async_api import async_playwright, Browser, Page, BrowserContext
+from patchright.async_api import async_playwright, Browser, Page, BrowserContext
 
 logger = logging.getLogger("agent-os.firefox")
 
