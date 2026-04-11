@@ -23,6 +23,7 @@ from src.core.stealth import (
 from src.core.tls_spoof import apply_browser_tls_spoofing
 from src.core.tls_proxy import TLSProxyServer, TLSHTTPClient, _CURL_AVAILABLE
 from src.core.cdp_stealth import CDPStealthInjector
+from src.core.stealth_god import GodModeStealth
 from src.tools.proxy_rotation import ProxyManager, ProxyInfo, RotationStrategy
 from src.security.evasion_engine import EvasionEngine
 from src.security.human_mimicry import HumanMimicry
@@ -79,6 +80,8 @@ class AgentBrowser:
         self._evasion = EvasionEngine()
         # CDP Stealth Injector — THE REAL FIX for navigator.webdriver detection
         self._cdp_stealth = CDPStealthInjector()
+        # GOD MODE Stealth — Ultimate anti-detection system
+        self._god_stealth = GodModeStealth()
         # Import at class level to avoid repeated imports
         self._mimicry = HumanMimicry()
         # TLS proxy for real browser fingerprint
@@ -249,11 +252,17 @@ class AgentBrowser:
         self._attach_console_listener("main", self.page)
 
         # ═══════════════════════════════════════════════════════════
-        # CDP STEALTH — The REAL fix for navigator.webdriver detection
-        # Uses Page.addScriptToEvaluateOnNewDocument which runs BEFORE
+        # GOD MODE STEALTH — Ultimate Anti-Detection System
+        # Uses CDP Page.addScriptToEvaluateOnNewDocument which runs BEFORE
         # any page JavaScript, including bot detection scripts.
-        # This is fundamentally better than context.add_init_script().
+        # This is the HIGHEST level of stealth possible.
         # ═══════════════════════════════════════════════════════════
+        await self._god_stealth.inject_into_page(
+            self.page,
+            page_id="main",
+        )
+
+        # Also inject CDP stealth as backup layer
         await self._cdp_stealth.inject_into_page(
             self.page,
             page_id="main",
@@ -1291,7 +1300,13 @@ class AgentBrowser:
         self._pages[tab_id] = page
         self._attach_console_listener(tab_id, page)
 
-        # CDP stealth — primary anti-detection layer
+        # GOD MODE stealth — primary anti-detection layer
+        await self._god_stealth.inject_into_page(
+            page,
+            page_id=tab_id,
+        )
+
+        # CDP stealth — backup layer
         await self._cdp_stealth.inject_into_page(
             page,
             page_id=tab_id,
@@ -1856,6 +1871,12 @@ class AgentBrowser:
         # Apply CDP stealth to main page
         chrome_ver = fp.get("chrome_version", "124")
         if self.page:
+            # GOD MODE stealth — primary
+            await self._god_stealth.inject_into_page(
+                self.page,
+                page_id="main",
+            )
+            # CDP stealth — backup
             await self._cdp_stealth.inject_into_page(
                 self.page,
                 page_id="main",
