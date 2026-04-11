@@ -1,138 +1,262 @@
 """
-Agent-OS TLS Fingerprint Spoofing
-Randomizes JA3 TLS fingerprint via CDP to evade advanced bot detection.
+Agent-OS TLS Fingerprint Engine
+Real TLS fingerprinting via curl_cffi for HTTP requests.
+CDP-level TLS metadata spoofing for Playwright browser.
+
+curl_cffi uses BoringSSL and can impersonate real Chrome/Firefox/Safari
+TLS ClientHello fingerprints at the network level — not just headers.
 """
 
-import random
 import logging
-from typing import List, Dict, Optional
+import asyncio
+import random
+from typing import Optional, Dict, Any, List
+from urllib.parse import urlparse
 
-logger = logging.getLogger("agent-os.tls_spoof")
+logger = logging.getLogger("agent-os.tls")
 
-# Real browser TLS cipher suites (Chrome 131+)
-CHROME_CIPHERS = [
-    "TLS_AES_128_GCM_SHA256",
-    "TLS_AES_256_GCM_SHA384",
-    "TLS_CHACHA20_POLY1305_SHA256",
-    "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
-    "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
-    "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
-    "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
-    "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
-    "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
-    "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
-    "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA",
-    "TLS_RSA_WITH_AES_128_GCM_SHA256",
-    "TLS_RSA_WITH_AES_256_GCM_SHA384",
-    "TLS_RSA_WITH_AES_128_CBC_SHA",
-    "TLS_RSA_WITH_AES_256_CBC_SHA",
-]
+# ═══════════════════════════════════════════════════════════════
+# curl_cffi session pool for HTTP requests with real TLS
+# ═══════════════════════════════════════════════════════════════
 
-# TLS extensions in order (real Chrome order)
-TLS_EXTENSIONS = [
-    "server_name",
-    "extended_master_secret",
-    "renegotiation_info",
-    "supported_groups",
-    "ec_point_formats",
-    "application_layer_protocol_negotiation",
-    "status_request",
-    "signature_algorithms",
-    "signed_certificate_timestamp",
-    "key_share",
-    "psk_key_exchange_modes",
-    "supported_versions",
-    "compress_certificate",
-    "application_settings",
-    "record_size_limit",
-    "padding",
-]
+_CURL_AVAILABLE = False
+_curl_Session = None
+_curl_BrowserType = None
 
-# Supported groups (elliptic curves)
-SUPPORTED_GROUPS = [
-    "X25519",
-    "secp256r1",
-    "secp384r1",
-]
-
-# Signature algorithms
-SIGNATURE_ALGORITHMS = [
-    "ecdsa_secp256r1_sha256",
-    "rsa_pss_rsae_sha256",
-    "rsa_pkcs1_sha256",
-    "ecdsa_secp384r1_sha384",
-    "rsa_pss_rsae_sha384",
-    "rsa_pkcs1_sha384",
-    "rsa_pss_rsae_sha512",
-    "rsa_pkcs1_sha512",
-]
+try:
+    from curl_cffi.requests import Session as _curl_Session, BrowserType as _curl_BrowserType
+    _CURL_AVAILABLE = True
+except ImportError:
+    pass
 
 
-def get_randomized_tls_config() -> Dict:
-    """
-    Generate a randomized but realistic TLS configuration.
-    Returns a dict that can be applied via CDP Network.setUserAgentOverride
-    or Network.setExtraHTTPHeaders.
-    """
-    # Shuffle cipher order slightly (real browsers have stable order but
-    # different versions have different orders)
-    ciphers = list(CHROME_CIPHERS)
-    # Randomly swap 1-2 adjacent pairs to create variation
-    for _ in range(random.randint(1, 2)):
-        i = random.randint(0, len(ciphers) - 2)
-        ciphers[i], ciphers[i + 1] = ciphers[i + 1], ciphers[i]
-
-    # Randomize supported groups order
-    groups = list(SUPPORTED_GROUPS)
-    if random.random() > 0.5:
-        groups[0], groups[1] = groups[1], groups[0]
-
-    # Randomize ALPN (always h2 + http/1.1 for Chrome)
-    alpn_protocols = ["h2", "http/1.1"]
-
+# Chrome versions and their curl_cffi BrowserType mappings
+def _get_profiles():
+    if not _CURL_AVAILABLE:
+        return {}
     return {
-        "ciphers": ciphers,
-        "supported_groups": groups,
-        "signature_algorithms": SIGNATURE_ALGORITHMS,
-        "alpn_protocols": alpn_protocols,
-        "tls_versions": ["TLS 1.3", "TLS 1.2"],
+        "chrome116": _curl_BrowserType.chrome116,
+        "chrome119": _curl_BrowserType.chrome119,
+        "chrome120": _curl_BrowserType.chrome120,
+        "chrome124": _curl_BrowserType.chrome124,
+        "safari15_3": _curl_BrowserType.safari15_3,
+        "safari15_5": _curl_BrowserType.safari15_5,
+        "safari17_0": _curl_BrowserType.safari17_0,
+        "safari17_2_1": _curl_BrowserType.safari17_2_1,
+        "edge99": _curl_BrowserType.edge99,
+        "edge101": _curl_BrowserType.edge101,
     }
 
 
-async def apply_tls_spoofing(page, browser_version: str = "131") -> None:
+class TLSFingerprintEngine:
     """
-    Apply TLS fingerprint spoofing via CDP session.
+    Manages curl_cffi sessions with real browser TLS fingerprint impersonation.
+    Each session mimics a specific browser version's TLS ClientHello,
+    HTTP/2 settings, and cipher suite order at the network level.
+    """
 
+    def __init__(self, default_profile: str = "chrome124"):
+        if not _CURL_AVAILABLE:
+            logger.error(
+                "curl_cffi not installed! TLS fingerprinting will NOT work.\n"
+                "Run: pip install curl_cffi\n"
+                "Without this, bot detection WILL catch you."
+            )
+            raise ImportError("curl_cffi is required for TLS fingerprinting")
+
+        self._profiles = _get_profiles()
+        self._sessions: Dict[str, Any] = {}
+        self._default_profile = default_profile
+        self._session_cookies: Dict[str, Dict] = {}
+        self._request_count: int = 0
+
+    def _get_or_create_session(self, profile: str) -> Any:
+        """Get or create a curl_cffi session for a browser profile."""
+        if profile not in self._sessions:
+            browser_type = self._profiles.get(profile)
+            if not browser_type:
+                raise ValueError(f"Unknown profile: {profile}. Available: {list(self._profiles.keys())}")
+
+            session = _curl_Session(impersonate=browser_type)
+            self._sessions[profile] = session
+            logger.info(f"Created TLS session: {profile}")
+
+        return self._sessions[profile]
+
+    def request(
+        self,
+        method: str,
+        url: str,
+        profile: Optional[str] = None,
+        headers: Optional[Dict] = None,
+        proxy: Optional[str] = None,
+        timeout: int = 30,
+        **kwargs,
+    ) -> Dict[str, Any]:
+        """
+        Perform HTTP request with real browser TLS fingerprint.
+
+        Args:
+            method: GET, POST, PUT, DELETE, etc.
+            url: Target URL
+            profile: Browser profile (chrome124, safari17_0, etc.)
+            headers: Additional headers (merged with browser's default)
+            proxy: Proxy URL (http://user:pass@host:port)
+            timeout: Request timeout in seconds
+
+        Returns:
+            {
+                "status_code": int,
+                "text": str,
+                "headers": dict,
+                "cookies": dict,
+                "url": str,
+                "tls_profile": str,
+            }
+        """
+        profile = profile or self._default_profile
+        session = self._get_or_create_session(profile)
+
+        # Merge extra headers
+        req_kwargs = {"timeout": timeout, **kwargs}
+        if headers:
+            req_kwargs["headers"] = headers
+        if proxy:
+            req_kwargs["proxy"] = proxy
+
+        self._request_count += 1
+
+        try:
+            resp = session.request(method, url, **req_kwargs)
+
+            # Persist cookies across requests in the same session
+            self._session_cookies[profile] = dict(resp.cookies)
+
+            return {
+                "status_code": resp.status_code,
+                "text": resp.text,
+                "headers": dict(resp.headers),
+                "cookies": dict(resp.cookies),
+                "url": resp.url,
+                "tls_profile": profile,
+            }
+        except Exception as e:
+            logger.error(f"TLS request failed ({profile} {method} {url[:80]}): {e}")
+            return {
+                "status_code": 0,
+                "text": "",
+                "headers": {},
+                "cookies": {},
+                "url": url,
+                "tls_profile": profile,
+                "error": str(e),
+            }
+
+    def get(self, url: str, **kwargs) -> Dict[str, Any]:
+        return self.request("GET", url, **kwargs)
+
+    def post(self, url: str, **kwargs) -> Dict[str, Any]:
+        return self.request("POST", url, **kwargs)
+
+    def rotate_profile(self) -> str:
+        """Switch to a random browser profile for the next request."""
+        available = list(self._profiles.keys())
+        # Avoid using the same profile twice in a row
+        choices = [p for p in available if p != self._default_profile]
+        self._default_profile = random.choice(choices)
+        logger.info(f"Rotated TLS profile to: {self._default_profile}")
+        return self._default_profile
+
+    def set_profile(self, profile: str):
+        """Set a specific browser profile."""
+        if profile not in self._profiles:
+            raise ValueError(f"Unknown profile: {profile}")
+        self._default_profile = profile
+
+    def close(self):
+        """Close all sessions."""
+        for session in self._sessions.values():
+            try:
+                session.close()
+            except Exception:
+                pass
+        self._sessions.clear()
+
+    @property
+    def available(self) -> bool:
+        return _CURL_AVAILABLE
+
+    @property
+    def stats(self) -> Dict:
+        return {
+            "requests_made": self._request_count,
+            "active_sessions": list(self._sessions.keys()),
+            "default_profile": self._default_profile,
+        }
+
+
+# ═══════════════════════════════════════════════════════════════
+# CDP-level TLS metadata for Playwright browser
+# ═══════════════════════════════════════════════════════════════
+
+# Real Chrome sec-ch-ua brand strings per version
+CHROME_BRAND_VERSIONS = {
+    "124": [
+        {"brand": "Chromium", "version": "124"},
+        {"brand": "Google Chrome", "version": "124"},
+        {"brand": "Not-A.Brand", "version": "99"},
+    ],
+    "120": [
+        {"brand": "Chromium", "version": "120"},
+        {"brand": "Google Chrome", "version": "120"},
+        {"brand": "Not_A Brand", "version": "99"},
+    ],
+    "116": [
+        {"brand": "Chromium", "version": "116"},
+        {"brand": "Google Chrome", "version": "116"},
+        {"brand": "Not/A.Brand", "version": "99"},
+    ],
+}
+
+
+async def apply_browser_tls_spoofing(page, chrome_version: str = "124") -> bool:
+    """
+    Apply TLS metadata spoofing to a Playwright page via CDP.
+    
+    This sets HTTP headers and User-Agent Client Hints to match a real
+    Chrome browser. It does NOT change the TLS ClientHello (that's
+    controlled by Chromium's BoringSSL). But it prevents header-level
+    fingerprinting from detecting automation.
+    
     Args:
-        page: Playwright page object
-        browser_version: Chrome version to emulate
+        page: Playwright Page object
+        chrome_version: Chrome version to emulate
+    
+    Returns:
+        True if applied successfully
     """
     try:
         cdp = await page.context.new_cdp_session(page)
 
-        # Set network user agent with realistic Chrome UA
+        # Build realistic User-Agent string
         ua = (
             f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             f"AppleWebKit/537.36 (KHTML, like Gecko) "
-            f"Chrome/{browser_version}.0.0.0 Safari/537.36"
+            f"Chrome/{chrome_version}.0.0.0 Safari/537.36"
         )
 
+        # Set User-Agent override with full metadata
+        brands = CHROME_BRAND_VERSIONS.get(chrome_version, CHROME_BRAND_VERSIONS["124"])
         await cdp.send("Network.setUserAgentOverride", {
             "userAgent": ua,
             "acceptLanguage": "en-US,en;q=0.9",
             "platform": "Win32",
             "userAgentMetadata": {
-                "brands": [
-                    {"brand": "Google Chrome", "version": browser_version},
-                    {"brand": "Chromium", "version": browser_version},
-                    {"brand": "Not/A)Brand", "version": "99"},
-                ],
+                "brands": brands,
                 "fullVersionList": [
-                    {"brand": "Google Chrome", "version": f"{browser_version}.0.0.0"},
-                    {"brand": "Chromium", "version": f"{browser_version}.0.0.0"},
-                    {"brand": "Not/A)Brand", "version": "99.0.0.0"},
+                    {**b, "version": f"{b['version']}.0.0.0"} for b in brands
                 ],
-                "fullVersion": f"{browser_version}.0.0.0",
+                "fullVersion": f"{chrome_version}.0.0.0",
                 "platform": "Windows",
                 "platformVersion": "15.0.0",
                 "architecture": "x86",
@@ -143,26 +267,41 @@ async def apply_tls_spoofing(page, browser_version: str = "131") -> None:
             },
         })
 
-        # Enable Network domain for header manipulation
+        # Enable Network domain
         await cdp.send("Network.enable")
 
-        # Set extra HTTP headers to match real Chrome
+        # Set extra HTTP headers that match real Chrome navigations
         await cdp.send("Network.setExtraHTTPHeaders", {
             "headers": {
-                "sec-ch-ua": f'"Google Chrome";v="{browser_version}", "Chromium";v="{browser_version}", "Not/A)Brand";v="99"',
+                "sec-ch-ua": ', '.join(
+                    f'"{b["brand"]}";v="{b["version"]}"' for b in brands
+                ),
                 "sec-ch-ua-mobile": "?0",
                 "sec-ch-ua-platform": '"Windows"',
                 "Upgrade-Insecure-Requests": "1",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                "Accept": (
+                    "text/html,application/xhtml+xml,application/xml;"
+                    "q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
+                ),
                 "Sec-Fetch-Site": "none",
                 "Sec-Fetch-Mode": "navigate",
                 "Sec-Fetch-User": "?1",
                 "Sec-Fetch-Dest": "document",
                 "Accept-Encoding": "gzip, deflate, br",
+                "Accept-Language": "en-US,en;q=0.9",
             }
         })
 
-        logger.info(f"TLS spoofing applied (Chrome {browser_version})")
+        # Also spoof via CDP Page domain for JavaScript-level checks
+        await cdp.send("Emulation.setUserAgentOverride", {
+            "userAgent": ua,
+            "acceptLanguage": "en-US,en;q=0.9",
+            "platform": "Win32",
+        })
+
+        logger.info(f"Browser TLS spoofing applied (Chrome {chrome_version})")
+        return True
 
     except Exception as e:
-        logger.warning(f"TLS spoofing failed (non-fatal): {e}")
+        logger.warning(f"Browser TLS spoofing failed: {e}")
+        return False

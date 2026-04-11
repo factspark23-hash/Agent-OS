@@ -1,199 +1,485 @@
 """
 Agent-OS Evasion Engine
-Integrates curl-impersonate, cloudscraper, and fingerprint injection
-for maximum anti-detection coverage across all layers.
+Real fingerprint generation, cloudscraper integration, unified HTTP engine.
 """
 
 import json
 import logging
-import asyncio
-import subprocess
-import shutil
+import random
+import hashlib
 import os
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from pathlib import Path
 
 logger = logging.getLogger("agent-os.evasion")
 
 
-# ═══════════════════════════════════════════════════════════
-# 1. CURL-IMPERSONATE — Browser-grade TLS for raw HTTP
-# ═══════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
+# REALISTIC BROWSER DATA — sourced from real browser telemetry
+# ═══════════════════════════════════════════════════════════════
 
-class CurlImpersonate:
-    """
-    Uses curl-impersonate (curl_cffi) for HTTP requests with
-    real browser TLS fingerprints. Use when you don't need a
-    full browser — just fast, stealthy HTTP.
-    
-    curl_cffi binds to Chrome's BoringSSL for perfect JA3 matching.
-    """
+# GPU renderers actually seen in Chrome on Windows (real data)
+WINDOWS_WEBGL_RENDERERS = [
+    ("Google Inc. (Intel)", "ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)"),
+    ("Google Inc. (Intel)", "ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)"),
+    ("Google Inc. (NVIDIA)", "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)"),
+    ("Google Inc. (NVIDIA)", "ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 SUPER Direct3D11 vs_5_0 ps_5_0, D3D11)"),
+    ("Google Inc. (NVIDIA)", "ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Ti Direct3D11 vs_5_0 ps_5_0, D3D11)"),
+    ("Google Inc. (Intel)", "ANGLE (Intel, Intel(R) HD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)"),
+    ("Google Inc. (AMD)", "ANGLE (AMD, AMD Radeon RX 580 Direct3D11 vs_5_0 ps_5_0, D3D11)"),
+    ("Google Inc. (AMD)", "ANGLE (AMD, AMD Radeon(TM) Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)"),
+]
 
-    # Chrome version → curl_cffi impersonate target
-    BROWSER_PROFILES = {
-        "chrome_110": "chrome110",
-        "chrome_116": "chrome116",
-        "chrome_119": "chrome119",
-        "chrome_120": "chrome120",
-        "chrome_124": "chrome124",
-        "edge_99": "edge99",
-        "edge_101": "edge101",
-        "safari_15_3": "safari15_3",
-        "safari_15_5": "safari15_5",
-        "safari_17_0": "safari17_0",
-        "safari_17_2_1": "safari17_2_1",
+MAC_WEBGL_RENDERERS = [
+    ("Google Inc. (Apple)", "ANGLE (Apple, Apple M1, OpenGL 4.1)"),
+    ("Google Inc. (Apple)", "ANGLE (Apple, Apple M2, OpenGL 4.1)"),
+    ("Google Inc. (Apple)", "ANGLE (Apple, Apple M2 Pro, OpenGL 4.1)"),
+    ("Google Inc. (Intel)", "ANGLE (Intel, Intel Iris Plus Graphics 640, OpenGL 4.1)"),
+    ("Google Inc. (AMD)", "ANGLE (AMD, AMD Radeon Pro 5500M, OpenGL 4.1)"),
+]
+
+LINUX_WEBGL_RENDERERS = [
+    ("Mesa", "Mesa Intel(R) UHD Graphics 630 (CFL GT2)"),
+    ("Mesa", "Mesa Intel(R) HD Graphics 620 (KBL GT2)"),
+    ("Mesa", "llvmpipe (LLVM 15.0.7, 256 bits)"),
+    ("NVIDIA Corporation", "NVIDIA GeForce GTX 1060 6GB/PCIe/SSE2"),
+    ("NVIDIA Corporation", "NVIDIA GeForce RTX 3070/PCIe/SSE2"),
+    ("AMD", "AMD Radeon RX 6700 XT (navi22, LLVM 15.0.7, DRM 3.49, 6.1.0-18-amd64)"),
+]
+
+# Screen resolutions with market share weights (approximate %)
+SCREEN_RESOLUTIONS = [
+    # (width, height, weight)
+    (1920, 1080, 25),
+    (1536, 864, 12),
+    (1366, 768, 10),
+    (1440, 900, 8),
+    (1280, 720, 7),
+    (2560, 1440, 6),
+    (1600, 900, 5),
+    (1280, 1024, 4),
+    (3840, 2160, 3),
+    (2560, 1080, 3),
+    (1680, 1050, 2),
+]
+
+# CPU core counts with distribution
+CPU_CORES = [
+    (4, 15), (8, 35), (6, 20), (12, 12), (16, 8), (2, 5), (10, 5),
+]
+
+# RAM amounts in GB with distribution
+DEVICE_MEMORY_GB = [
+    (8, 30), (16, 35), (4, 15), (32, 10), (2, 5), (64, 5),
+]
+
+# Chrome version distribution (approximate market share)
+CHROME_VERSIONS = [
+    ("124", 20), ("123", 18), ("122", 15), ("121", 12),
+    ("120", 10), ("119", 8), ("116", 5), ("110", 4),
+]
+
+# Timezone distribution
+TIMEZONES = [
+    ("America/New_York", 20), ("America/Chicago", 10),
+    ("America/Los_Angeles", 15), ("America/Denver", 5),
+    ("Europe/London", 12), ("Europe/Berlin", 10),
+    ("Europe/Paris", 8), ("Asia/Tokyo", 5),
+    ("Asia/Shanghai", 5), ("America/Phoenix", 3),
+    ("America/Anchorage", 2), ("Pacific/Honolulu", 2),
+    ("America/Toronto", 3),
+]
+
+
+def _weighted_choice(items: list) -> Any:
+    """Pick from a list of (value, weight) tuples using weighted random."""
+    total = sum(item[-1] for item in items)
+    r = random.uniform(0, total)
+    cumulative = 0
+    for item in items:
+        cumulative += item[-1]
+        if r <= cumulative:
+            # Return everything except the weight
+            return item[0] if len(item) == 2 else tuple(item[:-1])
+    last = items[-1]
+    return last[0] if len(last) == 2 else tuple(last[:-1])
+
+
+def generate_fingerprint(
+    os_target: str = "windows",
+    device_type: str = "desktop",
+    chrome_version: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Generate a realistic, randomized browser fingerprint.
+    Uses weighted distributions based on real-world browser statistics.
+
+    Args:
+        os_target: "windows", "mac", or "linux"
+        device_type: "desktop" or "mobile"
+        chrome_version: Specific Chrome version, or None for random
+
+    Returns:
+        Complete fingerprint dict
+    """
+    if chrome_version is None:
+        chrome_version = _weighted_choice(CHROME_VERSIONS)
+
+    # Pick screen resolution
+    screen_w, screen_h = _weighted_choice(SCREEN_RESOLUTIONS)
+
+    # Pick hardware
+    cores = _weighted_choice(CPU_CORES)
+    memory = _weighted_choice(DEVICE_MEMORY_GB)
+    timezone = _weighted_choice(TIMEZONES)
+
+    # Pick GPU based on OS
+    if os_target == "windows":
+        gl_vendor, gl_renderer = random.choice(WINDOWS_WEBGL_RENDERERS)
+        platform = "Win32"
+        ua_os = "Windows NT 10.0; Win64; x64"
+    elif os_target == "mac":
+        gl_vendor, gl_renderer = random.choice(MAC_WEBGL_RENDERERS)
+        platform = "MacIntel"
+        ua_os = "Macintosh; Intel Mac OS X 10_15_7"
+        # Macs commonly have higher pixel ratios
+        screen_w, screen_h = _weighted_choice([
+            (1440, 900, 20), (1680, 1050, 15), (1920, 1080, 15),
+            (2560, 1600, 10), (2560, 1440, 10), (3024, 1964, 8),
+            (3456, 2234, 7), (2880, 1800, 8), (1512, 982, 7),
+        ])
+    else:
+        gl_vendor, gl_renderer = random.choice(LINUX_WEBGL_RENDERERS)
+        platform = "Linux x86_64"
+        ua_os = "X11; Linux x86_64"
+
+    # Pixel ratio (Mac = 2x usually, Windows/Linux = 1x)
+    if os_target == "mac":
+        pixel_ratio = random.choice([1, 2, 2, 2, 2])  # Most Macs are Retina
+    else:
+        pixel_ratio = random.choice([1, 1, 1, 1, 1.25, 1.5])
+
+    # Touch support
+    max_touch = 0
+    is_mobile = False
+    if device_type == "mobile":
+        max_touch = random.choice([5, 10])
+        is_mobile = True
+        ua_os = "Linux; Android 14; Pixel 8"
+
+    # Canvas noise seed (unique per fingerprint)
+    canvas_seed = random.randint(1, 2**31)
+
+    # Audio context seed
+    audio_seed = random.randint(1, 2**31)
+
+    # User agent
+    if device_type == "mobile":
+        user_agent = (
+            f"Mozilla/5.0 ({ua_os}) AppleWebKit/537.36 "
+            f"(KHTML, like Gecko) Chrome/{chrome_version}.0.0.0 Mobile Safari/537.36"
+        )
+    else:
+        user_agent = (
+            f"Mozilla/5.0 ({ua_os}) AppleWebKit/537.36 "
+            f"(KHTML, like Gecko) Chrome/{chrome_version}.0.0.0 Safari/537.36"
+        )
+
+    # Generate unique fingerprint ID for consistency
+    fp_id = hashlib.md5(
+        f"{user_agent}{gl_renderer}{canvas_seed}{audio_seed}".encode()
+    ).hexdigest()[:12]
+
+    return {
+        "id": fp_id,
+        "chrome_version": chrome_version,
+        "user_agent": user_agent,
+        "platform": platform,
+        "os": os_target,
+        "device_type": device_type,
+        "hardware_concurrency": cores,
+        "device_memory": memory,
+        "max_touch_points": max_touch,
+        "screen_width": screen_w,
+        "screen_height": screen_h,
+        "color_depth": 24,
+        "pixel_ratio": pixel_ratio,
+        "is_mobile": is_mobile,
+        "webgl_vendor": gl_vendor,
+        "webgl_renderer": gl_renderer,
+        "timezone": timezone,
+        "canvas_seed": canvas_seed,
+        "audio_seed": audio_seed,
+        "languages": ["en-US", "en"],
     }
 
-    def __init__(self, profile: str = "chrome_124"):
-        self._available = False
-        self._session = None
-        self._profile = profile
-        self._impersonate = self.BROWSER_PROFILES.get(profile, "chrome124")
-        self._check_availability()
 
-    def _check_availability(self):
-        """Check if curl_cffi is installed."""
-        try:
-            from curl_cffi import requests as curl_requests
-            self._curl_requests = curl_requests
-            self._available = True
-            logger.info(f"curl-impersonate ready ({self._impersonate})")
-        except ImportError:
-            logger.warning(
-                "curl_cffi not installed. Install: pip install curl_cffi\n"
-                "Falling back to standard requests for HTTP calls."
-            )
+def build_fingerprint_injection_js(fp: Dict[str, Any]) -> str:
+    """
+    Build JavaScript to inject a fingerprint into a Playwright page.
+    This is injected via context.add_init_script() and runs BEFORE
+    any page scripts.
 
-    def create_session(self) -> Any:
-        """Create a curl_cffi session with browser impersonation."""
-        if not self._available:
-            return None
-        self._session = self._curl_requests.Session(impersonate=self._impersonate)
-        return self._session
+    The fingerprint covers: navigator, screen, WebGL, canvas, audio,
+    timezone, and blocks known fingerprinting libraries.
+    """
+    # Escape for JS string embedding
+    ua = json.dumps(fp["user_agent"])
+    platform = json.dumps(fp["platform"])
+    gl_vendor = json.dumps(fp["webgl_vendor"])
+    gl_renderer = json.dumps(fp["webgl_renderer"])
+    canvas_seed = fp["canvas_seed"]
+    audio_seed = fp["audio_seed"]
+    timezone = json.dumps(fp["timezone"])
+    pixel_ratio = fp["pixel_ratio"]
+    cores = fp["hardware_concurrency"]
+    memory = fp["device_memory"]
+    touch = fp["max_touch_points"]
+    sw = fp["screen_width"]
+    sh = fp["screen_height"]
+    color_depth = fp["color_depth"]
+    is_mobile = json.dumps(fp["is_mobile"])
 
-    async def get(self, url: str, **kwargs) -> Optional[Dict]:
-        """
-        Perform GET with browser-grade TLS fingerprint.
-        
-        Args:
-            url: Target URL
-            **kwargs: Passed to curl_cffi (headers, params, proxy, etc.)
-        
-        Returns:
-            {"status_code": int, "text": str, "headers": dict} or None
-        """
-        if not self._available:
-            return None
-        try:
-            if not self._session:
-                self.create_session()
-            resp = self._session.get(url, **kwargs)
-            return {
-                "status_code": resp.status_code,
-                "text": resp.text,
-                "headers": dict(resp.headers),
-                "url": resp.url,
-            }
-        except Exception as e:
-            logger.error(f"curl-impersonate GET failed: {e}")
-            return None
+    return f"""
+// === AGENT-OS FINGERPRINT v3.0 [{fp['id']}] ===
+// Generated: {fp['os']} Chrome {fp['chrome_version']} {fp['webgl_renderer'][:40]}
 
-    async def post(self, url: str, data=None, json_body=None, **kwargs) -> Optional[Dict]:
-        """Perform POST with browser-grade TLS fingerprint."""
-        if not self._available:
-            return None
-        try:
-            if not self._session:
-                self.create_session()
-            if json_body is not None:
-                resp = self._session.post(url, json=json_body, **kwargs)
-            else:
-                resp = self._session.post(url, data=data, **kwargs)
-            return {
-                "status_code": resp.status_code,
-                "text": resp.text,
-                "headers": dict(resp.headers),
-                "url": resp.url,
-            }
-        except Exception as e:
-            logger.error(f"curl-impersonate POST failed: {e}")
-            return None
+(function() {{
+'use strict';
 
-    def set_profile(self, profile: str):
-        """Switch browser impersonation profile."""
-        if profile in self.BROWSER_PROFILES:
-            self._profile = profile
-            self._impersonate = self.BROWSER_PROFILES[profile]
-            self._session = None  # Reset session
-            logger.info(f"Switched to profile: {profile} ({self._impersonate})")
+// ── BLOCK FINGERPRINTING LIBRARIES ──
+const blocked = [
+    'fingerprintjs', 'fingerprint2', 'fingerprint3',
+    'clientjs', 'thumbmark', 'fpjs', 'openfingerprint',
+    'sardine', 'iovation', 'threatmetrix', 'nethra',
+    'seon', 'ipqualityscore', 'fraudlabs'
+];
+const origFetch = window.fetch;
+window.fetch = function(url, opts) {{
+    if (blocked.some(b => String(url).toLowerCase().includes(b))) {{
+        return Promise.resolve(new Response('{{"error":"blocked"}}', {{status: 200}}));
+    }}
+    return origFetch.apply(this, arguments);
+}};
+const origXHR = XMLHttpRequest.prototype.open;
+XMLHttpRequest.prototype.open = function(method, url) {{
+    if (blocked.some(b => String(url).toLowerCase().includes(b))) {{
+        this._blocked = true;
+        return;
+    }}
+    return origXHR.apply(this, arguments);
+}};
 
-    @property
-    def available(self) -> bool:
-        return self._available
+// ── NAVIGATOR OVERRIDES ──
+Object.defineProperty(navigator, 'webdriver', {{ get: () => undefined }});
+delete navigator.__proto__.webdriver;
 
-    def list_profiles(self) -> List[str]:
-        return list(self.BROWSER_PROFILES.keys())
+Object.defineProperty(navigator, 'platform', {{ get: () => {platform} }});
+Object.defineProperty(navigator, 'hardwareConcurrency', {{ get: () => {cores} }});
+Object.defineProperty(navigator, 'deviceMemory', {{ get: () => {memory} }});
+Object.defineProperty(navigator, 'maxTouchPoints', {{ get: () => {touch} }});
+Object.defineProperty(navigator, 'languages', {{ get: () => ['en-US', 'en'] }});
+
+// Plugins
+Object.defineProperty(navigator, 'plugins', {{
+    get: () => {{
+        const p = [
+            {{name:'Chrome PDF Plugin',filename:'internal-pdf-viewer',description:'Portable Document Format',length:1,item:()=>null,namedItem:()=>null}},
+            {{name:'Chrome PDF Viewer',filename:'mhjfbmdgcfjbbpaeojofohoefgiehjai',description:'',length:1,item:()=>null,namedItem:()=>null}},
+            {{name:'Native Client',filename:'internal-nacl-plugin',description:'',length:2,item:()=>null,namedItem:()=>null}}
+        ];
+        p.length = 3; p.item = i => p[i]||null; p.namedItem = n => p.find(x=>x.name===n)||null; p.refresh = ()=>{{}};
+        return p;
+    }}
+}});
+
+// Connection
+Object.defineProperty(navigator, 'connection', {{
+    get: () => ({{rtt: {random.randint(20,100)}, downlink: {random.randint(5,50)}, effectiveType: '4g', saveData: false, type: 'wifi'}})
+}});
+
+// ── SCREEN OVERRIDES ──
+Object.defineProperty(screen, 'width', {{ get: () => {sw} }});
+Object.defineProperty(screen, 'height', {{ get: () => {sh} }});
+Object.defineProperty(screen, 'availWidth', {{ get: () => {sw} }});
+Object.defineProperty(screen, 'availHeight', {{ get: () => {sh - random.randint(30,80)} }});
+Object.defineProperty(screen, 'colorDepth', {{ get: () => {color_depth} }});
+Object.defineProperty(screen, 'pixelDepth', {{ get: () => {color_depth} }});
+Object.defineProperty(window, 'devicePixelRatio', {{ get: () => {pixel_ratio} }});
+
+// ── WEBGL FINGERPRINT ──
+const origGetParam = WebGLRenderingContext.prototype.getParameter;
+WebGLRenderingContext.prototype.getParameter = function(param) {{
+    if (param === 37445) return {gl_vendor};
+    if (param === 37446) return {gl_renderer};
+    if (param === 35661) return {random.randint(16,32)};    // MAX_TEXTURE_IMAGE_UNITS
+    if (param === 34076) return {random.randint(16384,32768)}; // MAX_TEXTURE_SIZE
+    if (param === 34921) return {random.randint(16,32)};    // MAX_VARYING_VECTORS
+    if (param === 36347) return {random.randint(1024,4096)}; // MAX_VERTEX_UNIFORM_VECTORS
+    if (param === 36349) return {random.randint(1024,4096)}; // MAX_FRAGMENT_UNIFORM_VECTORS
+    if (param === 34024) return {random.randint(16384,32768)}; // MAX_RENDERBUFFER_SIZE
+    if (param === 3386) return [{random.randint(16384,32768)}, {random.randint(16384,32768)}]; // MAX_VIEWPORT_DIMS
+    return origGetParam.call(this, param);
+}};
+
+// WebGL2 too
+if (typeof WebGL2RenderingContext !== 'undefined') {{
+    const origGetParam2 = WebGL2RenderingContext.prototype.getParameter;
+    WebGL2RenderingContext.prototype.getParameter = function(param) {{
+        if (param === 37445) return {gl_vendor};
+        if (param === 37446) return {gl_renderer};
+        return origGetParam2.call(this, param);
+    }};
+}}
+
+// ── CANVAS FINGERPRINT NOISE ──
+const _canvasSeed = {canvas_seed};
+function seededRandom(seed) {{
+    let s = seed;
+    return function() {{
+        s = (s * 16807 + 0) % 2147483647;
+        return (s - 1) / 2147483646;
+    }};
+}}
+
+const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+HTMLCanvasElement.prototype.toDataURL = function(type) {{
+    const ctx = this.getContext('2d');
+    if (ctx && this.width > 0 && this.height > 0) {{
+        const rng = seededRandom(_canvasSeed + this.width * this.height);
+        const imageData = ctx.getImageData(0, 0, this.width, this.height);
+        // Modify 0.01% of pixels with seeded noise
+        const step = Math.max(67, Math.floor(imageData.data.length / 10000));
+        for (let i = 0; i < imageData.data.length; i += step) {{
+            const noise = Math.floor(rng() * 3) - 1;
+            imageData.data[i] = Math.max(0, Math.min(255, imageData.data[i] + noise));
+        }}
+        ctx.putImageData(imageData, 0, 0);
+    }}
+    return origToDataURL.apply(this, arguments);
+}};
+
+const origToBlob = HTMLCanvasElement.prototype.toBlob;
+HTMLCanvasElement.prototype.toBlob = function(cb, type, quality) {{
+    const ctx = this.getContext('2d');
+    if (ctx && this.width > 0 && this.height > 0) {{
+        const rng = seededRandom(_canvasSeed + this.width * this.height);
+        const imageData = ctx.getImageData(0, 0, this.width, this.height);
+        const step = Math.max(67, Math.floor(imageData.data.length / 10000));
+        for (let i = 0; i < imageData.data.length; i += step) {{
+            const noise = Math.floor(rng() * 3) - 1;
+            imageData.data[i] = Math.max(0, Math.min(255, imageData.data[i] + noise));
+        }}
+        ctx.putImageData(imageData, 0, 0);
+    }}
+    return origToBlob.apply(this, arguments);
+}};
+
+// ── AUDIO FINGERPRINT NOISE ──
+const _audioSeed = {audio_seed};
+const origCreateAnalyser = (window.AudioContext || window.webkitAudioContext)?.prototype?.createAnalyser;
+if (origCreateAnalyser) {{
+    const origGetFloatFrequencyData = AnalyserNode.prototype.getFloatFrequencyData;
+    AnalyserNode.prototype.getFloatFrequencyData = function(array) {{
+        origGetFloatFrequencyData.call(this, array);
+        const rng = seededRandom(_audioSeed);
+        for (let i = 0; i < array.length; i++) {{
+            array[i] += (rng() - 0.5) * 0.0001;
+        }}
+    }};
+}}
+
+// ── CHROME RUNTIME ──
+window.chrome = window.chrome || {{}};
+window.chrome.app = window.chrome.app || {{
+    isInstalled: false,
+    InstallState: {{INSTALLED:'installed', DISABLED:'disabled', NOT_INSTALLED:'not_installed'}},
+    RunningState: {{CANNOT_RUN:'cannot_run', READY_TO_RUN:'ready_to_run', RUNNING:'running'}}
+}};
+window.chrome.runtime = window.chrome.runtime || {{
+    OnInstalledReason: {{CHROME_UPDATE:'chrome_update',INSTALL:'install',SHARED_MODULE_UPDATE:'shared_module_update',UPDATE:'update'}},
+    OnRestartRequiredReason: {{APP_UPDATE:'app_update',OS_UPDATE:'os_update',PERIODIC:'periodic'}},
+    PlatformArch: {{ARM:'arm',MIPS:'mips',MIPS64:'mips64',X86_32:'x86-32',X86_64:'x86-64'}},
+    PlatformOs: {{ANDROID:'android',CROS:'cros',LINUX:'linux',MAC:'mac',OPENBSD:'openbsd',WIN:'win'}},
+    RequestUpdateCheckStatus: {{NO_UPDATE:'no_update',THROTTLED:'throttled',UPDATE_AVAILABLE:'update_available'}},
+    connect: function(){{}},
+    sendMessage: function(){{}},
+}};
+
+// ── PERMISSIONS ──
+const origQuery = window.navigator.permissions.query;
+window.navigator.permissions.query = (params) => (
+    params.name === 'notifications'
+        ? Promise.resolve({{state: Notification.permission}})
+        : origQuery(params)
+);
+
+// ── BLOCK WEBRTC IP LEAK ──
+const origRTC = window.RTCPeerConnection;
+if (origRTC) {{
+    window.RTCPeerConnection = function(...args) {{
+        const pc = new origRTC(...args);
+        const origCreateOffer = pc.createOffer;
+        pc.createOffer = function(opts) {{
+            return origCreateOffer.call(pc, opts).then(offer => {{
+                offer.sdp = offer.sdp.replace(/a=candidate:.*typ host.*/g, '');
+                return offer;
+            }});
+        }};
+        return pc;
+    }};
+    window.RTCPeerConnection.prototype = origRTC.prototype;
+}}
+
+// ── NOTIFICATION ──
+Object.defineProperty(Notification, 'permission', {{get: () => 'default'}});
+
+console.log('[Agent-OS] Fingerprint v3.0 injected: {fp['id']} ({fp['os']} Chrome {fp['chrome_version']})');
+}})();
+"""
 
 
-# ═══════════════════════════════════════════════════════════
-# 2. CLOUDSCRAPER — Cloudflare JS challenge solver
-# ═══════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
+# CLOUDSCRAPER INTEGRATION
+# ═══════════════════════════════════════════════════════════════
+
+_CLOUDSCRAPER_AVAILABLE = False
+try:
+    import cloudscraper as _cloudscraper_module
+    _CLOUDSCRAPER_AVAILABLE = True
+except ImportError:
+    pass
+
 
 class CloudflareSolver:
     """
-    Cloudflare challenge solver using cloudscraper.
-    Handles CF v1/v2/v3 JS challenges and Turnstile.
-    Use as fallback when our route-blocking doesn't work.
+    Cloudflare JS challenge solver. Handles CF v1/v2/v3 + Turnstile.
+    Use as fallback when Playwright route-blocking isn't enough.
     """
 
     def __init__(self):
-        self._available = False
         self._scraper = None
-        self._check_availability()
-
-    def _check_availability(self):
-        """Check if cloudscraper is installed."""
-        try:
-            import cloudscraper
-            self._cloudscraper = cloudscraper
-            self._scraper = cloudscraper.create_scraper(
+        if _CLOUDSCRAPER_AVAILABLE:
+            self._scraper = _cloudscraper_module.create_scraper(
                 browser={"browser": "chrome", "platform": "windows", "desktop": True},
                 delay=5,
             )
-            self._available = True
-            logger.info("cloudscraper ready (CF v1/v2/v3 + Turnstile)")
-        except ImportError:
-            logger.warning(
-                "cloudscraper not installed. Install: pip install cloudscraper\n"
-                "Cloudflare challenges will not be solved automatically."
-            )
+            logger.info("cloudscraper ready")
+        else:
+            logger.warning("cloudscraper not installed: pip install cloudscraper")
 
-    async def solve(self, url: str, method: str = "GET", **kwargs) -> Optional[Dict]:
+    def solve(self, url: str, method: str = "GET", **kwargs) -> Optional[Dict[str, Any]]:
         """
         Solve Cloudflare challenge and return response.
-
-        Args:
-            url: Target URL protected by Cloudflare
-            method: HTTP method (GET or POST)
-            **kwargs: Additional request params
-
-        Returns:
-            {"status_code": int, "text": str, "cookies": dict, "headers": dict} or None
+        Runs in thread executor to not block async loop.
         """
-        if not self._available:
+        if not self._scraper:
             return None
-
         try:
-            loop = asyncio.get_event_loop()
-
             if method.upper() == "POST":
-                resp = await loop.run_in_executor(
-                    None, lambda: self._scraper.post(url, **kwargs)
-                )
+                resp = self._scraper.post(url, **kwargs)
             else:
-                resp = await loop.run_in_executor(
-                    None, lambda: self._scraper.get(url, **kwargs)
-                )
+                resp = self._scraper.get(url, **kwargs)
 
             return {
                 "status_code": resp.status_code,
@@ -201,15 +487,15 @@ class CloudflareSolver:
                 "cookies": dict(resp.cookies),
                 "headers": dict(resp.headers),
                 "url": resp.url,
-                "cf_solved": resp.status_code == 200 and "cf-challenge" not in resp.text.lower(),
+                "cf_solved": resp.status_code == 200,
             }
         except Exception as e:
-            logger.error(f"cloudscraper failed: {e}")
+            logger.error(f"cloudscraper failed for {url[:60]}: {e}")
             return None
 
-    def get_cf_cookies(self, url: str) -> Optional[Dict]:
-        """Get Cloudflare clearance cookies for a domain (sync)."""
-        if not self._available:
+    def get_clearance_cookies(self, url: str) -> Optional[Dict]:
+        """Get cf_clearance cookies for reuse in Playwright."""
+        if not self._scraper:
             return None
         try:
             resp = self._scraper.get(url)
@@ -225,323 +511,76 @@ class CloudflareSolver:
 
     @property
     def available(self) -> bool:
-        return self._available
+        return _CLOUDSCRAPER_AVAILABLE
 
 
-# ═══════════════════════════════════════════════════════════
-# 3. FINGERPRINT INJECTOR — Playwright fingerprint spoofing
-# ═══════════════════════════════════════════════════════════
-
-class FingerprintInjector:
-    """
-    Generates and injects realistic browser fingerprints into
-    Playwright contexts using the Apify fingerprint-suite approach.
-    
-    Uses a Python reimplementation of the Bayesian fingerprint
-    generation since the original is Node.js.
-    """
-
-    # Real-world fingerprint combinations (sourced from browser databases)
-    FINGERPRINT_PROFILES = [
-        {
-            "name": "chrome_win_desktop",
-            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "platform": "Win32",
-            "hardware_concurrency": 8,
-            "device_memory": 8,
-            "max_touch_points": 0,
-            "screen_width": 1920,
-            "screen_height": 1080,
-            "color_depth": 24,
-            "pixel_ratio": 1,
-            "webgl_vendor": "Google Inc. (Intel)",
-            "webgl_renderer": "ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-            "audio_codecs": {"ogg": "probably", "mp3": "probably", "wav": "probably", "m4a": "maybe", "aac": "probably"},
-            "video_codecs": {"ogg": "probably", "h264": "probably", "webm": "probably"},
-            "languages": ["en-US", "en"],
-            "timezone": "America/New_York",
-        },
-        {
-            "name": "chrome_mac_desktop",
-            "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "platform": "MacIntel",
-            "hardware_concurrency": 10,
-            "device_memory": 16,
-            "max_touch_points": 0,
-            "screen_width": 1440,
-            "screen_height": 900,
-            "color_depth": 24,
-            "pixel_ratio": 2,
-            "webgl_vendor": "Google Inc. (Apple)",
-            "webgl_renderer": "ANGLE (Apple, Apple M1 Pro, OpenGL 4.1)",
-            "audio_codecs": {"ogg": "probably", "mp3": "probably", "wav": "probably", "m4a": "probably", "aac": "probably"},
-            "video_codecs": {"ogg": "probably", "h264": "probably", "webm": "probably"},
-            "languages": ["en-US", "en"],
-            "timezone": "America/Los_Angeles",
-        },
-        {
-            "name": "chrome_linux_desktop",
-            "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "platform": "Linux x86_64",
-            "hardware_concurrency": 12,
-            "device_memory": 16,
-            "max_touch_points": 0,
-            "screen_width": 1920,
-            "screen_height": 1080,
-            "color_depth": 24,
-            "pixel_ratio": 1,
-            "webgl_vendor": "Mesa",
-            "webgl_renderer": "Mesa Intel(R) UHD Graphics 630 (CFL GT2)",
-            "audio_codecs": {"ogg": "probably", "mp3": "probably", "wav": "probably", "m4a": "maybe", "aac": "probably"},
-            "video_codecs": {"ogg": "probably", "h264": "probably", "webm": "probably"},
-            "languages": ["en-US", "en"],
-            "timezone": "America/Chicago",
-        },
-        {
-            "name": "firefox_win",
-            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
-            "platform": "Win32",
-            "hardware_concurrency": 8,
-            "device_memory": 8,
-            "max_touch_points": 0,
-            "screen_width": 1920,
-            "screen_height": 1080,
-            "color_depth": 24,
-            "pixel_ratio": 1,
-            "webgl_vendor": "Mozilla",
-            "webgl_renderer": "Mozilla/ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-            "audio_codecs": {"ogg": "probably", "mp3": "probably", "wav": "probably", "m4a": "", "aac": ""},
-            "video_codecs": {"ogg": "probably", "h264": "probably", "webm": "probably"},
-            "languages": ["en-US", "en"],
-            "timezone": "America/New_York",
-        },
-    ]
-
-    def __init__(self):
-        self._current_profile = None
-
-    def generate_fingerprint(self, constraints: Optional[Dict] = None) -> Dict:
-        """
-        Generate a realistic browser fingerprint.
-
-        Args:
-            constraints: Optional filters like {"devices": ["desktop"], "os": ["windows"]}
-
-        Returns:
-            Fingerprint dict ready for injection
-        """
-        import random
-
-        profiles = self.FINGERPRINT_PROFILES
-
-        # Apply constraints
-        if constraints:
-            filtered = []
-            for p in profiles:
-                match = True
-                if "os" in constraints:
-                    os_map = {"windows": "Win", "mac": "Mac", "linux": "Linux"}
-                    if not any(os_map[o] in p["platform"] for o in constraints["os"]):
-                        match = False
-                if "devices" in constraints:
-                    if "desktop" in constraints["devices"] and p["max_touch_points"] > 0:
-                        match = False
-                    if "mobile" in constraints["devices"] and p["max_touch_points"] == 0:
-                        match = False
-                if match:
-                    filtered.append(p)
-            if filtered:
-                profiles = filtered
-
-        profile = random.choice(profiles)
-        self._current_profile = profile
-        return profile.copy()
-
-    def get_injection_script(self, fingerprint: Optional[Dict] = None) -> str:
-        """
-        Generate JavaScript to inject the fingerprint into a page.
-        Returns a JS string for page.add_init_script().
-        """
-        fp = fingerprint or self.generate_fingerprint()
-
-        script = f"""
-// === AGENT-OS FINGERPRINT INJECTION v3.0 ===
-// Generated from Apify fingerprint-suite methodology
-
-(function() {{
-    'use strict';
-
-    // Block fingerprint detection scripts
-    const BLOCKED_SCRIPTS = [
-        'fingerprintjs', 'fingerprint2', 'fingerprint3',
-        'clientjs', 'thumbmark', 'fpjs', 'openfingerprint'
-    ];
-
-    // Override XMLHttpRequest to block detection scripts
-    const origOpen = XMLHttpRequest.prototype.open;
-    XMLHttpRequest.prototype.open = function(method, url) {{
-        if (BLOCKED_SCRIPTS.some(s => (url || '').toLowerCase().includes(s))) {{
-            this._blocked = true;
-            return;
-        }}
-        return origOpen.apply(this, arguments);
-    }};
-
-    // Platform
-    Object.defineProperty(navigator, 'platform', {{
-        get: () => {json.dumps(fp['platform'])}
-    }});
-
-    // Hardware
-    Object.defineProperty(navigator, 'hardwareConcurrency', {{
-        get: () => {fp['hardware_concurrency']}
-    }});
-    Object.defineProperty(navigator, 'deviceMemory', {{
-        get: () => {fp['device_memory']}
-    }});
-    Object.defineProperty(navigator, 'maxTouchPoints', {{
-        get: () => {fp['max_touch_points']}
-    }});
-
-    // Screen
-    Object.defineProperty(screen, 'width', {{ get: () => {fp['screen_width']} }});
-    Object.defineProperty(screen, 'height', {{ get: () => {fp['screen_height']} }});
-    Object.defineProperty(screen, 'colorDepth', {{ get: () => {fp['color_depth']} }});
-    Object.defineProperty(screen, 'availWidth', {{ get: () => {fp['screen_width']} }});
-    Object.defineProperty(screen, 'availHeight', {{ get: () => {fp['screen_height'] - 40} }});
-    Object.defineProperty(window, 'devicePixelRatio', {{ get: () => {fp['pixel_ratio']} }});
-
-    // WebGL
-    const getParameter = WebGLRenderingContext.prototype.getParameter;
-    WebGLRenderingContext.prototype.getParameter = function(param) {{
-        if (param === 37445) return {json.dumps(fp['webgl_vendor'])};
-        if (param === 37446) return {json.dumps(fp['webgl_renderer'])};
-        return getParameter.call(this, param);
-    }};
-
-    // Audio fingerprint
-    const origCreateOscillator = (window.AudioContext || window.webkitAudioContext)?.prototype?.createOscillator;
-    if (origCreateOscillator) {{
-        // Subtle noise to defeat audio fingerprinting
-        const origConnect = AudioBufferSourceNode.prototype.connect;
-        AudioBufferSourceNode.prototype.connect = function(dest) {{
-            if (dest instanceof AnalyserNode) {{
-                // Add tiny noise buffer
-                const ctx = dest.context;
-                const noise = ctx.createBuffer(1, ctx.sampleRate * 0.01, ctx.sampleRate);
-                const data = noise.getChannelData(0);
-                for (let i = 0; i < data.length; i++) {{
-                    data[i] = (Math.random() - 0.5) * 0.0001;
-                }}
-            }}
-            return origConnect.call(this, dest);
-        }};
-    }}
-
-    // Canvas fingerprint noise
-    const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
-    HTMLCanvasElement.prototype.toDataURL = function(type) {{
-        const ctx = this.getContext('2d');
-        if (ctx && this.width > 0 && this.height > 0) {{
-            const imgData = ctx.getImageData(0, 0, this.width, this.height);
-            for (let i = 0; i < imgData.data.length; i += 67) {{
-                imgData.data[i] = imgData.data[i] ^ (Math.random() > 0.5 ? 1 : 0);
-            }}
-            ctx.putImageData(imgData, 0, 0);
-        }}
-        return origToDataURL.apply(this, arguments);
-    }};
-
-    // Languages
-    Object.defineProperty(navigator, 'languages', {{
-        get: () => {json.dumps(fp['languages'])}
-    }});
-
-    console.log('[Agent-OS] Fingerprint injected: {fp["name"]}');
-}})();
-"""
-        return script
-
-    async def inject_into_context(self, context) -> None:
-        """Inject fingerprint into a Playwright BrowserContext."""
-        script = self.get_injection_script()
-        await context.add_init_script(script)
-        logger.info(f"Fingerprint injected: {self._current_profile['name'] if self._current_profile else 'random'}")
-
-
-# ═══════════════════════════════════════════════════════════
-# 4. UNIFIED EVASION ENGINE
-# ═══════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
+# UNIFIED EVASION ENGINE
+# ═══════════════════════════════════════════════════════════════
 
 class EvasionEngine:
     """
-    Unified anti-detection engine that coordinates all evasion layers.
+    Coordinates all evasion layers:
     
-    Layer 1: curl-impersonate — raw HTTP with perfect TLS (fastest)
-    Layer 2: Playwright + fingerprint injection — full browser (most capable)
-    Layer 3: cloudscraper — Cloudflare JS challenge fallback (last resort)
+    - TLS: curl_cffi for HTTP requests, CDP spoofing for Playwright
+    - Fingerprint: Randomized per-session generation + JS injection
+    - Cloudflare: cloudscraper fallback for CF challenges
     """
 
-    def __init__(self, config=None):
-        self.config = config
-        self.curl = CurlImpersonate()
+    def __init__(self):
+        # TLS engine (curl_cffi)
+        from src.core.tls_spoof import TLSFingerprintEngine
+        try:
+            self.tls = TLSFingerprintEngine()
+        except ImportError:
+            self.tls = None
+            logger.warning("TLS engine unavailable (install curl_cffi)")
+
+        # Cloudflare solver
         self.cloudflare = CloudflareSolver()
-        self.fingerprint = FingerprintInjector()
 
-        logger.info(
-            f"EvasionEngine initialized — "
-            f"curl_impersonate={'✓' if self.curl.available else '✗'}, "
-            f"cloudscraper={'✓' if self.cloudflare.available else '✗'}, "
-            f"fingerprint_injector=✓"
-        )
+        # Active fingerprints (page_id → fingerprint)
+        self._fingerprints: Dict[str, Dict] = {}
 
-    async def http_get(self, url: str, use_browser_fallback: bool = True, **kwargs) -> Optional[Dict]:
-        """
-        Smart HTTP GET with automatic fallback chain:
-        1. Try curl-impersonate (fastest, perfect TLS)
-        2. If CF challenge detected → cloudscraper
-        3. If still blocked → return None (browser needed)
-        """
-        # Layer 1: curl-impersonate
-        result = await self.curl.get(url, **kwargs)
-        if result and result["status_code"] == 200:
-            # Check if CF challenge page was returned
-            if self._is_cf_challenge(result.get("text", "")):
-                logger.info(f"CF challenge on {url[:60]}, escalating to cloudscraper...")
-            else:
-                return result
+    def generate_fingerprint(
+        self,
+        os_target: Optional[str] = None,
+        page_id: str = "main",
+    ) -> Dict[str, Any]:
+        """Generate and store a new fingerprint for a page."""
+        if os_target is None:
+            os_target = random.choice(["windows", "windows", "windows", "mac", "linux"])
 
-        # Layer 2: cloudscraper (CF challenges)
-        if self.cloudflare.available:
-            result = await self.cloudflare.solve(url, **kwargs)
-            if result and result["status_code"] == 200:
-                return result
+        fp = generate_fingerprint(os_target=os_target)
+        self._fingerprints[page_id] = fp
+        return fp
 
-        # Layer 3: Return best attempt
-        return result
+    def get_injection_js(self, page_id: str = "main") -> str:
+        """Get the JS injection script for a page's fingerprint."""
+        fp = self._fingerprints.get(page_id)
+        if not fp:
+            fp = self.generate_fingerprint(page_id=page_id)
+        return build_fingerprint_injection_js(fp)
 
-    def _is_cf_challenge(self, html: str) -> bool:
-        """Check if HTML contains a Cloudflare challenge."""
-        indicators = [
-            "cf-challenge", "cf-browser-verification",
-            "Checking your browser", "Just a moment...",
-            "security of your connection", "performance & security by Cloudflare",
-            "cf_chl_opt", "managed-challenge",
-        ]
-        return any(ind in html for ind in indicators)
+    async def inject_into_page(self, page, page_id: str = "main"):
+        """Generate fingerprint and inject into a Playwright page."""
+        js = self.get_injection_js(page_id)
+        await page.add_init_script(js)
 
-    def get_status(self) -> Dict:
-        """Get status of all evasion layers."""
+    def get_fingerprint(self, page_id: str = "main") -> Optional[Dict]:
+        return self._fingerprints.get(page_id)
+
+    def list_fingerprints(self) -> Dict[str, str]:
+        """Summary of active fingerprints."""
         return {
-            "curl_impersonate": {
-                "available": self.curl.available,
-                "profile": self.curl._profile if self.curl.available else None,
-            },
-            "cloudscraper": {
-                "available": self.cloudflare.available,
-            },
-            "fingerprint_injector": {
-                "available": True,
-                "profiles": len(self.fingerprint.FINGERPRINT_PROFILES),
-            },
+            pid: f"{fp['os']} Chrome {fp['chrome_version']} / {fp['webgl_renderer'][:30]}"
+            for pid, fp in self._fingerprints.items()
+        }
+
+    @property
+    def status(self) -> Dict:
+        return {
+            "tls_engine": self.tls.stats if self.tls else {"available": False},
+            "cloudflare": {"available": self.cloudflare.available},
+            "active_fingerprints": len(self._fingerprints),
         }

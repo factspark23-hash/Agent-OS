@@ -19,8 +19,8 @@ from src.core.stealth import (
     ANTI_DETECTION_JS,
     handle_request_interception,
 )
-from src.core.tls_spoof import apply_tls_spoofing
-from src.security.evasion_engine import FingerprintInjector
+from src.core.tls_spoof import apply_browser_tls_spoofing
+from src.security.evasion_engine import EvasionEngine
 from src.security.human_mimicry import HumanMimicry
 
 logger = logging.getLogger("agent-os.browser")
@@ -69,8 +69,10 @@ class AgentBrowser:
         self._proxy_pool: List[Dict[str, Any]] = []
         self._proxy_index: int = 0
         self._proxy_rotation_enabled: bool = False
-        # Fingerprint injector (replaces basic stealth)
-        self._fingerprint_injector = FingerprintInjector()
+        self._proxy_request_count: int = 0
+        self._proxy_rotation_interval: int = 10
+        # Evasion engine (TLS + fingerprint + cloudflare)
+        self._evasion = EvasionEngine()
         # Import at class level to avoid repeated imports
         self._mimicry = HumanMimicry()
 
@@ -158,11 +160,11 @@ class AgentBrowser:
 
         self.context = await self.browser.new_context(**context_options)
 
-        # Inject stealth script on every page (base layer)
+        # Inject stealth script on every page (base layer — removes webdriver, etc.)
         await self.context.add_init_script(ANTI_DETECTION_JS)
 
-        # Inject realistic fingerprint (Apify fingerprint-suite approach)
-        await self._fingerprint_injector.inject_into_context(self.context)
+        # Generate and inject a randomized fingerprint (real-world distributions)
+        await self._evasion.inject_into_page(self.page, page_id="main")
 
         # Set up request interception for bot detection blocking
         await self.context.route("**/*", self._handle_request)
@@ -171,7 +173,9 @@ class AgentBrowser:
         self.context.on("download", self._handle_download)
 
         # Apply TLS fingerprint spoofing via CDP
-        await apply_tls_spoofing(self.page)
+        fp = self._evasion.get_fingerprint("main")
+        chrome_ver = fp["chrome_version"] if fp else "124"
+        await apply_browser_tls_spoofing(self.page, chrome_version=chrome_ver)
 
         self.page = await self.context.new_page()
         self._pages["main"] = self.page
@@ -1017,10 +1021,12 @@ class AgentBrowser:
         return images
 
     async def new_tab(self, tab_id: str) -> str:
-        """Create a new tab."""
+        """Create a new tab with its own fingerprint."""
         page = await self.context.new_page()
         self._pages[tab_id] = page
         self._attach_console_listener(tab_id, page)
+        # Each tab gets a fresh fingerprint
+        await self._evasion.inject_into_page(page, page_id=tab_id)
         return tab_id
 
     async def switch_tab(self, tab_id: str) -> Dict[str, Any]:
@@ -1086,7 +1092,7 @@ class AgentBrowser:
 
     async def set_proxy_pool(self, proxy_urls: List[str], rotation_interval: int = 10) -> Dict[str, Any]:
         """
-        Set a pool of proxies for automatic rotation. Rotates every N requests.
+        Set a pool of proxies for automatic rotation.
 
         Args:
             proxy_urls: List of proxy URLs
@@ -1105,20 +1111,24 @@ class AgentBrowser:
         self._proxy_rotation_interval = rotation_interval
         self._proxy_request_count = 0
 
-        logger.info(f"Proxy pool configured: {len(self._proxy_pool)} proxies, rotating every {rotation_interval} requests")
+        logger.info(
+            f"Proxy pool configured: {len(self._proxy_pool)} proxies, "
+            f"rotating every {rotation_interval} requests"
+        )
 
         return {
             "status": "success",
             "pool_size": len(self._proxy_pool),
             "rotation_interval": rotation_interval,
             "proxies": [p.get("server", "N/A") for p in self._proxy_pool],
-            "note": "Proxy rotation requires browser restart. Use restart command.",
+            "current_index": 0,
         }
 
     async def rotate_proxy(self) -> Dict[str, Any]:
         """
-        Manually rotate to the next proxy in the pool.
-        Restarts the browser with the new proxy.
+        Rotate to the next proxy in the pool.
+        Saves cookies, closes browser, relaunches with new proxy.
+        This is the only way to change proxy in Chromium — it's set at launch.
 
         Returns:
             Status and new proxy info
@@ -1126,16 +1136,22 @@ class AgentBrowser:
         if not self._proxy_pool:
             return {"status": "error", "error": "No proxy pool configured. Use set_proxy_pool first."}
 
+        old_index = self._proxy_index
         self._proxy_index = (self._proxy_index + 1) % len(self._proxy_pool)
-        self._proxy_config = self._proxy_pool[self._proxy_index]
+        new_proxy = self._proxy_pool[self._proxy_index]
 
-        # Save cookies before restart
+        # Save all page URLs and cookies before restart
+        saved_urls = {}
+        for pid, page in self._pages.items():
+            if page.url and page.url != "about:blank":
+                saved_urls[pid] = page.url
+
         try:
             await self._save_cookies("default")
         except Exception:
             pass
 
-        # Close and relaunch with new proxy
+        # Close everything
         try:
             if self.context:
                 await self.context.close()
@@ -1146,21 +1162,41 @@ class AgentBrowser:
         except Exception:
             pass
 
+        # Clear state
         self.browser = None
         self.context = None
         self.page = None
         self._pages.clear()
 
+        # Apply new proxy config
+        self._proxy_config = new_proxy
+
+        # Relaunch
         await self._launch_browser()
 
-        current = self._proxy_pool[self._proxy_index]
-        logger.info(f"Rotated to proxy {self._proxy_index + 1}/{len(self._proxy_pool)}: {current.get('server', 'N/A')}")
+        # Re-navigate saved pages to restore state
+        for pid, url in saved_urls.items():
+            try:
+                if pid == "main":
+                    await self.page.goto(url, wait_until="domcontentloaded", timeout=15000)
+                else:
+                    tab = await self.new_tab(pid)
+                    if tab:
+                        await self._pages[pid].goto(url, wait_until="domcontentloaded", timeout=15000)
+            except Exception as e:
+                logger.warning(f"Failed to restore page {pid}: {e}")
+
+        logger.info(
+            f"Proxy rotated: {old_index} → {self._proxy_index} "
+            f"({new_proxy.get('server', 'N/A')})"
+        )
 
         return {
             "status": "success",
             "proxy_index": self._proxy_index,
-            "proxy": current,
+            "proxy": new_proxy,
             "total_proxies": len(self._proxy_pool),
+            "pages_restored": list(saved_urls.keys()),
         }
 
     async def get_proxy_pool(self) -> Dict[str, Any]:
@@ -1173,23 +1209,28 @@ class AgentBrowser:
             "pool_size": len(self._proxy_pool),
             "current_index": self._proxy_index,
             "rotation_enabled": self._proxy_rotation_enabled,
+            "rotation_interval": self._proxy_rotation_interval,
+            "request_count": self._proxy_request_count,
             "proxies": [p.get("server", "N/A") for p in self._proxy_pool],
+            "current_proxy": self._proxy_pool[self._proxy_index].get("server", "N/A"),
         }
 
     async def _maybe_rotate_proxy(self):
-        """Auto-rotate proxy if pool is configured and threshold is reached."""
+        """Auto-rotate proxy if pool is configured and interval reached."""
         if not self._proxy_rotation_enabled or not self._proxy_pool:
             return
 
-        self._proxy_request_count = getattr(self, "_proxy_request_count", 0) + 1
-        interval = getattr(self, "_proxy_rotation_interval", 10)
+        self._proxy_request_count += 1
 
-        if self._proxy_request_count >= interval:
+        if self._proxy_request_count >= self._proxy_rotation_interval:
             self._proxy_request_count = 0
             try:
                 result = await self.rotate_proxy()
                 if result.get("status") == "success":
-                    logger.info(f"Auto-rotated proxy to index {self._proxy_index}")
+                    logger.info(
+                        f"Auto-rotated proxy to #{self._proxy_index}: "
+                        f"{self._proxy_pool[self._proxy_index].get('server', 'N/A')}"
+                    )
             except Exception as e:
                 logger.warning(f"Proxy auto-rotation failed: {e}")
 
