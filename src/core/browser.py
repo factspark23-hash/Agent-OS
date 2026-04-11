@@ -28,6 +28,8 @@ from src.tools.proxy_rotation import ProxyManager, ProxyInfo
 from src.security.evasion_engine import EvasionEngine
 from src.security.human_mimicry import HumanMimicry
 from src.security.captcha_solver import CaptchaSolver
+from src.security.cloudflare_bypass import CloudflareBypassEngine, CloudflareChallengeType
+from src.core.firefox_engine import FirefoxEngine, DualEngineManager
 
 logger = logging.getLogger("agent-os.browser")
 
@@ -103,6 +105,13 @@ class AgentBrowser:
         self._domain_proxy_map: Dict[str, str] = {}
         # Request tracking for proxy result recording
         self._request_proxy_map: Dict[str, str] = {}
+        # Enhanced Cloudflare bypass engine (v1/v2/v3 + Turnstile)
+        self._cf_bypass = CloudflareBypassEngine(config)
+        # Firefox fallback engine (for Chromium-detected sites)
+        self._firefox_engine: Optional[FirefoxEngine] = None
+        self._firefox_enabled = self.config.get("browser.firefox_fallback", True)
+        # Dual engine manager
+        self._dual_engine: Optional[DualEngineManager] = None
 
     def _get_or_create_cookie_key(self) -> bytes:
         """Get or create encryption key for cookie storage."""
@@ -276,6 +285,19 @@ class AgentBrowser:
 
         # Apply TLS fingerprint spoofing via CDP (needs an existing page)
         await apply_browser_tls_spoofing(self.page, chrome_version=chrome_ver)
+
+        # Initialize Firefox fallback engine if enabled
+        if self._firefox_enabled:
+            try:
+                self._firefox_engine = FirefoxEngine(self.config)
+                await self._firefox_engine.start()
+                self._dual_engine = DualEngineManager(self.config, chromium_engine=self)
+                self._dual_engine.firefox = self._firefox_engine
+                self._dual_engine._started = True
+                logger.info("Firefox fallback engine initialized")
+            except Exception as e:
+                logger.warning(f"Firefox engine failed to start: {e}")
+                self._firefox_engine = None
 
     async def recover(self):
         """Recover from browser crash by relaunching."""
@@ -468,47 +490,69 @@ class AgentBrowser:
 
     async def _try_cloudflare_bypass(self, url: str, page: Page) -> bool:
         """
-        Attempt Cloudflare bypass using cloudscraper.
-        Gets cf_clearance cookies and applies them to the Playwright context.
+        Attempt Cloudflare bypass using enhanced bypass engine.
+        Handles JS challenge, Turnstile, and Managed Challenge.
         """
-        if not self._evasion.cloudflare.available:
+        try:
+            detection = await self._cf_bypass.detect(page)
+            if detection.challenge_type == CloudflareChallengeType.NO_CHALLENGE:
+                return False
+
+            logger.info(f"CF challenge detected: {detection.challenge_type.value}")
+            result = await self._cf_bypass.solve(page, detection)
+
+            if result.get("status") == "success":
+                logger.info(f"CF challenge solved: {result.get('method')} in {result.get('time')}s")
+                return True
+
+            # Fallback to legacy cloudscraper
+            if self._evasion.cloudflare.available:
+                logger.info("Falling back to legacy cloudscraper...")
+                loop = asyncio.get_event_loop()
+                cf_data = await loop.run_in_executor(
+                    None, self._evasion.cloudflare.get_clearance_cookies, url
+                )
+                if cf_data and cf_data.get("cf_clearance"):
+                    from urllib.parse import urlparse
+                    parsed = urlparse(url)
+                    domain = parsed.hostname
+                    cookies = cf_data.get("cookies", {})
+                    cookie_list = []
+                    for name, value in cookies.items():
+                        cookie_list.append({
+                            "name": name, "value": value,
+                            "domain": domain, "path": "/",
+                        })
+                    if cookie_list:
+                        await self.context.add_cookies(cookie_list)
+                        logger.info(f"Applied {len(cookie_list)} CF cookies via legacy method")
+                        return True
+
             return False
 
-        logger.info(f"Attempting Cloudflare bypass for {url[:60]}...")
-        loop = asyncio.get_event_loop()
-        cf_data = await loop.run_in_executor(
-            None, self._evasion.cloudflare.get_clearance_cookies, url
-        )
-
-        if not cf_data or not cf_data.get("cf_clearance"):
-            logger.warning("Cloudflare bypass failed — no clearance cookie")
+        except Exception as e:
+            logger.error(f"CF bypass error: {e}")
             return False
 
-        # Apply cookies to the Playwright context
-        cookies = cf_data.get("cookies", {})
-        cookie_list = []
-        from urllib.parse import urlparse
-        parsed = urlparse(url)
-        domain = parsed.hostname
+    async def _try_firefox_fallback(self, url: str) -> Optional[Dict[str, Any]]:
+        """
+        Try navigating with Firefox engine when Chromium is blocked.
+        """
+        if not self._firefox_engine:
+            return None
 
-        for name, value in cookies.items():
-            cookie_list.append({
-                "name": name,
-                "value": value,
-                "domain": domain,
-                "path": "/",
-            })
+        logger.info(f"Trying Firefox fallback for {url[:60]}...")
+        try:
+            result = await self._firefox_engine.navigate(url, retries=2)
+            if result.get("status") == "success":
+                logger.info(f"Firefox succeeded where Chromium failed!")
+                result["fallback_engine"] = "firefox"
+                result["original_engine"] = "chromium"
+                return result
+        except Exception as e:
+            logger.error(f"Firefox fallback failed: {e}")
 
-        if cookie_list:
-            await self.context.add_cookies(cookie_list)
-            logger.info(f"Applied {len(cookie_list)} Cloudflare cookies")
-
-        # Update user agent if cloudscraper returned one
-        cf_ua = cf_data.get("user_agent")
-        if cf_ua:
-            logger.info(f"Cloudscraper UA: {cf_ua[:60]}...")
-
-        return True
+        return None
 
     async def navigate(self, url: str, page_id: str = "main", wait_until: str = "domcontentloaded",
                        retries: int = 3, country: str = None) -> Dict[str, Any]:
@@ -644,6 +688,31 @@ class AgentBrowser:
                     continue
 
         return {"status": "error", "error": last_error or "All retries exhausted"}
+
+    async def navigate_with_fallback(self, url: str, page_id: str = "main",
+                                      retries: int = 3, country: str = None) -> Dict[str, Any]:
+        """
+        Navigate with automatic Chromium → Firefox fallback.
+        If Chromium gets blocked, automatically tries Firefox.
+        """
+        # Try Chromium first
+        result = await self.navigate(url, page_id=page_id, retries=retries, country=country)
+
+        if result.get("status") == "success":
+            result["engine_used"] = "chromium"
+            return result
+
+        # Chromium failed — try Firefox fallback
+        status_code = result.get("status_code", 0)
+        if status_code in (403, 406, 429) or result.get("status") == "error":
+            firefox_result = await self._try_firefox_fallback(url)
+            if firefox_result:
+                firefox_result["engine_used"] = "firefox"
+                firefox_result["chromium_status"] = result.get("status")
+                firefox_result["chromium_status_code"] = status_code
+                return firefox_result
+
+        return result
 
     async def get_content(self, page_id: str = "main") -> Dict[str, Any]:
         """Get current page content."""
@@ -1952,7 +2021,10 @@ class AgentBrowser:
         # Stop proxy manager
         if self._proxy_manager:
             await self._proxy_manager.stop()
-        logger.info("Browser stopped")
+        # Stop Firefox fallback engine
+        if self._firefox_engine:
+            await self._firefox_engine.stop()
+        logger.info("Browser stopped (all engines)")
 
     async def tls_get(self, url: str, **kwargs) -> Dict[str, Any]:
         """HTTP GET with real browser TLS fingerprint (no browser needed)."""
