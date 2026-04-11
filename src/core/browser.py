@@ -21,6 +21,7 @@ from src.core.stealth import (
 )
 from src.core.tls_spoof import apply_browser_tls_spoofing
 from src.core.tls_proxy import TLSProxyServer, TLSHTTPClient, _CURL_AVAILABLE
+from src.core.cdp_stealth import CDPStealthInjector
 from src.security.evasion_engine import EvasionEngine
 from src.security.human_mimicry import HumanMimicry
 
@@ -74,6 +75,8 @@ class AgentBrowser:
         self._proxy_rotation_interval: int = 10
         # Evasion engine (TLS + fingerprint + cloudflare)
         self._evasion = EvasionEngine()
+        # CDP Stealth Injector — THE REAL FIX for navigator.webdriver detection
+        self._cdp_stealth = CDPStealthInjector()
         # Import at class level to avoid repeated imports
         self._mimicry = HumanMimicry()
         # TLS proxy for real browser fingerprint
@@ -200,7 +203,7 @@ class AgentBrowser:
         chrome_ver = fp["chrome_version"] if fp else "124"
 
         # Inject stealth + fingerprint as a SINGLE context-level init script
-        # This runs on EVERY page created from this context, before any page JS
+        # This is the BACKUP layer — CDP stealth is the primary
         fingerprint_js = self._evasion.get_injection_js("main")
         await self.context.add_init_script(ANTI_DETECTION_JS + "\n" + fingerprint_js)
 
@@ -214,6 +217,19 @@ class AgentBrowser:
         self.page = await self.context.new_page()
         self._pages["main"] = self.page
         self._attach_console_listener("main", self.page)
+
+        # ═══════════════════════════════════════════════════════════
+        # CDP STEALTH — The REAL fix for navigator.webdriver detection
+        # Uses Page.addScriptToEvaluateOnNewDocument which runs BEFORE
+        # any page JavaScript, including bot detection scripts.
+        # This is fundamentally better than context.add_init_script().
+        # ═══════════════════════════════════════════════════════════
+        await self._cdp_stealth.inject_into_page(
+            self.page,
+            page_id="main",
+            chrome_version=chrome_ver,
+            fingerprint=fp,
+        )
 
         # Apply TLS fingerprint spoofing via CDP (needs an existing page)
         await apply_browser_tls_spoofing(self.page, chrome_version=chrome_ver)
@@ -1188,13 +1204,24 @@ class AgentBrowser:
         """Create a new tab with its own fingerprint."""
         # Generate fingerprint for this tab
         fp = self._evasion.generate_fingerprint(page_id=tab_id)
-        # Inject via context-level init script (runs on all future pages)
+        chrome_ver = fp["chrome_version"] if fp else "124"
+
+        # Inject via context-level init script (backup layer)
         fingerprint_js = self._evasion.get_injection_js(tab_id)
         await self.context.add_init_script(fingerprint_js)
 
         page = await self.context.new_page()
         self._pages[tab_id] = page
         self._attach_console_listener(tab_id, page)
+
+        # CDP stealth — primary anti-detection layer
+        await self._cdp_stealth.inject_into_page(
+            page,
+            page_id=tab_id,
+            chrome_version=chrome_ver,
+            fingerprint=fp,
+        )
+
         return tab_id
 
     async def switch_tab(self, tab_id: str) -> Dict[str, Any]:
@@ -1439,7 +1466,7 @@ class AgentBrowser:
         }
 
         self.context = await self.browser.new_context(**context_options)
-        # Inject stealth + fingerprint for device emulation
+        # Inject stealth + fingerprint for device emulation (backup layer)
         fp = self._evasion.generate_fingerprint(page_id="main")
         fingerprint_js = self._evasion.get_injection_js("main")
         await self.context.add_init_script(ANTI_DETECTION_JS + "\n" + fingerprint_js)
@@ -1458,6 +1485,16 @@ class AgentBrowser:
                 await old_page.close()
             except Exception as e:
                 logger.warning(f"Failed to migrate page {page_id}: {e}")
+
+        # Apply CDP stealth to the main page
+        chrome_ver = fp.get("chrome_version", "124")
+        if self.page:
+            await self._cdp_stealth.inject_into_page(
+                self.page,
+                page_id="main",
+                chrome_version=chrome_ver,
+                fingerprint=fp,
+            )
 
         # Close old context
         if old_context:
@@ -1573,7 +1610,7 @@ class AgentBrowser:
         context_options["storage_state"] = storage_state
 
         self.context = await self.browser.new_context(**context_options)
-        # Inject stealth + fingerprint on restore
+        # Inject stealth + fingerprint on restore (backup layer)
         fp = self._evasion.generate_fingerprint(page_id="main")
         fingerprint_js = self._evasion.get_injection_js("main")
         await self.context.add_init_script(ANTI_DETECTION_JS + "\n" + fingerprint_js)
@@ -1610,6 +1647,16 @@ class AgentBrowser:
         if "main" not in self._pages:
             self.page = await self.context.new_page()
             self._pages["main"] = self.page
+
+        # Apply CDP stealth to main page
+        chrome_ver = fp.get("chrome_version", "124")
+        if self.page:
+            await self._cdp_stealth.inject_into_page(
+                self.page,
+                page_id="main",
+                chrome_version=chrome_ver,
+                fingerprint=fp,
+            )
 
         device = state.get("device", "desktop_1080")
         self._current_device = device

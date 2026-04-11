@@ -154,14 +154,16 @@ class UserContext:
         }
 
         self.context = await self.browser_instance.browser.new_context(**context_options)
-        # Inject stealth + fingerprint at context level
+        # Inject stealth + fingerprint at context level (backup layer)
         from src.security.evasion_engine import EvasionEngine
+        from src.core.cdp_stealth import CDPStealthInjector
         evasion = EvasionEngine()
         fp = evasion.generate_fingerprint(page_id="main")
         fingerprint_js = evasion.get_injection_js("main")
         await self.context.add_init_script(ANTI_DETECTION_JS + "\n" + fingerprint_js)
         await self.context.route("**/*", self._handle_request)
         self._evasion = evasion
+        self._cdp_stealth = CDPStealthInjector()
 
         # Restore saved state
         state = self._load_state()
@@ -183,6 +185,20 @@ class UserContext:
             self.pages["main"] = page
 
         self.active_page = self.pages.get("main", list(self.pages.values())[0])
+        
+        # Apply CDP stealth to active page — THE REAL FIX
+        try:
+            chrome_ver = fp.get("chrome_version", "124") if fp else "124"
+            await self._cdp_stealth.inject_into_page(
+                self.active_page,
+                page_id="main",
+                chrome_version=chrome_ver,
+                fingerprint=fp,
+            )
+            logger.info(f"CDP stealth applied to active page for {self.user_id}")
+        except Exception as e:
+            logger.warning(f"CDP stealth injection failed: {e}")
+        
         logger.info(f"User context initialized: {self.user_id} (profile: {self.profile_dir})")
 
     def _load_state(self) -> Optional[Dict]:

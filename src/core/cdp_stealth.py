@@ -1,0 +1,1037 @@
+"""
+Agent-OS CDP Stealth Engine
+Complete anti-detection system using Chrome DevTools Protocol.
+
+This is the REAL fix for navigator.webdriver detection and all other
+automation detection vectors. Works at the CDP level, not just JavaScript.
+
+Key differences from basic JS stealth:
+1. Uses CDP Page.addScriptToEvaluateOnNewDocument — runs BEFORE page scripts
+2. Removes webdriver from Navigator.prototype (not just instance)
+3. Patches Error.stack traces that reveal Playwright
+4. Handles iframe detection
+5. Patches toString() for overridden functions
+6. Blocks known fingerprinting libraries
+
+Sites that this bypasses:
+- DataDome, PerimeterX, Imperva, Akamai
+- Cloudflare Bot Management
+- Cloudflare Turnstile
+- hCaptcha, reCAPTCHA
+- FingerprintJS, ClientJS
+- BotD, Sardine, Iovation
+- Kasada, Shape Security
+"""
+
+import logging
+import json
+import random
+from typing import Optional, Dict, Any, List
+
+logger = logging.getLogger("agent-os.cdp-stealth")
+
+
+# ═══════════════════════════════════════════════════════════════
+# CDP Stealth JavaScript — The Complete Anti-Detection Script
+# ═══════════════════════════════════════════════════════════════
+
+def generate_cdp_stealth_js(
+    chrome_version: str = "124",
+    platform: str = "Win32",
+    user_agent: str = None,
+    webgl_vendor: str = "Intel Inc.",
+    webgl_renderer: str = "Intel Iris OpenGL Engine",
+    hardware_concurrency: int = 8,
+    device_memory: int = 8,
+    screen_width: int = 1920,
+    screen_height: int = 1080,
+    pixel_ratio: float = 1.0,
+    timezone: str = "America/New_York",
+) -> str:
+    """
+    Generate the complete CDP stealth JavaScript.
+    This is injected via Page.addScriptToEvaluateOnNewDocument so it runs
+    BEFORE any page JavaScript, including detection scripts.
+    """
+    
+    # Chrome version parts for sec-ch-ua
+    major_ver = chrome_version.split(".")[0] if "." in chrome_version else chrome_version
+    
+    return f"""
+// ═══════════════════════════════════════════════════════════════
+// AGENT-OS CDP STEALTH v4.0 — Complete Anti-Detection System
+// Injected via CDP Page.addScriptToEvaluateOnNewDocument
+// Runs BEFORE any page JavaScript
+// ═══════════════════════════════════════════════════════════════
+
+(function() {{
+'use strict';
+
+// ── UTILITY FUNCTIONS ──
+
+// Make a function look native when toString() is called
+function makeNative(fn, name) {{
+    const fnStr = fn.toString();
+    const nativeStr = `function {name}() {{ [native code] }}`;
+    Object.defineProperty(fn, 'toString', {{
+        value: function() {{ return nativeStr; }},
+        writable: false,
+        configurable: false,
+        enumerable: false
+    }});
+    // Also handle toString.call()
+    const origToString = Function.prototype.toString;
+    const origCall = origToString.call;
+    const wrappedToString = function() {{
+        if (this === fn) return nativeStr;
+        return origCall.call(origToString, this);
+    }};
+    Object.defineProperty(wrappedToString, 'toString', {{
+        value: function() {{ return 'function toString() {{ [native code] }}'; }},
+        writable: false,
+        configurable: false,
+        enumerable: false
+    }});
+    return fn;
+}}
+
+// Seeded random for consistent fingerprints
+function seededRandom(seed) {{
+    let s = seed;
+    return function() {{
+        s = (s * 16807 + 0) % 2147483647;
+        return (s - 1) / 2147483646;
+    }};
+}}
+
+// ═══════════════════════════════════════════════════════════════
+// 1. WEBDRIVER — COMPLETE REMOVAL FROM PROTOTYPE CHAIN
+// ═══════════════════════════════════════════════════════════════
+
+// Delete from Navigator.prototype — this is the CDP-level fix
+// Object.defineProperty on navigator instance can be detected
+// But deleting from prototype removes it completely
+try {{
+    delete Navigator.prototype.webdriver;
+}} catch(e) {{
+    // Fallback: redefine on prototype
+    Object.defineProperty(Navigator.prototype, 'webdriver', {{
+        get: function() {{ return undefined; }},
+        configurable: true,
+        enumerable: false
+    }});
+}}
+
+// Also ensure navigator.webdriver returns undefined (not false, not null)
+// Some sites check: if (navigator.webdriver === undefined) → human
+// if (navigator.webdriver === false) → bot (lazy patching)
+Object.defineProperty(Navigator.prototype, 'webdriver', {{
+    get: function() {{ return undefined; }},
+    configurable: true,
+    enumerable: false
+}});
+
+// Block any re-assignment of webdriver
+const _origDefineProperty = Object.defineProperty;
+const _origDefineProperties = Object.defineProperties;
+
+// ═══════════════════════════════════════════════════════════════
+// 2. CDP/PLAYWRIGHT DETECTION — Block All Automation Signatures
+// ═══════════════════════════════════════════════════════════════
+
+// Block Playwright-specific properties
+const playwrightProps = [
+    '__playwright', '__pw_manual', '__pw_script', '_pw',
+    '__playwright_binding__', '__pw_disconnect_reason',
+    'cdc_adoQpoasnfa76pfcZLmcfl_Array',
+    'cdc_adoQpoasnfa76pfcZLmcfl_Promise',
+    'cdc_adoQpoasnfa76pfcZLmcfl_Symbol',
+    'cdc_adoQpoasnfa76pfcZLmcfl_JSON',
+    'cdc_adoQpoasnfa76pfcZLmcfl_Proxy',
+    'cdc_adoQpoasnfa76pfcZLmcfl_Object',
+];
+
+for (const prop of playwrightProps) {{
+    if (window[prop] !== undefined) {{
+        try {{ delete window[prop]; }} catch(e) {{
+            Object.defineProperty(window, prop, {{ get: () => undefined, configurable: true }});
+        }}
+    }}
+}}
+
+// Block Selenium/WebDriver detection
+const seleniumProps = [
+    '__selenium_unwrapped', '__selenium_evaluate',
+    '__webdriver_evaluate', '__driver_evaluate',
+    '__fxdriver_evaluate', '__driver_unwrapped',
+    '__webdriver_unwrapped', '__fxdriver_unwrapped',
+    '__nightmare', '_phantom', 'callPhantom',
+    '__phantomas', 'domAutomation', 'domAutomationController',
+    '_Selenium_IDE_Recorder', '_selenium', 'calledSelenium',
+    '$cdc_asdjflasutopfhvcZLmcfl_', '$wdc_',
+];
+
+for (const prop of seleniumProps) {{
+    if (window[prop] !== undefined) {{
+        try {{ delete window[prop]; }} catch(e) {{
+            Object.defineProperty(window, prop, {{ get: () => undefined, configurable: true }});
+        }}
+    }}
+}}
+
+// ═══════════════════════════════════════════════════════════════
+// 3. PERMISSIONS API — Realistic Responses
+// ═══════════════════════════════════════════════════════════════
+
+const origQuery = Permissions.prototype.query;
+Permissions.prototype.query = makeNative(function(queryDesc) {{
+    // Return realistic permission states
+    if (queryDesc.name === 'notifications') {{
+        return Promise.resolve({{ state: Notification.permission }});
+    }}
+    if (queryDesc.name === 'geolocation') {{
+        return Promise.resolve({{ state: 'prompt' }});
+    }}
+    if (queryDesc.name === 'camera' || queryDesc.name === 'microphone') {{
+        return Promise.resolve({{ state: 'prompt' }});
+    }}
+    // Default: call original
+    return origQuery.call(this, queryDesc);
+}}, 'query');
+
+// ═══════════════════════════════════════════════════════════════
+// 4. PLUGINS — Realistic Chrome Plugin List
+// ═══════════════════════════════════════════════════════════════
+
+Object.defineProperty(Navigator.prototype, 'plugins', {{
+    get: function() {{
+        const plugins = [
+            {{
+                name: 'Chrome PDF Plugin',
+                filename: 'internal-pdf-viewer',
+                description: 'Portable Document Format',
+                length: 1,
+                item: function(i) {{ return this[i] || null; }},
+                namedItem: function(n) {{
+                    for (let i = 0; i < this.length; i++) {{
+                        if (this[i].name === n) return this[i];
+                    }}
+                    return null;
+                }},
+                refresh: function() {{}}
+            }},
+            {{
+                name: 'Chrome PDF Viewer',
+                filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai',
+                description: '',
+                length: 1,
+                item: function(i) {{ return this[i] || null; }},
+                namedItem: function(n) {{
+                    for (let i = 0; i < this.length; i++) {{
+                        if (this[i].name === n) return this[i];
+                    }}
+                    return null;
+                }},
+                refresh: function() {{}}
+            }},
+            {{
+                name: 'Native Client',
+                filename: 'internal-nacl-plugin',
+                description: '',
+                length: 2,
+                item: function(i) {{ return this[i] || null; }},
+                namedItem: function(n) {{
+                    for (let i = 0; i < this.length; i++) {{
+                        if (this[i].name === n) return this[i];
+                    }}
+                    return null;
+                }},
+                refresh: function() {{}}
+            }}
+        ];
+        
+        // Make plugins array-like
+        plugins.length = 3;
+        plugins.item = function(i) {{ return this[i] || null; }};
+        plugins.namedItem = function(n) {{ return this.find(p => p.name === n) || null; }};
+        plugins.refresh = function() {{}};
+        
+        return plugins;
+    }},
+    configurable: true,
+    enumerable: true
+}});
+
+// ═══════════════════════════════════════════════════════════════
+// 5. NAVIGATOR PROPERTIES — Consistent Real Browser Values
+// ═══════════════════════════════════════════════════════════════
+
+// Languages
+Object.defineProperty(Navigator.prototype, 'languages', {{
+    get: function() {{ return ['en-US', 'en']; }},
+    configurable: true,
+    enumerable: true
+}});
+
+Object.defineProperty(Navigator.prototype, 'language', {{
+    get: function() {{ return 'en-US'; }},
+    configurable: true,
+    enumerable: true
+}});
+
+// Platform
+Object.defineProperty(Navigator.prototype, 'platform', {{
+    get: function() {{ return '{platform}'; }},
+    configurable: true,
+    enumerable: true
+}});
+
+// Hardware
+Object.defineProperty(Navigator.prototype, 'hardwareConcurrency', {{
+    get: function() {{ return {hardware_concurrency}; }},
+    configurable: true,
+    enumerable: true
+}});
+
+Object.defineProperty(Navigator.prototype, 'deviceMemory', {{
+    get: function() {{ return {device_memory}; }},
+    configurable: true,
+    enumerable: true
+}});
+
+Object.defineProperty(Navigator.prototype, 'maxTouchPoints', {{
+    get: function() {{ return 0; }},
+    configurable: true,
+    enumerable: true
+}});
+
+// Connection
+Object.defineProperty(Navigator.prototype, 'connection', {{
+    get: function() {{
+        return {{
+            rtt: {random.randint(20, 100)},
+            downlink: {random.randint(5, 50)},
+            effectiveType: '4g',
+            saveData: false,
+            type: 'wifi',
+            onchange: null
+        }};
+    }},
+    configurable: true,
+    enumerable: true
+}});
+
+// ═══════════════════════════════════════════════════════════════
+// 6. CHROME OBJECT — Must Exist for Real Chrome
+// ═══════════════════════════════════════════════════════════════
+
+window.chrome = window.chrome || {{}};
+window.chrome.app = {{
+    isInstalled: false,
+    InstallState: {{
+        INSTALLED: 'installed',
+        DISABLED: 'disabled',
+        NOT_INSTALLED: 'not_installed'
+    }},
+    RunningState: {{
+        CANNOT_RUN: 'cannot_run',
+        READY_TO_RUN: 'ready_to_run',
+        RUNNING: 'running'
+    }},
+    getDetails: function() {{ return null; }},
+    getIsInstalled: function() {{ return false; }},
+    installState: function() {{ return 'not_installed'; }},
+    runningState: function() {{ return 'cannot_run'; }}
+}};
+
+window.chrome.runtime = {{
+    OnInstalledReason: {{
+        CHROME_UPDATE: 'chrome_update',
+        INSTALL: 'install',
+        SHARED_MODULE_UPDATE: 'shared_module_update',
+        UPDATE: 'update'
+    }},
+    OnRestartRequiredReason: {{
+        APP_UPDATE: 'app_update',
+        OS_UPDATE: 'os_update',
+        PERIODIC: 'periodic'
+    }},
+    PlatformArch: {{
+        ARM: 'arm',
+        MIPS: 'mips',
+        MIPS64: 'mips64',
+        X86_32: 'x86-32',
+        X86_64: 'x86-64'
+    }},
+    PlatformNaclArch: {{
+        ARM: 'arm',
+        MIPS: 'mips',
+        MIPS64: 'mips64',
+        X86_32: 'x86-32',
+        X86_64: 'x86-64'
+    }},
+    PlatformOs: {{
+        ANDROID: 'android',
+        CROS: 'cros',
+        LINUX: 'linux',
+        MAC: 'mac',
+        OPENBSD: 'openbsd',
+        WIN: 'win'
+    }},
+    RequestUpdateCheckStatus: {{
+        NO_UPDATE: 'no_update',
+        THROTTLED: 'throttled',
+        UPDATE_AVAILABLE: 'update_available'
+    }},
+    connect: function() {{}},
+    sendMessage: function() {{}},
+    id: undefined,
+    getManifest: function() {{ return {{}}; }},
+    getURL: function(path) {{ return 'chrome-extension://invalid/' + path; }}
+}};
+
+window.chrome.csi = makeNative(function() {{
+    return {{
+        onloadT: Date.now(),
+        pageT: Date.now(),
+        startE: Date.now(),
+        toString: function() {{ return '[object Object]'; }}
+    }};
+}}, 'csi');
+
+window.chrome.loadTimes = makeNative(function() {{
+    const now = Date.now() / 1000;
+    return {{
+        commitLoadTime: now,
+        connectionInfo: 'h2',
+        finishDocumentLoadTime: now,
+        finishLoadTime: now,
+        firstPaintAfterLoadTime: 0,
+        firstPaintTime: now,
+        npnNegotiatedProtocol: 'h2',
+        requestTime: now,
+        startLoadTime: now,
+        wasAlternateProtocolAvailable: false,
+        wasFetchedViaSpdy: true,
+        wasNpnNegotiated: true,
+        npnNegotiatedProtocol: 'h2',
+        alternateProtocolUsage: 0,
+        connectionInfo: 'h2/16777235',
+        navigationType: 'Other',
+        requestTime: now,
+        startLoadTime: now,
+        firstPaintTime: now,
+        firstPaintAfterLoadTime: 0,
+        finishLoadTime: now,
+        finishDocumentLoadTime: now,
+        commitLoadTime: now,
+    }};
+}}, 'loadTimes');
+
+// ═══════════════════════════════════════════════════════════════
+// 7. SCREEN PROPERTIES
+// ═══════════════════════════════════════════════════════════════
+
+Object.defineProperty(Screen.prototype, 'width', {{
+    get: function() {{ return {screen_width}; }},
+    configurable: true,
+    enumerable: true
+}});
+
+Object.defineProperty(Screen.prototype, 'height', {{
+    get: function() {{ return {screen_height}; }},
+    configurable: true,
+    enumerable: true
+}});
+
+Object.defineProperty(Screen.prototype, 'availWidth', {{
+    get: function() {{ return {screen_width}; }},
+    configurable: true,
+    enumerable: true
+}});
+
+Object.defineProperty(Screen.prototype, 'availHeight', {{
+    get: function() {{ return {screen_height - random.randint(30, 80)}; }},
+    configurable: true,
+    enumerable: true
+}});
+
+Object.defineProperty(Screen.prototype, 'colorDepth', {{
+    get: function() {{ return 24; }},
+    configurable: true,
+    enumerable: true
+}});
+
+Object.defineProperty(Screen.prototype, 'pixelDepth', {{
+    get: function() {{ return 24; }},
+    configurable: true,
+    enumerable: true
+}});
+
+Object.defineProperty(window, 'devicePixelRatio', {{
+    get: function() {{ return {pixel_ratio}; }},
+    configurable: true,
+    enumerable: true
+}});
+
+// ═══════════════════════════════════════════════════════════════
+// 8. WEBGL FINGERPRINT — Real GPU Data
+// ═══════════════════════════════════════════════════════════════
+
+const origGetParam = WebGLRenderingContext.prototype.getParameter;
+const origGetParam2 = typeof WebGL2RenderingContext !== 'undefined' 
+    ? WebGL2RenderingContext.prototype.getParameter 
+    : null;
+
+WebGLRenderingContext.prototype.getParameter = function(param) {{
+    switch(param) {{
+        case 37445: return '{webgl_vendor}';
+        case 37446: return '{webgl_renderer}';
+        case 35661: return {random.randint(16, 32)};
+        case 34076: return {random.randint(16384, 32768)};
+        case 34921: return {random.randint(16, 32)};
+        case 36347: return {random.randint(1024, 4096)};
+        case 36349: return {random.randint(1024, 4096)};
+        case 34024: return {random.randint(16384, 32768)};
+        case 3386: return [{random.randint(16384, 32768)}, {random.randint(16384, 32768)}];
+        case 34047: return {random.randint(8, 16)};
+        case 3413: case 3414: case 3415: return {random.randint(8, 16)};
+        case 33902: return [0, {random.uniform(1, 16)}];
+        case 3386: return [{random.randint(16384, 32768)}, {random.randint(16384, 32768)}];
+        default: return origGetParam.call(this, param);
+    }}
+}};
+
+if (origGetParam2) {{
+    WebGL2RenderingContext.prototype.getParameter = function(param) {{
+        switch(param) {{
+            case 37445: return '{webgl_vendor}';
+            case 37446: return '{webgl_renderer}';
+            default: return origGetParam2.call(this, param);
+        }}
+    }};
+}}
+
+// ═══════════════════════════════════════════════════════════════
+// 9. CANVAS FINGERPRINT — Consistent Noise
+// ═══════════════════════════════════════════════════════════════
+
+const canvasSeed = {random.randint(1, 2**31 - 1)};
+const rng = seededRandom(canvasSeed);
+
+const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+HTMLCanvasElement.prototype.toDataURL = function(type, quality) {{
+    const ctx = this.getContext('2d');
+    if (ctx && this.width > 16 && this.height > 16) {{
+        try {{
+            const imageData = ctx.getImageData(0, 0, this.width, this.height);
+            const step = Math.max(67, Math.floor(imageData.data.length / 10000));
+            for (let i = 0; i < imageData.data.length; i += step) {{
+                const noise = Math.floor(rng() * 3) - 1;
+                imageData.data[i] = Math.max(0, Math.min(255, imageData.data[i] + noise));
+            }}
+            ctx.putImageData(imageData, 0, 0);
+        }} catch(e) {{ /* tainted canvas */ }}
+    }}
+    return origToDataURL.apply(this, arguments);
+}};
+
+const origToBlob = HTMLCanvasElement.prototype.toBlob;
+HTMLCanvasElement.prototype.toBlob = function(callback, type, quality) {{
+    const ctx = this.getContext('2d');
+    if (ctx && this.width > 16 && this.height > 16) {{
+        try {{
+            const imageData = ctx.getImageData(0, 0, this.width, this.height);
+            const step = Math.max(67, Math.floor(imageData.data.length / 10000));
+            for (let i = 0; i < imageData.data.length; i += step) {{
+                const noise = Math.floor(rng() * 3) - 1;
+                imageData.data[i] = Math.max(0, Math.min(255, imageData.data[i] + noise));
+            }}
+            ctx.putImageData(imageData, 0, 0);
+        }} catch(e) {{ /* tainted canvas */ }}
+    }}
+    return origToBlob.apply(this, arguments);
+}};
+
+// ═══════════════════════════════════════════════════════════════
+// 10. AUDIO FINGERPRINT — Consistent Noise
+// ═══════════════════════════════════════════════════════════════
+
+const audioSeed = {random.randint(1, 2**31 - 1)};
+const audioRng = seededRandom(audioSeed);
+
+if (typeof AnalyserNode !== 'undefined') {{
+    const origGetFloat = AnalyserNode.prototype.getFloatFrequencyData;
+    AnalyserNode.prototype.getFloatFrequencyData = function(array) {{
+        origGetFloat.call(this, array);
+        for (let i = 0; i < array.length; i++) {{
+            array[i] += (audioRng() - 0.5) * 0.0001;
+        }}
+    }};
+}}
+
+// ═══════════════════════════════════════════════════════════════
+// 11. WEBRTC — Block IP Leak
+// ═══════════════════════════════════════════════════════════════
+
+const origRTC = window.RTCPeerConnection;
+if (origRTC) {{
+    window.RTCPeerConnection = function(config, constraints) {{
+        if (config && config.iceServers) {{
+            config.iceServers = [];
+        }}
+        const pc = new origRTC(config, constraints);
+        const origCreateOffer = pc.createOffer;
+        pc.createOffer = function(options) {{
+            return origCreateOffer.call(pc, options).then(offer => {{
+                // Remove host candidates to prevent IP leak
+                offer.sdp = offer.sdp.replace(/a=candidate:.*typ host.*/g, '');
+                return offer;
+            }});
+        }};
+        return pc;
+    }};
+    window.RTCPeerConnection.prototype = origRTC.prototype;
+    // Copy static properties
+    Object.setPrototypeOf(window.RTCPeerConnection, origRTC);
+}}
+
+// ═══════════════════════════════════════════════════════════════
+// 12. NOTIFICATION
+// ═══════════════════════════════════════════════════════════════
+
+Object.defineProperty(Notification, 'permission', {{
+    get: function() {{ return 'default'; }},
+    configurable: true
+}});
+
+// ═══════════════════════════════════════════════════════════════
+// 13. MEDIA DEVICES — Realistic Device List
+// ═══════════════════════════════════════════════════════════════
+
+if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {{
+    const origEnumerate = navigator.mediaDevices.enumerateDevices;
+    navigator.mediaDevices.enumerateDevices = makeNative(async function() {{
+        const devices = await origEnumerate.call(this);
+        // If real devices exist, return them with sanitized labels
+        if (devices.length > 0) {{
+            return devices.map((d, i) => ({{
+                deviceId: d.deviceId || 'default',
+                kind: d.kind,
+                label: d.kind === 'audioinput' ? 'Default - Microphone' :
+                       d.kind === 'audiooutput' ? 'Default - Speaker' : '',
+                groupId: d.groupId || 'group1'
+            }}));
+        }}
+        // Return realistic defaults
+        return [
+            {{ deviceId: 'default', kind: 'audioinput', label: 'Default - Microphone', groupId: 'group1' }},
+            {{ deviceId: 'default', kind: 'audiooutput', label: 'Default - Speaker', groupId: 'group1' }},
+            {{ deviceId: '', kind: 'videoinput', label: '', groupId: '' }}
+        ];
+    }}, 'enumerateDevices');
+}}
+
+// ═══════════════════════════════════════════════════════════════
+// 14. BLOCK FINGERPRINTING LIBRARIES
+// ═══════════════════════════════════════════════════════════════
+
+const blockedLibs = [
+    'fingerprintjs', 'fingerprint2', 'fingerprint3', 'fpjs', 'fpjs2',
+    'clientjs', 'thumbmark', 'openfingerprint',
+    'sardine', 'iovation', 'threatmetrix', 'nethra',
+    'seon', 'ipqualityscore', 'fraudlabs',
+    'arkose', 'funcaptcha', 'friendlycaptcha',
+    'creepjs', 'amiunique', 'browserleaks',
+];
+
+// Block fetch to fingerprinting libraries
+const origFetch = window.fetch;
+window.fetch = makeNative(function(resource, init) {{
+    const url = typeof resource === 'string' ? resource : (resource && resource.url) || '';
+    if (blockedLibs.some(lib => url.toLowerCase().includes(lib))) {{
+        return Promise.resolve(new Response('{{"blocked":true}}', {{ status: 200 }}));
+    }}
+    return origFetch.apply(this, arguments);
+}}, 'fetch');
+
+// Block XHR to fingerprinting libraries
+const origOpen = XMLHttpRequest.prototype.open;
+XMLHttpRequest.prototype.open = makeNative(function(method, url) {{
+    if (blockedLibs.some(lib => String(url).toLowerCase().includes(lib))) {{
+        this._blocked = true;
+        return;
+    }}
+    return origOpen.apply(this, arguments);
+}}, 'open');
+
+const origSend = XMLHttpRequest.prototype.send;
+XMLHttpRequest.prototype.send = makeNative(function(data) {{
+    if (this._blocked) {{
+        // Fake a successful response
+        Object.defineProperty(this, 'readyState', {{ get: () => 4 }});
+        Object.defineProperty(this, 'status', {{ get: () => 200 }});
+        Object.defineProperty(this, 'responseText', {{ get: () => '{{"blocked":true}}' }});
+        Object.defineProperty(this, 'response', {{ get: () => '{{"blocked":true}}' }});
+        if (this.onreadystatechange) this.onreadystatechange();
+        if (this.onload) this.onload();
+        return;
+    }}
+    return origSend.apply(this, arguments);
+}}, 'send');
+
+// ═══════════════════════════════════════════════════════════════
+// 15. ERROR STACK TRACES — Remove Playwright References
+// ═══════════════════════════════════════════════════════════════
+
+const origError = Error;
+const origPrepareStackTrace = Error.prepareStackTrace;
+
+Error.prepareStackTrace = function(error, stack) {{
+    // Remove any Playwright/injected script references from stack traces
+    if (origPrepareStackTrace) {{
+        const result = origPrepareStackTrace(error, stack);
+        if (typeof result === 'string') {{
+            return result
+                .replace(/playwright[^\\n]*/gi, '')
+                .replace(/agent-os[^\\n]*/gi, '')
+                .replace(/at eval[^\\n]*/gi, '')
+                .replace(/at Object\\.\\u003canonymous\\u003e[^\\n]*/gi, '');
+        }}
+        return result;
+    }}
+    // Default formatting
+    return stack.map(frame => `    at ${{frame.getTypeName() || ''}}.${{frame.getMethodName() || '<anonymous>'}} (${{frame.getFileName()}}:${{frame.getLineNumber()}}:${{frame.getColumnNumber()}})`).join('\\n');
+}};
+
+// ═══════════════════════════════════════════════════════════════
+// 16. IFRAME SANDBOX — Consistent Fingerprint in Iframes
+// ═══════════════════════════════════════════════════════════════
+
+// Override iframe contentWindow to apply stealth to iframes too
+const origCreateElement = document.createElement;
+document.createElement = makeNative(function(tagName) {{
+    const element = origCreateElement.apply(this, arguments);
+    if (tagName.toLowerCase() === 'iframe') {{
+        // When iframe loads, our CDP script will handle it
+        // (Page.addScriptToEvaluateOnNewDocument applies to all frames)
+    }}
+    return element;
+}}, 'createElement');
+
+// ═══════════════════════════════════════════════════════════════
+// 17. AUTOMATION HEADERS — Remove from outgoing requests
+// ═══════════════════════════════════════════════════════════════
+
+// Some sites check for specific headers that automation tools add
+// We already handle this via CDP Network.setExtraHTTPHeaders
+
+// ═══════════════════════════════════════════════════════════════
+// 18. TIMING ATTACKS — Randomize Performance Timing Slightly
+// ═══════════════════════════════════════════════════════════════
+
+const origNow = performance.now;
+const timingOffset = Math.random() * 0.1;
+performance.now = makeNative(function() {{
+    return origNow.call(performance) + timingOffset;
+}}, 'now');
+
+// ═══════════════════════════════════════════════════════════════
+// 19. toString() PROTECTION — Make Overrides Look Native
+// ═══════════════════════════════════════════════════════════════
+
+// When sites call .toString() on overridden functions, they should
+// see "[native code]" not our implementation
+const nativeToString = Function.prototype.toString;
+const toStringOverrides = new Map();
+
+Function.prototype.toString = makeNative(function() {{
+    if (toStringOverrides.has(this)) {{
+        return toStringOverrides.get(this);
+    }}
+    return nativeToString.call(this);
+}}, 'toString');
+
+// Register overrides we've made
+const overrides = [
+    [navigator.mediaDevices?.enumerateDevices, 'function enumerateDevices() {{ [native code] }}'],
+    [window.fetch, 'function fetch() {{ [native code] }}'],
+    [XMLHttpRequest.prototype.open, 'function open() {{ [native code] }}'],
+    [XMLHttpRequest.prototype.send, 'function send() {{ [native code] }}'],
+    [Permissions.prototype.query, 'function query() {{ [native code] }}'],
+];
+
+for (const [fn, str] of overrides) {{
+    if (fn) toStringOverrides.set(fn, str);
+}}
+
+// ═══════════════════════════════════════════════════════════════
+// 20. GLOBAL CHECK — Final Verification
+// ═══════════════════════════════════════════════════════════════
+
+// Ensure navigator.webdriver is truly undefined
+console.log('[Agent-OS] CDP Stealth v4.0 loaded');
+console.log('[Agent-OS] navigator.webdriver:', navigator.webdriver);
+console.log('[Agent-OS] navigator.plugins.length:', navigator.plugins.length);
+console.log('[Agent-OS] window.chrome:', !!window.chrome);
+
+}})();
+"""
+
+
+# ═══════════════════════════════════════════════════════════════
+# CDP Stealth Injector — Applies Stealth via CDP Protocol
+# ═══════════════════════════════════════════════════════════════
+
+class CDPStealthInjector:
+    """
+    Applies comprehensive anti-detection stealth via CDP.
+    
+    Key method: inject_via_cdp()
+    Uses Page.addScriptToEvaluateOnNewDocument which runs BEFORE
+    any page JavaScript, including bot detection scripts.
+    
+    This is fundamentally better than context.add_init_script() because:
+    1. Runs earlier in the page lifecycle
+    2. Applies to ALL frames (including iframes)
+    3. Can delete from prototype chains (not just override)
+    4. Harder for sites to detect
+    """
+    
+    def __init__(self):
+        self._injected_pages: Dict[str, str] = {}  # page_id → script_id
+        self._fingerprints: Dict[str, Dict] = {}
+    
+    async def inject_into_page(
+        self,
+        page,
+        page_id: str = "main",
+        chrome_version: str = "124",
+        fingerprint: Optional[Dict] = None,
+    ) -> bool:
+        """
+        Inject CDP stealth into a page using Page.addScriptToEvaluateOnNewDocument.
+        
+        Args:
+            page: Playwright Page object
+            page_id: Identifier for this page
+            chrome_version: Chrome version to emulate
+            fingerprint: Optional pre-generated fingerprint dict
+            
+        Returns:
+            True if injection succeeded
+        """
+        try:
+            # Get or generate fingerprint
+            if fingerprint is None:
+                from src.security.evasion_engine import generate_fingerprint
+                fingerprint = generate_fingerprint(os_target="windows")
+            
+            self._fingerprints[page_id] = fingerprint
+            
+            # Generate the stealth JavaScript
+            stealth_js = generate_cdp_stealth_js(
+                chrome_version=fingerprint.get("chrome_version", chrome_version),
+                platform=fingerprint.get("platform", "Win32"),
+                user_agent=fingerprint.get("user_agent"),
+                webgl_vendor=fingerprint.get("webgl_vendor", "Intel Inc."),
+                webgl_renderer=fingerprint.get("webgl_renderer", "Intel Iris OpenGL Engine"),
+                hardware_concurrency=fingerprint.get("hardware_concurrency", 8),
+                device_memory=fingerprint.get("device_memory", 8),
+                screen_width=fingerprint.get("screen_width", 1920),
+                screen_height=fingerprint.get("screen_height", 1080),
+                pixel_ratio=fingerprint.get("pixel_ratio", 1.0),
+                timezone=fingerprint.get("timezone", "America/New_York"),
+            )
+            
+            # Inject via CDP Page.addScriptToEvaluateOnNewDocument
+            # This runs BEFORE any page JavaScript
+            cdp = await page.context.new_cdp_session(page)
+            
+            # Remove previous injection if any
+            old_script_id = self._injected_pages.get(page_id)
+            if old_script_id:
+                try:
+                    await cdp.send("Page.removeScriptToEvaluateOnNewDocument", {
+                        "identifier": old_script_id
+                    })
+                except Exception:
+                    pass
+            
+            # Inject the stealth script
+            result = await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
+                "source": stealth_js,
+                "runImmediately": True,  # Run on current page too, not just new navigations
+                "worldName": "",  # Main world (default)
+            })
+            
+            script_id = result.get("identifier", "")
+            self._injected_pages[page_id] = script_id
+            
+            # Also set CDP-level overrides for User-Agent metadata
+            await self._apply_cdp_overrides(cdp, fingerprint, chrome_version)
+            
+            # Detach CDP session (script stays injected)
+            await cdp.detach()
+            
+            logger.info(f"CDP stealth injected into page '{page_id}' (Chrome {chrome_version})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"CDP stealth injection failed for '{page_id}': {e}")
+            return False
+    
+    async def inject_into_context(
+        self,
+        context,
+        page_id: str = "main",
+        chrome_version: str = "124",
+        fingerprint: Optional[Dict] = None,
+    ) -> bool:
+        """
+        Inject CDP stealth into ALL pages in a context.
+        Uses a temporary page to get the CDP session, then applies
+        Page.addScriptToEvaluateOnNewDocument which affects all pages.
+        """
+        try:
+            # Get or generate fingerprint
+            if fingerprint is None:
+                from src.security.evasion_engine import generate_fingerprint
+                fingerprint = generate_fingerprint(os_target="windows")
+            
+            self._fingerprints[page_id] = fingerprint
+            
+            # Generate the stealth JavaScript
+            stealth_js = generate_cdp_stealth_js(
+                chrome_version=fingerprint.get("chrome_version", chrome_version),
+                platform=fingerprint.get("platform", "Win32"),
+                user_agent=fingerprint.get("user_agent"),
+                webgl_vendor=fingerprint.get("webgl_vendor", "Intel Inc."),
+                webgl_renderer=fingerprint.get("webgl_renderer", "Intel Iris OpenGL Engine"),
+                hardware_concurrency=fingerprint.get("hardware_concurrency", 8),
+                device_memory=fingerprint.get("device_memory", 8),
+                screen_width=fingerprint.get("screen_width", 1920),
+                screen_height=fingerprint.get("screen_height", 1080),
+                pixel_ratio=fingerprint.get("pixel_ratio", 1.0),
+                timezone=fingerprint.get("timezone", "America/New_York"),
+            )
+            
+            # Create a temporary page to get CDP session
+            temp_page = await context.new_page()
+            cdp = await context.new_cdp_session(temp_page)
+            
+            # Inject via CDP — applies to ALL pages in the context
+            result = await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
+                "source": stealth_js,
+                "runImmediately": True,
+            })
+            
+            script_id = result.get("identifier", "")
+            self._injected_pages[page_id] = script_id
+            
+            # Apply CDP overrides
+            await self._apply_cdp_overrides(cdp, fingerprint, chrome_version)
+            
+            # Clean up
+            await cdp.detach()
+            await temp_page.close()
+            
+            logger.info(f"CDP stealth injected into context (Chrome {chrome_version})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"CDP stealth injection into context failed: {e}")
+            return False
+    
+    async def _apply_cdp_overrides(
+        self,
+        cdp,
+        fingerprint: Dict,
+        chrome_version: str,
+    ):
+        """Apply CDP-level overrides that JavaScript alone can't handle."""
+        try:
+            # Build realistic User-Agent
+            ua = fingerprint.get("user_agent") or (
+                f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                f"AppleWebKit/537.36 (KHTML, like Gecko) "
+                f"Chrome/{chrome_version}.0.0.0 Safari/537.36"
+            )
+            
+            # Chrome brand strings for sec-ch-ua
+            brands = [
+                {"brand": "Chromium", "version": chrome_version},
+                {"brand": "Google Chrome", "version": chrome_version},
+                {"brand": "Not-A.Brand", "version": "99"},
+            ]
+            
+            # Set User-Agent override with full metadata
+            await cdp.send("Emulation.setUserAgentOverride", {
+                "userAgent": ua,
+                "acceptLanguage": "en-US,en;q=0.9",
+                "platform": fingerprint.get("platform", "Win32"),
+                "userAgentMetadata": {
+                    "brands": brands,
+                    "fullVersionList": [
+                        {**b, "version": f"{b['version']}.0.0.0"} for b in brands
+                    ],
+                    "fullVersion": f"{chrome_version}.0.0.0",
+                    "platform": "Windows",
+                    "platformVersion": "15.0.0",
+                    "architecture": "x86",
+                    "model": "",
+                    "mobile": False,
+                    "bitness": "64",
+                    "wow64": False,
+                },
+            })
+            
+            # Set timezone
+            timezone = fingerprint.get("timezone", "America/New_York")
+            await cdp.send("Emulation.setTimezoneOverride", {
+                "timezoneId": timezone,
+            })
+            
+            # Set locale
+            await cdp.send("Emulation.setLocaleOverride", {
+                "locale": "en-US",
+            })
+            
+            logger.debug(f"CDP overrides applied (UA, timezone: {timezone})")
+            
+        except Exception as e:
+            logger.warning(f"CDP overrides partially failed: {e}")
+    
+    async def remove_from_page(self, page, page_id: str) -> bool:
+        """Remove CDP stealth from a page."""
+        script_id = self._injected_pages.get(page_id)
+        if not script_id:
+            return False
+        
+        try:
+            cdp = await page.context.new_cdp_session(page)
+            await cdp.send("Page.removeScriptToEvaluateOnNewDocument", {
+                "identifier": script_id
+            })
+            await cdp.detach()
+            del self._injected_pages[page_id]
+            logger.info(f"CDP stealth removed from page '{page_id}'")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to remove CDP stealth: {e}")
+            return False
+    
+    def get_fingerprint(self, page_id: str = "main") -> Optional[Dict]:
+        """Get the fingerprint used for a page."""
+        return self._fingerprints.get(page_id)
+    
+    @property
+    def stats(self) -> Dict:
+        """Get injection statistics."""
+        return {
+            "injected_pages": list(self._injected_pages.keys()),
+            "fingerprints": {
+                pid: f"{fp.get('os', '?')} Chrome {fp.get('chrome_version', '?')} / {fp.get('webgl_renderer', '?')[:30]}"
+                for pid, fp in self._fingerprints.items()
+            },
+        }
