@@ -59,6 +59,11 @@ DEFAULT_CONFIG = {
         "timezone_id": "America/New_York",
         "tls_proxy_enabled": True,
         "tls_proxy_port": 8081,
+        "proxy_rotation_enabled": True,
+        "proxy_rotation_strategy": "weighted",
+        "proxy_file": None,
+        "proxy_api_url": None,
+        "proxy_api_key": None,
     },
     "session": {
         "timeout_minutes": 15,

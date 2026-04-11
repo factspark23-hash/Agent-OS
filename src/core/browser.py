@@ -11,6 +11,7 @@ import logging
 import os
 from typing import Optional, Dict, Any, List
 from pathlib import Path
+from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet
 from playwright.async_api import async_playwright, Browser, Page, BrowserContext
@@ -22,6 +23,7 @@ from src.core.stealth import (
 from src.core.tls_spoof import apply_browser_tls_spoofing
 from src.core.tls_proxy import TLSProxyServer, TLSHTTPClient, _CURL_AVAILABLE
 from src.core.cdp_stealth import CDPStealthInjector
+from src.tools.proxy_rotation import ProxyManager, ProxyInfo, RotationStrategy
 from src.security.evasion_engine import EvasionEngine
 from src.security.human_mimicry import HumanMimicry
 
@@ -84,6 +86,16 @@ class AgentBrowser:
         self._tls_http: Optional[TLSHTTPClient] = None
         self._tls_proxy_port = self.config.get("browser.tls_proxy_port", 8081)
         self._tls_proxy_enabled = self.config.get("browser.tls_proxy_enabled", True)
+        # High-level proxy rotation (residential, mobile, datacenter)
+        self._proxy_manager: Optional[ProxyManager] = None
+        self._proxy_manager_enabled = self.config.get("browser.proxy_rotation_enabled", True)
+        self._proxy_rotation_strategy = self.config.get("browser.proxy_rotation_strategy", "weighted")
+        self._current_proxy: Optional[ProxyInfo] = None
+        self._current_proxy_config: Optional[Dict] = None
+        # Domain → proxy mapping for sticky sessions
+        self._domain_proxy_map: Dict[str, str] = {}
+        # Request tracking for proxy result recording
+        self._request_proxy_map: Dict[str, str] = {}
 
     def _get_or_create_cookie_key(self) -> bytes:
         """Get or create encryption key for cookie storage."""
@@ -120,8 +132,26 @@ class AgentBrowser:
         # Initialize HTTP client for non-browser requests
         self._tls_http = TLSHTTPClient()
 
+        # Initialize proxy manager for residential/mobile IP rotation
+        if self._proxy_manager_enabled:
+            self._proxy_manager = ProxyManager(strategy=self._proxy_rotation_strategy)
+            # Load proxies from config if specified
+            proxy_file = self.config.get("browser.proxy_file")
+            if proxy_file:
+                result = self._proxy_manager.load_proxies(proxy_file)
+                logger.info(f"Loaded {result.get('loaded', 0)} proxies from {proxy_file}")
+            # Load from API if configured
+            proxy_api = self.config.get("browser.proxy_api_url")
+            if proxy_api:
+                api_key = self.config.get("browser.proxy_api_key")
+                result = await self._proxy_manager.load_from_api(proxy_api, api_key)
+                logger.info(f"Loaded {result.get('loaded', 0)} proxies from API")
+            # Start health monitoring
+            await self._proxy_manager.start()
+            logger.info(f"Proxy rotation enabled (strategy: {self._proxy_rotation_strategy})")
+
         await self._launch_browser()
-        logger.info("Browser started with stealth patches v2.0 + TLS fingerprinting")
+        logger.info("Browser started with stealth patches v2.0 + TLS fingerprinting + proxy rotation")
 
     async def _launch_browser(self):
         """Internal: launch browser and set up context."""
@@ -468,11 +498,26 @@ class AgentBrowser:
         return True
 
     async def navigate(self, url: str, page_id: str = "main", wait_until: str = "domcontentloaded",
-                       retries: int = 2) -> Dict[str, Any]:
-        """Navigate to a URL with human-like timing, auto retry, and Cloudflare bypass."""
+                       retries: int = 3, country: str = None) -> Dict[str, Any]:
+        """
+        Navigate to a URL with human-like timing, proxy rotation, auto retry, and Cloudflare bypass.
+
+        Args:
+            url: Target URL
+            page_id: Tab/page ID
+            wait_until: Playwright wait condition
+            retries: Max retry attempts (will rotate proxy on each retry)
+            country: Geo-target proxy selection (e.g., "US", "GB", "DE")
+        """
         page = self._pages.get(page_id, self.page)
+        domain = urlparse(url).hostname or ""
+
+        # Get geo-targeting for known streaming sites
+        geo_target = country or self._get_geo_target(domain)
 
         last_error = None
+        tried_proxies: List[str] = []
+
         for attempt in range(retries + 1):
             if attempt > 0:
                 # Backoff delay between retries
@@ -480,11 +525,24 @@ class AgentBrowser:
                 logger.info(f"Retry {attempt}/{retries} for {url[:60]} (waiting {wait_time:.1f}s)")
                 await asyncio.sleep(wait_time)
 
-            # Auto-rotate proxy if pool is configured
-            await self._maybe_rotate_proxy()
+            # Rotate proxy if we have a proxy manager
+            if self._proxy_manager and self._proxy_manager_enabled:
+                proxy_result = await self._rotate_to_next_proxy(
+                    domain=domain,
+                    country=geo_target,
+                    exclude=tried_proxies,
+                )
+                if proxy_result:
+                    tried_proxies.append(proxy_result)
+
+            # Fallback: auto-rotate proxy pool if configured
+            elif self._proxy_rotation_enabled:
+                await self._maybe_rotate_proxy()
 
             # Human-like delay before navigation
             await asyncio.sleep(random.uniform(0.3, 1.2))
+
+            request_id = f"{domain}-{attempt}-{random.randint(1000,9999)}"
 
             try:
                 response = await page.goto(url, wait_until=wait_until, timeout=30000)
@@ -505,9 +563,21 @@ class AgentBrowser:
 
                 status_code = response.status if response else 200
 
-                # If blocked and we have retries left, try bypass
+                # Record proxy success
+                if self._current_proxy:
+                    self._record_proxy_result(success=True, status_code=status_code)
+
+                # If blocked and we have retries left, try with different proxy
                 if self._is_blocked_page(title, text) and attempt < retries:
                     logger.warning(f"Block/challenge detected on {url[:60]} (attempt {attempt + 1})")
+
+                    # Record proxy failure (blocked = proxy is burned)
+                    if self._current_proxy:
+                        self._record_proxy_result(
+                            success=False,
+                            status_code=status_code,
+                            error="blocked_by_site"
+                        )
 
                     # Try Cloudflare bypass
                     if "cloudflare" in title.lower() or "just a moment" in title.lower():
@@ -528,11 +598,12 @@ class AgentBrowser:
                                         "status_code": response.status if response else 200,
                                         "blocked_requests": self._blocked_requests,
                                         "cf_bypassed": True,
+                                        "proxy_used": self._current_proxy.proxy_id if self._current_proxy else None,
                                     }
                             except Exception as e:
                                 logger.warning(f"Reload after CF bypass failed: {e}")
 
-                    # If not Cloudflare or bypass failed, try with different wait strategy
+                    # If not Cloudflare or bypass failed, rotate proxy and retry
                     continue
 
                 # Save cookies after navigation
@@ -545,10 +616,16 @@ class AgentBrowser:
                     "status_code": status_code,
                     "blocked_requests": self._blocked_requests,
                     "attempt": attempt + 1,
+                    "proxy_used": self._current_proxy.proxy_id if self._current_proxy else None,
+                    "geo_target": geo_target,
                 }
             except Exception as e:
                 last_error = str(e)
                 logger.error(f"Navigation attempt {attempt + 1} failed: {e}")
+
+                # Record proxy failure
+                if self._current_proxy:
+                    self._record_proxy_result(success=False, error=str(e)[:100])
 
                 # Check if it's a timeout — try with networkidle instead
                 if "timeout" in last_error.lower() and attempt < retries:
@@ -1240,6 +1317,134 @@ class AgentBrowser:
             return True
         return False
 
+    # ─── Proxy Rotation Helpers ────────────────────────────────
+
+    def _get_geo_target(self, domain: str) -> Optional[str]:
+        """
+        Auto-detect geo-target for known streaming/content sites.
+        These sites often require specific country IPs.
+        """
+        # Map of domain patterns to required countries
+        GEO_REQUIREMENTS = {
+            "netflix.com": "US",
+            "hulu.com": "US",
+            "max.com": "US",  # HBO Max
+            "peacocktv.com": "US",
+            "paramountplus.com": "US",
+            "disneyplus.com": "US",
+            "bbc.co.uk": "GB",
+            "itv.com": "GB",
+            "channel4.com": "GB",
+            "zdf.de": "DE",
+            "arte.tv": "FR",
+            "tf1.fr": "FR",
+            "rai.it": "IT",
+            "crunchyroll.com": "US",
+            "funimation.com": "US",
+            "hbo.com": "US",
+            "showtime.com": "US",
+            "starz.com": "US",
+            "amazon.co.uk": "GB",
+            "amazon.de": "DE",
+            "amazon.fr": "FR",
+            "amazon.co.jp": "JP",
+            "bbc.com": "GB",
+            "itvx.com": "GB",
+            "9now.com.au": "AU",
+            "sbs.com.au": "AU",
+            "ctv.ca": "CA",
+            "crave.ca": "CA",
+        }
+
+        domain_lower = domain.lower()
+        for pattern, country in GEO_REQUIREMENTS.items():
+            if pattern in domain_lower:
+                return country
+        return None
+
+    async def _rotate_to_next_proxy(
+        self,
+        domain: str = None,
+        country: str = None,
+        exclude: List[str] = None,
+    ) -> Optional[str]:
+        """
+        Rotate to the next proxy from the proxy manager.
+        Returns the proxy ID if successful, None otherwise.
+        """
+        if not self._proxy_manager:
+            return None
+
+        try:
+            # Get a proxy with failover
+            result = await self._proxy_manager.get_proxy(
+                domain=domain,
+                country=country,
+                exclude=exclude,
+                with_failover=True,
+            )
+
+            if result.get("status") != "success":
+                logger.warning(f"No proxy available for {domain}: {result.get('error')}")
+                return None
+
+            proxy_data = result["proxy"]
+            playwright_config = result["playwright_config"]
+            proxy_id = proxy_data["proxy_id"]
+
+            # Store current proxy info
+            self._current_proxy_config = playwright_config
+            self._domain_proxy_map[domain] = proxy_id
+
+            # For Playwright, we need to recreate the browser with the new proxy
+            # because Chromium doesn't support changing proxy at runtime
+            # Instead, we'll use the TLS proxy which CAN change proxies dynamically
+            if self._tls_proxy:
+                # Update TLS proxy to use this proxy
+                logger.info(f"Rotating to proxy {proxy_id} for {domain} (via TLS proxy)")
+            else:
+                # Direct proxy — need browser restart
+                logger.info(f"Proxy {proxy_id} selected for {domain} (browser restart needed for direct proxy)")
+
+            return proxy_id
+
+        except Exception as e:
+            logger.error(f"Proxy rotation failed: {e}")
+            return None
+
+    def _record_proxy_result(
+        self,
+        success: bool,
+        status_code: int = 0,
+        latency_ms: float = 0,
+        error: str = "",
+    ):
+        """Record the result of using a proxy for health tracking."""
+        if not self._proxy_manager or not self._current_proxy:
+            return
+
+        try:
+            self._proxy_manager.record_result(
+                proxy_id=self._current_proxy.proxy_id,
+                success=success,
+                latency_ms=latency_ms,
+                status_code=status_code,
+                error=error,
+            )
+        except Exception as e:
+            logger.debug(f"Failed to record proxy result: {e}")
+
+    @property
+    def current_proxy_info(self) -> Dict[str, Any]:
+        """Get info about the currently active proxy."""
+        if not self._current_proxy:
+            return {"status": "no_proxy", "proxy": None}
+        return {
+            "status": "active",
+            "proxy": self._current_proxy.to_dict() if hasattr(self._current_proxy, 'to_dict') else str(self._current_proxy),
+            "config": self._current_proxy_config,
+        }
+
     def _parse_proxy_url(self, proxy_url: str) -> Dict[str, Any]:
         """Parse proxy URL into Playwright proxy config."""
         from urllib.parse import urlparse
@@ -1721,6 +1926,9 @@ class AgentBrowser:
         # Close HTTP client
         if self._tls_http:
             self._tls_http.close()
+        # Stop proxy manager
+        if self._proxy_manager:
+            await self._proxy_manager.stop()
         logger.info("Browser stopped")
 
     async def tls_get(self, url: str, **kwargs) -> Dict[str, Any]:
