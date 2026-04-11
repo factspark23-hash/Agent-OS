@@ -1356,7 +1356,8 @@ class AgentBrowser:
             if box:
                 target_x = box["x"] + box["width"] / 2
                 target_y = box["y"] + box["height"] / 2
-                path = mimicry.mouse_path(target_x, target_y)
+                start_x, start_y = mimicry._last_move
+                path = mimicry.mouse_path(start_x, start_y, target_x, target_y)
 
                 for x, y in path:
                     await page.mouse.move(x, y)
@@ -1515,7 +1516,8 @@ class AgentBrowser:
             if box:
                 target_x = box["x"] + box["width"] / 2
                 target_y = box["y"] + box["height"] / 2
-                path = mimicry.mouse_path(target_x, target_y)
+                start_x, start_y = mimicry._last_move
+                path = mimicry.mouse_path(start_x, start_y, target_x, target_y)
                 for x, y in path:
                     await page.mouse.move(x, y)
                     await asyncio.sleep(random.uniform(0.005, 0.02))
@@ -1605,7 +1607,8 @@ class AgentBrowser:
             tgt_y = target_box["y"] + target_box["height"] / 2
 
             # Move to source with human-like path
-            path_to_source = mimicry.mouse_path(src_x, src_y)
+            start_x, start_y = mimicry._last_move
+            path_to_source = mimicry.mouse_path(start_x, start_y, src_x, src_y)
             for x, y in path_to_source:
                 await page.mouse.move(x, y)
                 await asyncio.sleep(random.uniform(0.005, 0.015))
@@ -1615,7 +1618,7 @@ class AgentBrowser:
             await asyncio.sleep(random.uniform(0.1, 0.3))
 
             # Drag to target with human-like path
-            path_to_target = mimicry.mouse_path(tgt_x, tgt_y)
+            path_to_target = mimicry.mouse_path(src_x, src_y, tgt_x, tgt_y)
             for x, y in path_to_target:
                 await page.mouse.move(x, y)
                 await asyncio.sleep(random.uniform(0.008, 0.02))
@@ -1688,7 +1691,8 @@ class AgentBrowser:
             if box:
                 target_x = box["x"] + box["width"] / 2
                 target_y = box["y"] + box["height"] / 2
-                path = mimicry.mouse_path(target_x, target_y)
+                start_x, start_y = mimicry._last_move
+                path = mimicry.mouse_path(start_x, start_y, target_x, target_y)
                 for x, y in path:
                     await page.mouse.move(x, y)
                     await asyncio.sleep(random.uniform(0.005, 0.02))
