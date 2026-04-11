@@ -46,19 +46,31 @@ class CaptchaBypass:
         r"perimeterx",
         r"px-cdn\.net",
         r"px-client\.net",
+        r"px-captcha\.net",
         # DataDome
         r"datadome\.co",
         r"captcha\.geo\.datadome",
+        r"js\.datadome\.co",
         # Imperva/Incapsula
         r"imperva\.com",
         r"incapdns\.net",
+        r"_Incapsula_Resource",
         # Akamai Bot Manager
         r"akamai-bot",
         r"akadns\.net.*bot",
+        r"akamai.*sensor",
         # Shape Security
         r"shapesecurity\.com",
         # Kasada
         r"kasada\.io",
+        r"k-i\.co",
+        # F5 / BigIP
+        r"f5-.*\.net",
+        r"bigip",
+        # Arkose Labs (FunCaptcha)
+        r"arkoselabs\.com",
+        r"funcaptcha\.co",
+        r"funcaptcha\.com",
         # Generic bot detection
         r"bot-detection",
         r"botdetect",
@@ -67,6 +79,13 @@ class CaptchaBypass:
         r"anti-bot",
         r"captcha",
         r"challenge\.php",
+        # Fraud detection
+        r"threatmetrix",
+        r"iovation",
+        r"nethra",
+        r"sardine\.com",
+        r"seon\.io",
+        r"ipqualityscore",
     ]
 
     # JavaScript patterns that detect bots
@@ -112,12 +131,19 @@ class CaptchaBypass:
             "recaptcha": ["recaptcha", "gstatic.com/recaptcha"],
             "hcaptcha": ["hcaptcha"],
             "cloudflare": ["challenges.cloudflare", "turnstile"],
-            "perimeterx": ["perimeterx", "px-cloud", "px-cdn", "px-client"],
+            "perimeterx": ["perimeterx", "px-cloud", "px-cdn", "px-client", "px-captcha"],
             "datadome": ["datadome"],
-            "imperva": ["imperva", "incapdns"],
+            "imperva": ["imperva", "incapdns", "_Incapsula_Resource"],
             "akamai": ["akamai"],
             "shape": ["shapesecurity"],
-            "kasada": ["kasada"],
+            "kasada": ["kasada", "k-i.co"],
+            "f5": ["f5-", "bigip"],
+            "arkose": ["arkoselabs", "funcaptcha"],
+            "threatmetrix": ["threatmetrix", "nethra"],
+            "iovation": ["iovation"],
+            "sardine": ["sardine"],
+            "seon": ["seon"],
+            "ipqualityscore": ["ipqualityscore"],
         }
         for det_type, patterns in type_map.items():
             if any(p in url_lower for p in patterns):
@@ -172,6 +198,36 @@ class CaptchaBypass:
             "kasada": {
                 "verified": True,
                 "token": "agent-os-kasada-token"
+            },
+            "f5": {
+                "bot_score": random.randint(90, 100),
+                "human": True
+            },
+            "arkose": {
+                "solved": True,
+                "session_token": "agent-os-arkose-token"
+            },
+            "threatmetrix": {
+                "org_id": "agent-os",
+                "result": "pass",
+                "risk_score": random.randint(1, 10)
+            },
+            "iovation": {
+                "result": "pass",
+                "confidence": round(random.uniform(0.9, 0.99), 2)
+            },
+            "sardine": {
+                "decision": "approve",
+                "risk_score": random.randint(1, 15)
+            },
+            "seon": {
+                "fraud_score": random.randint(1, 15),
+                "decision": "approve"
+            },
+            "ipqualityscore": {
+                "success": True,
+                "fraud_score": random.randint(1, 15),
+                "message": "Low Risk"
             },
             "generic": {
                 "human": True,

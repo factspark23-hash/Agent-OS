@@ -187,7 +187,7 @@ class UserContext:
             self.pages["main"] = page
 
         self.active_page = self.pages.get("main", list(self.pages.values())[0])
-        
+
         # Apply GOD MODE stealth to active page — THE ULTIMATE FIX
         try:
             # GOD MODE stealth — primary anti-detection layer
@@ -206,7 +206,7 @@ class UserContext:
             logger.info(f"GOD MODE stealth applied to active page for {self.user_id}")
         except Exception as e:
             logger.warning(f"GOD MODE stealth injection failed: {e}")
-        
+
         logger.info(f"User context initialized: {self.user_id} (profile: {self.profile_dir})")
 
     def _load_state(self) -> Optional[Dict]:

@@ -176,13 +176,15 @@ BOT_DETECTION_URLS = [
     "challenges.cloudflare.com",
     "cloudflare.com/cdn-cgi/challenge",
     "cloudflareinsights.com",
-    "static.cloudflareinsights.com",
     "managed-challenge",
     "no-connection",
     "check-bot", "verify-human", "bot-detection",
     "akamai-bot", "imperva", "f5-bot",
     "distil", "shape-security", "kasada",
     "botmanager", "radar", "fingerprint",
+    "arkoselabs", "funcaptcha", "threatmetrix",
+    "iovation", "nethra", "sardine", "seon.io",
+    "ipqualityscore", "fraudlabs",
 ]
 
 # Script URL patterns to block entirely (return empty body)
@@ -199,6 +201,13 @@ FAKE_RESPONSES = {
     "datadome": {"status": 200, "headers": {"x-datadome": "pass"}, "cookie": "human-verified"},
     "cloudflare": {"success": True, "cf_clearance": "agent-os-clearance-token"},
     "bot-detection": {"human": True, "verified": True, "timestamp": 1700000000},
+    "kasada": {"verified": True, "token": "agent-os-kasada-token"},
+    "arkose": {"solved": True, "session_token": "agent-os-arkose-token"},
+    "threatmetrix": {"org_id": "agent-os", "result": "pass", "risk_score": 5},
+    "iovation": {"result": "pass", "confidence": 0.95},
+    "sardine": {"decision": "approve", "risk_score": 10},
+    "seon": {"fraud_score": 10, "decision": "approve"},
+    "ipqualityscore": {"success": True, "fraud_score": 10, "message": "Low Risk"},
 }
 
 
@@ -225,16 +234,28 @@ def handle_request_interception(url: str, resource_type: str):
         "captcha.px-cloud.net",
         "px-cdn.net",
         "px-client.net",
+        "px-captcha.net",
         "captcha.geo.datadome",
+        "js.datadome.co",
         "datadome.co",
         "incapdns.net",
+        "_Incapsula_Resource",
         "shapesecurity.com",
         "kasada.io",
+        "k-i.co",
+        "arkoselabs.com",
+        "funcaptcha.co",
+        "funcaptcha.com",
+        "threatmetrix.com",
+        "nethra",
+        "iovation.com",
+        "sardine.com",
+        "seon.io",
+        "ipqualityscore.com",
     ]
 
     for domain in BLOCK_DOMAINS:
         if domain in url_lower:
-            # Determine which type and return appropriate fake response
             if "recaptcha" in url_lower or "gstatic.com/recaptcha" in url_lower:
                 return True, FAKE_RESPONSES.get("recaptcha", {"human": True})
             elif "hcaptcha" in url_lower:
@@ -245,6 +266,20 @@ def handle_request_interception(url: str, resource_type: str):
                 return True, FAKE_RESPONSES.get("perimeterx", {"human": True})
             elif "datadome" in url_lower:
                 return True, FAKE_RESPONSES.get("datadome", {"human": True})
+            elif "kasada" in url_lower or "k-i.co" in url_lower:
+                return True, FAKE_RESPONSES.get("kasada", {"human": True})
+            elif "arkoselabs" in url_lower or "funcaptcha" in url_lower:
+                return True, FAKE_RESPONSES.get("arkose", {"human": True})
+            elif "threatmetrix" in url_lower or "nethra" in url_lower:
+                return True, FAKE_RESPONSES.get("threatmetrix", {"human": True})
+            elif "iovation" in url_lower:
+                return True, FAKE_RESPONSES.get("iovation", {"human": True})
+            elif "sardine" in url_lower:
+                return True, FAKE_RESPONSES.get("sardine", {"human": True})
+            elif "seon" in url_lower:
+                return True, FAKE_RESPONSES.get("seon", {"human": True})
+            elif "ipqualityscore" in url_lower:
+                return True, FAKE_RESPONSES.get("ipqualityscore", {"human": True})
             else:
                 return True, {"human": True}
 
@@ -256,6 +291,14 @@ def handle_request_interception(url: str, resource_type: str):
             "botdetect",
             "perimeterx",
             "kasada",
+            "datadome",
+            "arkoselabs",
+            "funcaptcha",
+            "threatmetrix",
+            "iovation",
+            "sardine",
+            "seon.io",
+            "ipqualityscore",
         ]
         for pattern in SCRIPT_BLOCK_DOMAINS:
             if pattern in url_lower:

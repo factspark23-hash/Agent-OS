@@ -8,10 +8,8 @@ TLS ClientHello fingerprints at the network level — not just headers.
 """
 
 import logging
-import asyncio
 import random
-from typing import Optional, Dict, Any, List
-from urllib.parse import urlparse
+from typing import Optional, Dict, Any
 
 logger = logging.getLogger("agent-os.tls")
 
@@ -222,16 +220,16 @@ CHROME_BRAND_VERSIONS = {
 async def apply_browser_tls_spoofing(page, chrome_version: str = "124") -> bool:
     """
     Apply TLS metadata spoofing to a Playwright page via CDP.
-    
+
     This sets HTTP headers and User-Agent Client Hints to match a real
     Chrome browser. It does NOT change the TLS ClientHello (that's
     controlled by Chromium's BoringSSL). But it prevents header-level
     fingerprinting from detecting automation.
-    
+
     Args:
         page: Playwright Page object
         chrome_version: Chrome version to emulate
-    
+
     Returns:
         True if applied successfully
     """

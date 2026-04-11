@@ -24,9 +24,8 @@ Sites that this bypasses:
 """
 
 import logging
-import json
 import random
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict
 
 logger = logging.getLogger("agent-os.cdp-stealth")
 
@@ -53,10 +52,7 @@ def generate_cdp_stealth_js(
     This is injected via Page.addScriptToEvaluateOnNewDocument so it runs
     BEFORE any page JavaScript, including detection scripts.
     """
-    
-    # Chrome version parts for sec-ch-ua
-    major_ver = chrome_version.split(".")[0] if "." in chrome_version else chrome_version
-    
+
     return f"""
 // ═══════════════════════════════════════════════════════════════
 // AGENT-OS CDP STEALTH v4.0 — Complete Anti-Detection System
@@ -72,7 +68,7 @@ def generate_cdp_stealth_js(
 // Make a function look native when toString() is called
 function makeNative(fn, name) {{
     const fnStr = fn.toString();
-    const nativeStr = `function {name}() {{ [native code] }}`;
+    const nativeStr = `function ${{name}}() {{ [native code] }}`;
     Object.defineProperty(fn, 'toString', {{
         value: function() {{ return nativeStr; }},
         writable: false,
@@ -249,13 +245,13 @@ Object.defineProperty(Navigator.prototype, 'plugins', {{
                 refresh: function() {{}}
             }}
         ];
-        
+
         // Make plugins array-like
         plugins.length = 3;
         plugins.item = function(i) {{ return this[i] || null; }};
         plugins.namedItem = function(n) {{ return this.find(p => p.name === n) || null; }};
         plugins.refresh = function() {{}};
-        
+
         return plugins;
     }},
     configurable: true,
@@ -479,8 +475,8 @@ Object.defineProperty(window, 'devicePixelRatio', {{
 // ═══════════════════════════════════════════════════════════════
 
 const origGetParam = WebGLRenderingContext.prototype.getParameter;
-const origGetParam2 = typeof WebGL2RenderingContext !== 'undefined' 
-    ? WebGL2RenderingContext.prototype.getParameter 
+const origGetParam2 = typeof WebGL2RenderingContext !== 'undefined'
+    ? WebGL2RenderingContext.prototype.getParameter
     : null;
 
 WebGLRenderingContext.prototype.getParameter = function(param) {{
@@ -786,22 +782,22 @@ console.log('[Agent-OS] window.chrome:', !!window.chrome);
 class CDPStealthInjector:
     """
     Applies comprehensive anti-detection stealth via CDP.
-    
+
     Key method: inject_via_cdp()
     Uses Page.addScriptToEvaluateOnNewDocument which runs BEFORE
     any page JavaScript, including bot detection scripts.
-    
+
     This is fundamentally better than context.add_init_script() because:
     1. Runs earlier in the page lifecycle
     2. Applies to ALL frames (including iframes)
     3. Can delete from prototype chains (not just override)
     4. Harder for sites to detect
     """
-    
+
     def __init__(self):
         self._injected_pages: Dict[str, str] = {}  # page_id → script_id
         self._fingerprints: Dict[str, Dict] = {}
-    
+
     async def inject_into_page(
         self,
         page,
@@ -811,13 +807,13 @@ class CDPStealthInjector:
     ) -> bool:
         """
         Inject CDP stealth into a page using Page.addScriptToEvaluateOnNewDocument.
-        
+
         Args:
             page: Playwright Page object
             page_id: Identifier for this page
             chrome_version: Chrome version to emulate
             fingerprint: Optional pre-generated fingerprint dict
-            
+
         Returns:
             True if injection succeeded
         """
@@ -826,9 +822,9 @@ class CDPStealthInjector:
             if fingerprint is None:
                 from src.security.evasion_engine import generate_fingerprint
                 fingerprint = generate_fingerprint(os_target="windows")
-            
+
             self._fingerprints[page_id] = fingerprint
-            
+
             # Generate the stealth JavaScript
             stealth_js = generate_cdp_stealth_js(
                 chrome_version=fingerprint.get("chrome_version", chrome_version),
@@ -843,11 +839,11 @@ class CDPStealthInjector:
                 pixel_ratio=fingerprint.get("pixel_ratio", 1.0),
                 timezone=fingerprint.get("timezone", "America/New_York"),
             )
-            
+
             # Inject via CDP Page.addScriptToEvaluateOnNewDocument
             # This runs BEFORE any page JavaScript
             cdp = await page.context.new_cdp_session(page)
-            
+
             # Remove previous injection if any
             old_script_id = self._injected_pages.get(page_id)
             if old_script_id:
@@ -857,30 +853,30 @@ class CDPStealthInjector:
                     })
                 except Exception:
                     pass
-            
+
             # Inject the stealth script
             result = await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
                 "source": stealth_js,
                 "runImmediately": True,  # Run on current page too, not just new navigations
                 "worldName": "",  # Main world (default)
             })
-            
+
             script_id = result.get("identifier", "")
             self._injected_pages[page_id] = script_id
-            
+
             # Also set CDP-level overrides for User-Agent metadata
             await self._apply_cdp_overrides(cdp, fingerprint, chrome_version)
-            
+
             # Detach CDP session (script stays injected)
             await cdp.detach()
-            
+
             logger.info(f"CDP stealth injected into page '{page_id}' (Chrome {chrome_version})")
             return True
-            
+
         except Exception as e:
             logger.error(f"CDP stealth injection failed for '{page_id}': {e}")
             return False
-    
+
     async def inject_into_context(
         self,
         context,
@@ -898,9 +894,9 @@ class CDPStealthInjector:
             if fingerprint is None:
                 from src.security.evasion_engine import generate_fingerprint
                 fingerprint = generate_fingerprint(os_target="windows")
-            
+
             self._fingerprints[page_id] = fingerprint
-            
+
             # Generate the stealth JavaScript
             stealth_js = generate_cdp_stealth_js(
                 chrome_version=fingerprint.get("chrome_version", chrome_version),
@@ -915,34 +911,34 @@ class CDPStealthInjector:
                 pixel_ratio=fingerprint.get("pixel_ratio", 1.0),
                 timezone=fingerprint.get("timezone", "America/New_York"),
             )
-            
+
             # Create a temporary page to get CDP session
             temp_page = await context.new_page()
             cdp = await context.new_cdp_session(temp_page)
-            
+
             # Inject via CDP — applies to ALL pages in the context
             result = await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
                 "source": stealth_js,
                 "runImmediately": True,
             })
-            
+
             script_id = result.get("identifier", "")
             self._injected_pages[page_id] = script_id
-            
+
             # Apply CDP overrides
             await self._apply_cdp_overrides(cdp, fingerprint, chrome_version)
-            
+
             # Clean up
             await cdp.detach()
             await temp_page.close()
-            
+
             logger.info(f"CDP stealth injected into context (Chrome {chrome_version})")
             return True
-            
+
         except Exception as e:
             logger.error(f"CDP stealth injection into context failed: {e}")
             return False
-    
+
     async def _apply_cdp_overrides(
         self,
         cdp,
@@ -957,14 +953,14 @@ class CDPStealthInjector:
                 f"AppleWebKit/537.36 (KHTML, like Gecko) "
                 f"Chrome/{chrome_version}.0.0.0 Safari/537.36"
             )
-            
+
             # Chrome brand strings for sec-ch-ua
             brands = [
                 {"brand": "Chromium", "version": chrome_version},
                 {"brand": "Google Chrome", "version": chrome_version},
                 {"brand": "Not-A.Brand", "version": "99"},
             ]
-            
+
             # Set User-Agent override with full metadata
             await cdp.send("Emulation.setUserAgentOverride", {
                 "userAgent": ua,
@@ -985,29 +981,29 @@ class CDPStealthInjector:
                     "wow64": False,
                 },
             })
-            
+
             # Set timezone
             timezone = fingerprint.get("timezone", "America/New_York")
             await cdp.send("Emulation.setTimezoneOverride", {
                 "timezoneId": timezone,
             })
-            
+
             # Set locale
             await cdp.send("Emulation.setLocaleOverride", {
                 "locale": "en-US",
             })
-            
+
             logger.debug(f"CDP overrides applied (UA, timezone: {timezone})")
-            
+
         except Exception as e:
             logger.warning(f"CDP overrides partially failed: {e}")
-    
+
     async def remove_from_page(self, page, page_id: str) -> bool:
         """Remove CDP stealth from a page."""
         script_id = self._injected_pages.get(page_id)
         if not script_id:
             return False
-        
+
         try:
             cdp = await page.context.new_cdp_session(page)
             await cdp.send("Page.removeScriptToEvaluateOnNewDocument", {
@@ -1020,11 +1016,11 @@ class CDPStealthInjector:
         except Exception as e:
             logger.warning(f"Failed to remove CDP stealth: {e}")
             return False
-    
+
     def get_fingerprint(self, page_id: str = "main") -> Optional[Dict]:
         """Get the fingerprint used for a page."""
         return self._fingerprints.get(page_id)
-    
+
     @property
     def stats(self) -> Dict:
         """Get injection statistics."""

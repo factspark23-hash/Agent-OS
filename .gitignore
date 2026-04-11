@@ -1,13 +1,13 @@
-# Agent-OS
-node_modules/
-__pycache__/
-*.pyc
-venv/
-.env
-*.enc
-*.key
 .agent-os/
+# Agent-OS
+.coverage
 dist/
 *.egg-info/
+*.enc
+.env
+*.key
+node_modules/
+*.pyc
+__pycache__/
 .pytest_cache/
-.coverage
+venv/

@@ -24,7 +24,7 @@ from src.core.tls_spoof import apply_browser_tls_spoofing
 from src.core.tls_proxy import TLSProxyServer, TLSHTTPClient, _CURL_AVAILABLE
 from src.core.cdp_stealth import CDPStealthInjector
 from src.core.stealth_god import GodModeStealth
-from src.tools.proxy_rotation import ProxyManager, ProxyInfo, RotationStrategy
+from src.tools.proxy_rotation import ProxyManager, ProxyInfo
 from src.security.evasion_engine import EvasionEngine
 from src.security.human_mimicry import HumanMimicry
 
@@ -550,8 +550,6 @@ class AgentBrowser:
 
             # Human-like delay before navigation
             await asyncio.sleep(random.uniform(0.3, 1.2))
-
-            request_id = f"{domain}-{attempt}-{random.randint(1000,9999)}"
 
             try:
                 response = await page.goto(url, wait_until=wait_until, timeout=30000)

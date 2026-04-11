@@ -31,11 +31,9 @@ Sites that WILL NOT be able to detect this:
 """
 
 import logging
-import json
 import random
 import hashlib
-import time
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from dataclasses import dataclass
 
 logger = logging.getLogger("agent-os.stealth-god")
@@ -52,7 +50,7 @@ class ConsistentFingerprint:
     Sites cross-check: if WebGL says Intel but canvas says NVIDIA → bot.
     This ensures everything matches a real hardware combination.
     """
-    
+
     # Hardware profile (real combinations from telemetry data)
     HARDWARE_PROFILES = [
         {
@@ -119,61 +117,61 @@ class ConsistentFingerprint:
             "pixel_ratio": 2.0,
         },
     ]
-    
+
     CHROME_VERSIONS = [
         ("124", 20), ("123", 18), ("122", 15), ("121", 12),
         ("120", 10), ("119", 8),
     ]
-    
+
     TIMEZONES = [
         ("America/New_York", 20), ("America/Chicago", 10),
         ("America/Los_Angeles", 15), ("Europe/London", 12),
         ("Europe/Berlin", 10), ("Europe/Paris", 8),
     ]
-    
+
     def __init__(self, seed: int = None):
         """Generate a consistent fingerprint from a seed."""
         if seed is None:
             seed = random.randint(1, 2**31 - 1)
-        
+
         self.seed = seed
         self._rng = random.Random(seed)
-        
+
         # Select hardware profile
         self.hardware = self._rng.choice(self.HARDWARE_PROFILES)
-        
+
         # Select Chrome version
         versions, weights = zip(*self.CHROME_VERSIONS)
         self.chrome_version = self._weighted_choice(versions, weights)
-        
+
         # Select timezone
         timezones, tz_weights = zip(*self.TIMEZONES)
         self.timezone = self._weighted_choice(timezones, tz_weights)
-        
+
         # Derived values
         self.platform = "Win32" if "Apple" not in self.hardware["name"] else "MacIntel"
         self.os = "windows" if self.platform == "Win32" else "mac"
-        
+
         # Canvas/Audio noise seeds (deterministic from main seed)
         self.canvas_seed = self._rng.randint(1, 2**31 - 1)
         self.audio_seed = self._rng.randint(1, 2**31 - 1)
-        
+
         # Fingerprint ID (for tracking)
         self.fp_id = hashlib.md5(
             f"{seed}{self.hardware['name']}{self.chrome_version}".encode()
         ).hexdigest()[:12]
-        
+
         # Build user agent
         if self.os == "windows":
             ua_os = "Windows NT 10.0; Win64; x64"
         else:
             ua_os = "Macintosh; Intel Mac OS X 10_15_7"
-        
+
         self.user_agent = (
             f"Mozilla/5.0 ({ua_os}) AppleWebKit/537.36 "
             f"(KHTML, like Gecko) Chrome/{self.chrome_version}.0.0.0 Safari/537.36"
         )
-    
+
     def _weighted_choice(self, items, weights):
         total = sum(weights)
         r = self._rng.uniform(0, total)
@@ -183,7 +181,7 @@ class ConsistentFingerprint:
             if r <= cumulative:
                 return item
         return items[-1]
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "fp_id": self.fp_id,
@@ -213,7 +211,7 @@ def generate_god_mode_js(fp: ConsistentFingerprint) -> str:
     """
     Generate the ULTIMATE anti-detection JavaScript.
     This script is designed to be UNDETECTABLE by any current or future bot detection.
-    
+
     Key principles:
     1. Never use Object.defineProperty on navigator (detectable)
     2. Always modify prototype chains (undetectable)
@@ -223,7 +221,7 @@ def generate_god_mode_js(fp: ConsistentFingerprint) -> str:
     6. Sanitize ALL stack traces
     7. Randomize timing (but consistently)
     """
-    
+
     return f"""
 // ═══════════════════════════════════════════════════════════════
 // AGENT-OS GOD MODE v5.0 — Ultimate Anti-Detection System
@@ -856,21 +854,21 @@ class GodModeStealth:
     The ultimate stealth injection system.
     Uses CDP to inject BEFORE any page JavaScript runs.
     """
-    
+
     def __init__(self):
         self._fingerprints: Dict[str, ConsistentFingerprint] = {}
         self._injected_pages: Dict[str, str] = {}
-    
+
     def generate_fingerprint(self, page_id: str = "main") -> ConsistentFingerprint:
         """Generate a consistent fingerprint for a page."""
         fp = ConsistentFingerprint()
         self._fingerprints[page_id] = fp
         return fp
-    
+
     def get_fingerprint(self, page_id: str = "main") -> Optional[ConsistentFingerprint]:
         """Get the fingerprint for a page."""
         return self._fingerprints.get(page_id)
-    
+
     async def inject_into_page(self, page, page_id: str = "main") -> bool:
         """
         Inject GOD MODE stealth into a page using CDP.
@@ -881,13 +879,13 @@ class GodModeStealth:
             fp = self._fingerprints.get(page_id)
             if not fp:
                 fp = self.generate_fingerprint(page_id)
-            
+
             # Generate the stealth JavaScript
             stealth_js = generate_god_mode_js(fp)
-            
+
             # Inject via CDP
             cdp = await page.context.new_cdp_session(page)
-            
+
             # Remove previous injection if any
             old_script_id = self._injected_pages.get(page_id)
             if old_script_id:
@@ -897,29 +895,29 @@ class GodModeStealth:
                     })
                 except Exception:
                     pass
-            
+
             # Inject with runImmediately=True (runs on current page too)
             result = await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
                 "source": stealth_js,
                 "runImmediately": True,
             })
-            
+
             script_id = result.get("identifier", "")
             self._injected_pages[page_id] = script_id
-            
+
             # Apply CDP-level overrides
             await self._apply_cdp_overrides(cdp, fp)
-            
+
             # Detach CDP session
             await cdp.detach()
-            
+
             logger.info(f"GOD MODE stealth injected: {fp.fp_id} ({fp.hardware['name']}, Chrome {fp.chrome_version})")
             return True
-            
+
         except Exception as e:
             logger.error(f"GOD MODE injection failed for '{page_id}': {e}")
             return False
-    
+
     async def _apply_cdp_overrides(self, cdp, fp: ConsistentFingerprint):
         """Apply CDP-level overrides."""
         try:
@@ -949,22 +947,22 @@ class GodModeStealth:
                     "wow64": False,
                 },
             })
-            
+
             # Timezone override
             await cdp.send("Emulation.setTimezoneOverride", {
                 "timezoneId": fp.timezone,
             })
-            
+
             # Locale override
             await cdp.send("Emulation.setLocaleOverride", {
                 "locale": "en-US",
             })
-            
+
             logger.debug(f"CDP overrides applied for {fp.fp_id}")
-            
+
         except Exception as e:
             logger.warning(f"CDP overrides partially failed: {e}")
-    
+
     @property
     def stats(self) -> Dict:
         return {

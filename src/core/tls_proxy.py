@@ -16,12 +16,9 @@ Architecture:
 import asyncio
 import logging
 import time
-import random
-import hashlib
-import json
 import re
-from typing import Optional, Dict, Any, List, Tuple
-from urllib.parse import urlparse, urljoin
+from typing import Optional, Dict
+from urllib.parse import urlparse
 from dataclasses import dataclass, field
 from collections import defaultdict
 
