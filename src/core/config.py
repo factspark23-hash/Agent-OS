@@ -57,6 +57,8 @@ DEFAULT_CONFIG = {
         "device": "desktop_1080",
         "locale": "en-US",
         "timezone_id": "America/New_York",
+        "tls_proxy_enabled": True,
+        "tls_proxy_port": 8081,
     },
     "session": {
         "timeout_minutes": 15,

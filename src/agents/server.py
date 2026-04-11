@@ -723,6 +723,9 @@ class AgentServer:
                 "legacy_token": self.config.get("security.allow_legacy_token_auth", True),
             },
         }
+        # TLS fingerprinting stats
+        if hasattr(self.browser, "tls_stats"):
+            status["tls"] = self.browser.tls_stats
         if self.persistent_manager:
             ph = self.persistent_manager.get_health()
             status["persistent_browser"] = ph.get("summary", {})
@@ -926,6 +929,10 @@ class AgentServer:
             # Proxy
             "set-proxy": self._cmd_set_proxy,
             "get-proxy": self._cmd_get_proxy,
+            # TLS Fingerprint HTTP Requests
+            "tls-get": self._cmd_tls_get,
+            "tls-post": self._cmd_tls_post,
+            "tls-stats": self._cmd_tls_stats,
             # Mobile Emulation
             "emulate-device": self._cmd_emulate_device,
             "list-devices": self._cmd_list_devices,
@@ -1487,6 +1494,39 @@ class AgentServer:
 
     async def _cmd_get_proxy(self, data: Dict, session) -> Dict:
         return await self.browser.get_proxy()
+
+    # ─── TLS Fingerprint HTTP Requests ─────────────────────
+
+    async def _cmd_tls_get(self, data: Dict, session) -> Dict:
+        """HTTP GET with real browser TLS fingerprint (no browser needed)."""
+        url = data.get("url")
+        if not url:
+            return {"status": "error", "error": "Missing 'url'"}
+        headers = data.get("headers", {})
+        profile = data.get("profile")
+        timeout = data.get("timeout", 30)
+        return await self.browser.tls_get(url, headers=headers, profile=profile, timeout=timeout)
+
+    async def _cmd_tls_post(self, data: Dict, session) -> Dict:
+        """HTTP POST with real browser TLS fingerprint (no browser needed)."""
+        url = data.get("url")
+        if not url:
+            return {"status": "error", "error": "Missing 'url'"}
+        headers = data.get("headers", {})
+        json_data = data.get("json")
+        body = data.get("body")
+        profile = data.get("profile")
+        timeout = data.get("timeout", 30)
+        kwargs = {"headers": headers, "profile": profile, "timeout": timeout}
+        if json_data:
+            kwargs["json_data"] = json_data
+        elif body:
+            kwargs["data"] = body.encode() if isinstance(body, str) else body
+        return await self.browser.tls_post(url, **kwargs)
+
+    async def _cmd_tls_stats(self, data: Dict, session) -> Dict:
+        """Get TLS proxy and fingerprinting statistics."""
+        return {"status": "success", **self.browser.tls_stats}
 
     # ─── Mobile Emulation ──────────────────────────────────
 

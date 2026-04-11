@@ -20,6 +20,7 @@ from src.core.stealth import (
     handle_request_interception,
 )
 from src.core.tls_spoof import apply_browser_tls_spoofing
+from src.core.tls_proxy import TLSProxyServer, TLSHTTPClient, _CURL_AVAILABLE
 from src.security.evasion_engine import EvasionEngine
 from src.security.human_mimicry import HumanMimicry
 
@@ -75,6 +76,11 @@ class AgentBrowser:
         self._evasion = EvasionEngine()
         # Import at class level to avoid repeated imports
         self._mimicry = HumanMimicry()
+        # TLS proxy for real browser fingerprint
+        self._tls_proxy: Optional[TLSProxyServer] = None
+        self._tls_http: Optional[TLSHTTPClient] = None
+        self._tls_proxy_port = self.config.get("browser.tls_proxy_port", 8081)
+        self._tls_proxy_enabled = self.config.get("browser.tls_proxy_enabled", True)
 
     def _get_or_create_cookie_key(self) -> bytes:
         """Get or create encryption key for cookie storage."""
@@ -92,8 +98,27 @@ class AgentBrowser:
         self._cookie_dir.mkdir(parents=True, exist_ok=True)
         self._download_dir.mkdir(parents=True, exist_ok=True)
 
+        # Start TLS proxy if curl_cffi is available
+        if self._tls_proxy_enabled and _CURL_AVAILABLE:
+            try:
+                self._tls_proxy = TLSProxyServer(port=self._tls_proxy_port)
+                proxy_started = await self._tls_proxy.start()
+                if proxy_started:
+                    logger.info(f"TLS proxy active on port {self._tls_proxy_port}")
+                else:
+                    self._tls_proxy = None
+                    logger.warning("TLS proxy failed to start, using direct connection")
+            except Exception as e:
+                logger.warning(f"TLS proxy startup failed: {e}")
+                self._tls_proxy = None
+        elif self._tls_proxy_enabled:
+            logger.warning("curl_cffi not installed — TLS proxy disabled, bot detection risk HIGH")
+
+        # Initialize HTTP client for non-browser requests
+        self._tls_http = TLSHTTPClient()
+
         await self._launch_browser()
-        logger.info("Browser started with stealth patches v2.0")
+        logger.info("Browser started with stealth patches v2.0 + TLS fingerprinting")
 
     async def _launch_browser(self):
         """Internal: launch browser and set up context."""
@@ -128,13 +153,23 @@ class AgentBrowser:
             "args": self._launch_args,
         }
 
-        # Proxy support
-        proxy_url = self.config.get("browser.proxy")
-        if proxy_url:
-            proxy_config = self._parse_proxy_url(proxy_url)
-            launch_options["proxy"] = proxy_config
-            self._proxy_config = proxy_config
-            logger.info(f"Proxy configured: {proxy_config.get('server', 'N/A')}")
+        # Proxy support — prefer TLS proxy, then user-configured proxy
+        if self._tls_proxy:
+            # Route all traffic through our TLS proxy for real browser TLS fingerprint
+            tls_proxy_config = {
+                "server": self._tls_proxy.proxy_url,
+            }
+            launch_options["proxy"] = tls_proxy_config
+            self._proxy_config = tls_proxy_config
+            logger.info(f"TLS proxy configured: {self._tls_proxy.proxy_url}")
+        else:
+            # Fallback to user-configured proxy
+            proxy_url = self.config.get("browser.proxy")
+            if proxy_url:
+                proxy_config = self._parse_proxy_url(proxy_url)
+                launch_options["proxy"] = proxy_config
+                self._proxy_config = proxy_config
+                logger.info(f"Proxy configured: {proxy_config.get('server', 'N/A')}")
 
         self.browser = await self.playwright.chromium.launch(**launch_options)
 
@@ -222,6 +257,16 @@ class AgentBrowser:
             self.page = None
             self._pages.clear()
             self._console_logs.clear()
+
+            # Ensure TLS proxy is still running
+            if self._tls_proxy_enabled and _CURL_AVAILABLE and not self._tls_proxy:
+                try:
+                    self._tls_proxy = TLSProxyServer(port=self._tls_proxy_port)
+                    await self._tls_proxy.start()
+                    logger.info("TLS proxy restarted after crash")
+                except Exception as e:
+                    logger.warning(f"TLS proxy restart failed: {e}")
+                    self._tls_proxy = None
 
             # Relaunch
             await self._launch_browser()
@@ -1623,4 +1668,52 @@ class AgentBrowser:
             await self.browser.close()
         if self.playwright:
             await self.playwright.stop()
+        # Stop TLS proxy
+        if self._tls_proxy:
+            await self._tls_proxy.stop()
+        # Close HTTP client
+        if self._tls_http:
+            self._tls_http.close()
         logger.info("Browser stopped")
+
+    async def tls_get(self, url: str, **kwargs) -> Dict[str, Any]:
+        """HTTP GET with real browser TLS fingerprint (no browser needed)."""
+        if self._tls_http and self._tls_http.available:
+            resp = await self._tls_http.get(url, **kwargs)
+            return {
+                "status_code": resp.status_code,
+                "text": resp.text,
+                "headers": resp.headers,
+                "url": resp.url,
+                "tls_profile": resp.tls_profile,
+                "error": resp.error,
+            }
+        return {"error": "TLS HTTP client not available"}
+
+    async def tls_post(self, url: str, **kwargs) -> Dict[str, Any]:
+        """HTTP POST with real browser TLS fingerprint (no browser needed)."""
+        if self._tls_http and self._tls_http.available:
+            resp = await self._tls_http.post(url, **kwargs)
+            return {
+                "status_code": resp.status_code,
+                "text": resp.text,
+                "headers": resp.headers,
+                "url": resp.url,
+                "tls_profile": resp.tls_profile,
+                "error": resp.error,
+            }
+        return {"error": "TLS HTTP client not available"}
+
+    @property
+    def tls_stats(self) -> Dict:
+        """Get TLS proxy and HTTP client statistics."""
+        stats = {
+            "curl_cffi_available": _CURL_AVAILABLE,
+            "proxy_running": self._tls_proxy is not None,
+            "proxy_url": self._tls_proxy.proxy_url if self._tls_proxy else None,
+        }
+        if self._tls_proxy:
+            stats["proxy_stats"] = self._tls_proxy.stats
+        if self._tls_http:
+            stats["http_client_stats"] = self._tls_http.stats
+        return stats
