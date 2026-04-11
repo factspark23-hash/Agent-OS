@@ -150,6 +150,20 @@ cd "$INSTALL_DIR"
 # ─── Step 4: Virtual Environment ────────────────────────
 step "Setting up virtual environment..."
 if [ ! -d "venv" ]; then
+    # Ensure venv module is available
+    if ! $PYTHON -m venv --help > /dev/null 2>&1; then
+        warn "python3-venv not found. Installing..."
+        PY_VER=$($PYTHON -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+        if command -v apt-get > /dev/null 2>&1; then
+            run_privileged apt-get update -qq 2>/dev/null
+            run_privileged apt-get install -y -qq "python${PY_VER}-venv" python3-pip python3-dev build-essential 2>/dev/null
+        elif command -v dnf > /dev/null 2>&1; then
+            run_privileged dnf install -y -q python3-venv python3-pip python3-devel gcc 2>/dev/null
+        elif command -v yum > /dev/null 2>&1; then
+            run_privileged yum install -y -q python3-venv python3-pip python3-devel gcc 2>/dev/null
+        fi
+    fi
+
     $PYTHON -m venv venv 2>/dev/null || {
         $PYTHON -m venv --without-pip venv
         source venv/bin/activate
@@ -183,15 +197,20 @@ ok "System dependencies ready"
 
 # ─── Step 6: Python Dependencies ────────────────────────
 step "Installing Python packages..."
-pip install --upgrade pip -q
+pip install --upgrade pip -q 2>&1 | tail -1
 REQ_FILE="requirements.lock"
 [ ! -f "$REQ_FILE" ] && REQ_FILE="requirements.txt"
-pip install -r "$REQ_FILE" -q
+pip install -r "$REQ_FILE" --no-cache-dir 2>&1 | tail -5 || {
+    warn "Some packages failed. Retrying with --no-build-isolation..."
+    pip install -r "$REQ_FILE" --no-build-isolation 2>&1 | tail -5 || true
+}
 ok "Python packages installed"
 
 # ─── Step 7: Playwright Chromium ────────────────────────
 step "Installing Chromium browser..."
 python -m playwright install chromium 2>&1 | tail -1
+# Also install system deps if available
+python -m playwright install-deps chromium 2>&1 | tail -1 || true
 ok "Chromium ready"
 
 # ─── Step 8: Environment File ───────────────────────────

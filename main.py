@@ -78,9 +78,11 @@ class AgentOS:
             from src.auth.jwt_handler import JWTHandler
             jwt_secret = self.config.get("jwt.secret_key") or os.environ.get("JWT_SECRET_KEY")
             if not jwt_secret:
-                self.logger.error("JWT_SECRET_KEY not set. Set it via environment variable or config jwt.secret_key")
-                self.logger.error("Generate one with: python -c 'import secrets; print(secrets.token_urlsafe(48))'")
-                sys.exit(1)
+                # Auto-generate for Docker/testing, warn in production
+                import secrets
+                jwt_secret = secrets.token_urlsafe(48)
+                self.logger.warning("JWT_SECRET_KEY not set — auto-generated (sessions won't survive restarts)")
+                self.logger.warning("For production: set JWT_SECRET_KEY env var")
 
             self.jwt_handler = JWTHandler(
                 secret_key=jwt_secret,

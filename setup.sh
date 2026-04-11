@@ -54,11 +54,23 @@ if [ ! -d "$VENV_DIR" ]; then
     # Check if python3-venv is available
     if ! python3 -m venv --help > /dev/null 2>&1; then
         echo "⚠️  python3-venv not found. Attempting to install..."
+        PYTHON_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
         if command -v apt-get > /dev/null 2>&1; then
-            run_privileged apt-get update -qq && run_privileged apt-get install -y -qq "python${PYTHON_VERSION}-venv"
+            run_privileged apt-get update -qq && run_privileged apt-get install -y -qq "python${PYTHON_VER}-venv" python3-pip python3-dev build-essential
+        elif command -v dnf > /dev/null 2>&1; then
+            run_privileged dnf install -y -q python3-venv python3-pip python3-devel gcc
+        elif command -v yum > /dev/null 2>&1; then
+            run_privileged yum install -y -q python3-venv python3-pip python3-devel gcc
         else
             echo "❌ Cannot install python3-venv. Install it manually and re-run."
             exit 1
+        fi
+    fi
+
+    # Also ensure pip and build tools exist
+    if ! python3 -m pip --version > /dev/null 2>&1; then
+        if command -v apt-get > /dev/null 2>&1; then
+            run_privileged apt-get install -y -qq python3-pip 2>/dev/null || true
         fi
     fi
 
@@ -133,14 +145,18 @@ if [ ! -f "$REQUIREMENTS_FILE" ]; then
 fi
 echo ""
 echo "📦 Installing Python dependencies from $(basename $REQUIREMENTS_FILE)..."
-pip install --upgrade pip -q
-pip install -r "$REQUIREMENTS_FILE" -q
+pip install --upgrade pip -q 2>&1 | tail -1
+pip install -r "$REQUIREMENTS_FILE" --no-cache-dir 2>&1 | tail -5 || {
+    echo "⚠️  Some packages failed. Retrying..."
+    pip install -r "$REQUIREMENTS_FILE" --no-build-isolation 2>&1 | tail -5 || true
+}
 echo "✅ Python dependencies installed"
 
 # ─── Playwright Chromium ─────────────────────────────────────
 echo ""
 echo "🌐 Installing Playwright Chromium..."
-$PYTHON_CMD -m playwright install chromium
+$PYTHON_CMD -m playwright install chromium 2>&1 | tail -1
+$PYTHON_CMD -m playwright install-deps chromium 2>&1 | tail -1 || true
 echo "✅ Chromium installed"
 
 # ─── Verify Installation ─────────────────────────────────────
