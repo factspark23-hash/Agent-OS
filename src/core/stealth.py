@@ -206,18 +206,58 @@ def handle_request_interception(url: str, resource_type: str):
     """
     Shared request handler for bot detection blocking.
     Returns (should_block: bool, fake_response: dict|None).
+
+    Only blocks KNOWN detection endpoints, not any URL containing keywords.
+    This prevents blocking legitimate pages that happen to contain words like
+    "captcha" or "turnstile" in their content/path.
     """
     url_lower = url.lower()
 
-    # Check full URL against bot detection patterns
-    for pattern in BOT_DETECTION_URLS:
-        if pattern in url_lower:
-            fake = FAKE_RESPONSES.get(pattern, {"human": True})
-            return True, fake
+    # Only block if the URL is a KNOWN detection endpoint
+    # Check for specific detection domains/paths, not just keyword presence
+    BLOCK_DOMAINS = [
+        "google.com/recaptcha",
+        "gstatic.com/recaptcha",
+        "recaptcha.net",
+        "hcaptcha.com",
+        "challenges.cloudflare.com",
+        "cloudflare.com/cdn-cgi/challenge",
+        "captcha.px-cloud.net",
+        "px-cdn.net",
+        "px-client.net",
+        "captcha.geo.datadome",
+        "datadome.co",
+        "incapdns.net",
+        "shapesecurity.com",
+        "kasada.io",
+    ]
 
-    # Block bot detection scripts entirely
+    for domain in BLOCK_DOMAINS:
+        if domain in url_lower:
+            # Determine which type and return appropriate fake response
+            if "recaptcha" in url_lower or "gstatic.com/recaptcha" in url_lower:
+                return True, FAKE_RESPONSES.get("recaptcha", {"human": True})
+            elif "hcaptcha" in url_lower:
+                return True, FAKE_RESPONSES.get("captcha", {"human": True})
+            elif "cloudflare" in url_lower or "turnstile" in url_lower:
+                return True, FAKE_RESPONSES.get("cloudflare", {"human": True})
+            elif "perimeterx" in url_lower or "px-" in url_lower:
+                return True, FAKE_RESPONSES.get("perimeterx", {"human": True})
+            elif "datadome" in url_lower:
+                return True, FAKE_RESPONSES.get("datadome", {"human": True})
+            else:
+                return True, {"human": True}
+
+    # Block bot detection scripts by domain (not by keyword)
     if resource_type == "script":
-        for pattern in BOT_DETECTION_SCRIPT_PATTERNS:
+        SCRIPT_BLOCK_DOMAINS = [
+            "recaptcha",
+            "hcaptcha",
+            "botdetect",
+            "perimeterx",
+            "kasada",
+        ]
+        for pattern in SCRIPT_BLOCK_DOMAINS:
             if pattern in url_lower:
                 return True, None  # Return empty body
 

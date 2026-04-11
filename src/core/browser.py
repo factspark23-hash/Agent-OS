@@ -160,11 +160,14 @@ class AgentBrowser:
 
         self.context = await self.browser.new_context(**context_options)
 
-        # Inject stealth script on every page (base layer — removes webdriver, etc.)
-        await self.context.add_init_script(ANTI_DETECTION_JS)
+        # Generate fingerprint FIRST (before creating page)
+        fp = self._evasion.generate_fingerprint(page_id="main")
+        chrome_ver = fp["chrome_version"] if fp else "124"
 
-        # Generate and inject a randomized fingerprint (real-world distributions)
-        await self._evasion.inject_into_page(self.page, page_id="main")
+        # Inject stealth + fingerprint as a SINGLE context-level init script
+        # This runs on EVERY page created from this context, before any page JS
+        fingerprint_js = self._evasion.get_injection_js("main")
+        await self.context.add_init_script(ANTI_DETECTION_JS + "\n" + fingerprint_js)
 
         # Set up request interception for bot detection blocking
         await self.context.route("**/*", self._handle_request)
@@ -172,14 +175,13 @@ class AgentBrowser:
         # Set up download handler
         self.context.on("download", self._handle_download)
 
-        # Apply TLS fingerprint spoofing via CDP
-        fp = self._evasion.get_fingerprint("main")
-        chrome_ver = fp["chrome_version"] if fp else "124"
-        await apply_browser_tls_spoofing(self.page, chrome_version=chrome_ver)
-
+        # Create the page BEFORE applying CDP-level spoofing
         self.page = await self.context.new_page()
         self._pages["main"] = self.page
         self._attach_console_listener("main", self.page)
+
+        # Apply TLS fingerprint spoofing via CDP (needs an existing page)
+        await apply_browser_tls_spoofing(self.page, chrome_version=chrome_ver)
 
     async def recover(self):
         """Recover from browser crash by relaunching."""
@@ -347,35 +349,152 @@ class AgentBrowser:
             return
         await route.continue_()
 
-    async def navigate(self, url: str, page_id: str = "main", wait_until: str = "domcontentloaded") -> Dict[str, Any]:
-        """Navigate to a URL with human-like timing and auto proxy rotation."""
+    # Block indicators that suggest a challenge/block page
+    _BLOCK_INDICATORS = [
+        "access denied", "captcha", "bot detected", "just a moment",
+        "checking your browser", "please verify", "unusual traffic",
+        "challenge", "blocked", "not available in your region",
+        "cloudflare ray id", "attention required",
+    ]
+
+    def _is_blocked_page(self, title: str, text: str) -> bool:
+        """Check if the loaded page is a block/challenge page."""
+        combined = (title + " " + text[:500]).lower()
+        return any(indicator in combined for indicator in self._BLOCK_INDICATORS)
+
+    async def _try_cloudflare_bypass(self, url: str, page: Page) -> bool:
+        """
+        Attempt Cloudflare bypass using cloudscraper.
+        Gets cf_clearance cookies and applies them to the Playwright context.
+        """
+        if not self._evasion.cloudflare.available:
+            return False
+
+        logger.info(f"Attempting Cloudflare bypass for {url[:60]}...")
+        loop = asyncio.get_event_loop()
+        cf_data = await loop.run_in_executor(
+            None, self._evasion.cloudflare.get_clearance_cookies, url
+        )
+
+        if not cf_data or not cf_data.get("cf_clearance"):
+            logger.warning("Cloudflare bypass failed — no clearance cookie")
+            return False
+
+        # Apply cookies to the Playwright context
+        cookies = cf_data.get("cookies", {})
+        cookie_list = []
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        domain = parsed.hostname
+
+        for name, value in cookies.items():
+            cookie_list.append({
+                "name": name,
+                "value": value,
+                "domain": domain,
+                "path": "/",
+            })
+
+        if cookie_list:
+            await self.context.add_cookies(cookie_list)
+            logger.info(f"Applied {len(cookie_list)} Cloudflare cookies")
+
+        # Update user agent if cloudscraper returned one
+        cf_ua = cf_data.get("user_agent")
+        if cf_ua:
+            logger.info(f"Cloudscraper UA: {cf_ua[:60]}...")
+
+        return True
+
+    async def navigate(self, url: str, page_id: str = "main", wait_until: str = "domcontentloaded",
+                       retries: int = 2) -> Dict[str, Any]:
+        """Navigate to a URL with human-like timing, auto retry, and Cloudflare bypass."""
         page = self._pages.get(page_id, self.page)
 
-        # Auto-rotate proxy if pool is configured
-        await self._maybe_rotate_proxy()
+        last_error = None
+        for attempt in range(retries + 1):
+            if attempt > 0:
+                # Backoff delay between retries
+                wait_time = random.uniform(2.0, 5.0) * attempt
+                logger.info(f"Retry {attempt}/{retries} for {url[:60]} (waiting {wait_time:.1f}s)")
+                await asyncio.sleep(wait_time)
 
-        # Human-like delay before navigation
-        await asyncio.sleep(random.uniform(0.3, 1.2))
+            # Auto-rotate proxy if pool is configured
+            await self._maybe_rotate_proxy()
 
-        try:
-            response = await page.goto(url, wait_until=wait_until, timeout=30000)
+            # Human-like delay before navigation
+            await asyncio.sleep(random.uniform(0.3, 1.2))
 
-            # Wait for page to fully load
-            await asyncio.sleep(random.uniform(0.5, 1.5))
+            try:
+                response = await page.goto(url, wait_until=wait_until, timeout=30000)
 
-            # Save cookies after navigation
-            await self._save_cookies("default")
+                # Wait for page to fully load (longer on retries for JS challenges)
+                load_wait = random.uniform(0.5, 1.5) + (attempt * 2.0)
+                await asyncio.sleep(load_wait)
 
-            return {
-                "status": "success",
-                "url": page.url,
-                "title": await page.title(),
-                "status_code": response.status if response else 200,
-                "blocked_requests": self._blocked_requests
-            }
-        except Exception as e:
-            logger.error(f"Navigation failed: {e}")
-            return {"status": "error", "error": str(e)}
+                # Check if we got a block/challenge page
+                title = await page.title()
+                text = ""
+                try:
+                    body = await page.query_selector("body")
+                    if body:
+                        text = await body.inner_text()
+                except Exception:
+                    pass
+
+                status_code = response.status if response else 200
+
+                # If blocked and we have retries left, try bypass
+                if self._is_blocked_page(title, text) and attempt < retries:
+                    logger.warning(f"Block/challenge detected on {url[:60]} (attempt {attempt + 1})")
+
+                    # Try Cloudflare bypass
+                    if "cloudflare" in title.lower() or "just a moment" in title.lower():
+                        bypassed = await self._try_cloudflare_bypass(url, page)
+                        if bypassed:
+                            # Reload with clearance cookies
+                            try:
+                                response = await page.reload(wait_until=wait_until, timeout=30000)
+                                await asyncio.sleep(random.uniform(2.0, 4.0))
+                                title = await page.title()
+                                if not self._is_blocked_page(title, ""):
+                                    # Bypass worked!
+                                    await self._save_cookies("default")
+                                    return {
+                                        "status": "success",
+                                        "url": page.url,
+                                        "title": title,
+                                        "status_code": response.status if response else 200,
+                                        "blocked_requests": self._blocked_requests,
+                                        "cf_bypassed": True,
+                                    }
+                            except Exception as e:
+                                logger.warning(f"Reload after CF bypass failed: {e}")
+
+                    # If not Cloudflare or bypass failed, try with different wait strategy
+                    continue
+
+                # Save cookies after navigation
+                await self._save_cookies("default")
+
+                return {
+                    "status": "success",
+                    "url": page.url,
+                    "title": title,
+                    "status_code": status_code,
+                    "blocked_requests": self._blocked_requests,
+                    "attempt": attempt + 1,
+                }
+            except Exception as e:
+                last_error = str(e)
+                logger.error(f"Navigation attempt {attempt + 1} failed: {e}")
+
+                # Check if it's a timeout — try with networkidle instead
+                if "timeout" in last_error.lower() and attempt < retries:
+                    wait_until = "networkidle"
+                    continue
+
+        return {"status": "error", "error": last_error or "All retries exhausted"}
 
     async def get_content(self, page_id: str = "main") -> Dict[str, Any]:
         """Get current page content."""
@@ -1022,11 +1141,15 @@ class AgentBrowser:
 
     async def new_tab(self, tab_id: str) -> str:
         """Create a new tab with its own fingerprint."""
+        # Generate fingerprint for this tab
+        fp = self._evasion.generate_fingerprint(page_id=tab_id)
+        # Inject via context-level init script (runs on all future pages)
+        fingerprint_js = self._evasion.get_injection_js(tab_id)
+        await self.context.add_init_script(fingerprint_js)
+
         page = await self.context.new_page()
         self._pages[tab_id] = page
         self._attach_console_listener(tab_id, page)
-        # Each tab gets a fresh fingerprint
-        await self._evasion.inject_into_page(page, page_id=tab_id)
         return tab_id
 
     async def switch_tab(self, tab_id: str) -> Dict[str, Any]:
@@ -1271,7 +1394,10 @@ class AgentBrowser:
         }
 
         self.context = await self.browser.new_context(**context_options)
-        await self.context.add_init_script(ANTI_DETECTION_JS)
+        # Inject stealth + fingerprint for device emulation
+        fp = self._evasion.generate_fingerprint(page_id="main")
+        fingerprint_js = self._evasion.get_injection_js("main")
+        await self.context.add_init_script(ANTI_DETECTION_JS + "\n" + fingerprint_js)
         await self.context.route("**/*", self._handle_request)
 
         # Migrate pages
@@ -1402,7 +1528,10 @@ class AgentBrowser:
         context_options["storage_state"] = storage_state
 
         self.context = await self.browser.new_context(**context_options)
-        await self.context.add_init_script(ANTI_DETECTION_JS)
+        # Inject stealth + fingerprint on restore
+        fp = self._evasion.generate_fingerprint(page_id="main")
+        fingerprint_js = self._evasion.get_injection_js("main")
+        await self.context.add_init_script(ANTI_DETECTION_JS + "\n" + fingerprint_js)
         await self.context.route("**/*", self._handle_request)
 
         # Recreate pages with saved URLs

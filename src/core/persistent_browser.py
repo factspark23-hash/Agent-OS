@@ -154,8 +154,14 @@ class UserContext:
         }
 
         self.context = await self.browser_instance.browser.new_context(**context_options)
-        await self.context.add_init_script(ANTI_DETECTION_JS)
+        # Inject stealth + fingerprint at context level
+        from src.security.evasion_engine import EvasionEngine
+        evasion = EvasionEngine()
+        fp = evasion.generate_fingerprint(page_id="main")
+        fingerprint_js = evasion.get_injection_js("main")
+        await self.context.add_init_script(ANTI_DETECTION_JS + "\n" + fingerprint_js)
         await self.context.route("**/*", self._handle_request)
+        self._evasion = evasion
 
         # Restore saved state
         state = self._load_state()
