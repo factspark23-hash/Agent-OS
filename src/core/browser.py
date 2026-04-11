@@ -574,9 +574,12 @@ class AgentBrowser:
             or 'unknown' if the version cannot be determined.
         """
         try:
-            version = await self.browser.version()
+            # Patchright exposes version as a property, Playwright as a method
+            version = self.browser.version
+            if asyncio.iscoroutine(version):
+                version = await version
             logger.info(f"Browser engine: {version}")
-            return version
+            return str(version)
         except Exception as exc:
             logger.warning(f"Could not determine browser version: {exc}")
             return "unknown"
