@@ -15,6 +15,8 @@ cryptography==44.0.2
 # Anti-detection evasion engines
 curl_cffi>=0.7.0           # curl-impersonate: browser-grade TLS fingerprint
 cloudscraper>=1.2.71       # Cloudflare v1/v2/v3 + Turnstile challenge solver
+patchright>=1.0.0          # Playwright fork with anti-detection patches (optional)
+nodriver>=0.32             # Undetected Chrome driver (optional)
 
 # Bug bounty / scanning tools
 beautifulsoup4==4.12.3
