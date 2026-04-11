@@ -44,6 +44,18 @@ TOOLS = [
         }
     ),
     Tool(
+        name="browser_fetch",
+        description="Fetch a URL using Chrome-impersonating HTTP client. "
+        "Bypasses TLS fingerprinting. Returns page title and text.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "URL to fetch"}
+            },
+            "required": ["url"]
+        }
+    ),
+    Tool(
         name="browser_get_content",
         description="Get the current page's HTML content and text.",
         inputSchema={"type": "object", "properties": {}}
@@ -462,6 +474,7 @@ async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[TextCon
 
     command_map = {
         "browser_navigate": ("navigate", ["url"]),
+        "browser_fetch": ("fetch", ["url"]),
         "browser_get_content": ("get-content", []),
         "browser_get_dom": ("get-dom", []),
         "browser_screenshot": ("screenshot", []),

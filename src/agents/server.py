@@ -857,6 +857,7 @@ class AgentServer:
         """Route command to appropriate handler."""
         handlers = {
             "navigate": self._cmd_navigate,
+            "fetch": self._cmd_fetch,
             "fill-form": self._cmd_fill_form,
             "click": self._cmd_click,
             "type": self._cmd_type,
@@ -1100,6 +1101,33 @@ class AgentServer:
             return {"status": "error", "error": "Missing 'url'"}
         return await self.browser.navigate(url, page_id=data.get("page_id", "main"),
                                            wait_until=data.get("wait_until", "domcontentloaded"))
+
+    async def _cmd_fetch(self, data: Dict, session) -> Dict:
+        """Fetch URL via TLS-spoofed HTTP (no browser, faster)."""
+        url = data.get("url")
+        if not url:
+            return {"status": "error", "error": "Missing 'url'"}
+
+        from src.core.http_client import TLSClient
+
+        client = TLSClient()
+        try:
+            result = await client.fetch_page(url, extract_text=True)
+            return {
+                "status": "success" if result.get("ok") else "error",
+                "url": result.get("url", url),
+                "title": result.get("title", ""),
+                "text": result.get("text", ""),
+                "word_count": result.get("word_count", 0),
+                "http_status": result.get("status", 0),
+                "tls_profile": client.profile,
+                "curl_cffi": client.available,
+            }
+        except Exception as exc:
+            logger.error("fetch command failed for %s: %s", url, exc)
+            return {"status": "error", "error": str(exc)}
+        finally:
+            await client.close()
 
     async def _cmd_fill_form(self, data: Dict, session) -> Dict:
         fields = data.get("fields", {})
@@ -1981,6 +2009,7 @@ class AgentServer:
         """Return command definitions. Kept as dict for /commands endpoint."""
         return {
             "navigate": {"params": {"url": "string"}, "description": "Navigate to a URL"},
+            "fetch": {"params": {"url": "string"}, "description": "Fetch URL via TLS-spoofed HTTP (no browser, faster)"},
             "click": {"params": {"selector": "string"}, "description": "Click an element"},
             "type": {"params": {"text": "string"}, "description": "Type text into focused element"},
             "screenshot": {"params": {"full_page": "bool"}, "description": "Take a screenshot"},
