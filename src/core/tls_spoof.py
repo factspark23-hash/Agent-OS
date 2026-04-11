@@ -32,18 +32,24 @@ except ImportError:
 def _get_profiles():
     if not _CURL_AVAILABLE:
         return {}
-    return {
-        "chrome116": _curl_BrowserType.chrome116,
-        "chrome119": _curl_BrowserType.chrome119,
-        "chrome120": _curl_BrowserType.chrome120,
-        "chrome124": _curl_BrowserType.chrome124,
-        "safari15_3": _curl_BrowserType.safari15_3,
-        "safari15_5": _curl_BrowserType.safari15_5,
-        "safari17_0": _curl_BrowserType.safari17_0,
-        "safari17_2_1": _curl_BrowserType.safari17_2_1,
-        "edge99": _curl_BrowserType.edge99,
-        "edge101": _curl_BrowserType.edge101,
-    }
+    # Use getattr to handle missing profiles across curl_cffi versions
+    profiles = {}
+    _known = [
+        "chrome116", "chrome119", "chrome120", "chrome124",
+        "safari15_3", "safari15_5", "safari17_0", "safari17_2_1",
+        "edge99", "edge101",
+    ]
+    for name in _known:
+        val = getattr(_curl_BrowserType, name, None)
+        if val is not None:
+            profiles[name] = val
+    # Ensure at least chrome124 exists
+    if "chrome124" not in profiles:
+        # Fallback: use whatever chrome profile is available
+        for attr in dir(_curl_BrowserType):
+            if attr.startswith("chrome") and not attr.startswith("_"):
+                profiles[attr] = getattr(_curl_BrowserType, attr)
+    return profiles
 
 
 class TLSFingerprintEngine:
