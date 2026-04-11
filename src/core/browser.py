@@ -27,6 +27,7 @@ from src.core.stealth_god import GodModeStealth
 from src.tools.proxy_rotation import ProxyManager, ProxyInfo
 from src.security.evasion_engine import EvasionEngine
 from src.security.human_mimicry import HumanMimicry
+from src.security.captcha_solver import CaptchaSolver
 
 logger = logging.getLogger("agent-os.browser")
 
@@ -84,6 +85,9 @@ class AgentBrowser:
         self._god_stealth = GodModeStealth()
         # Import at class level to avoid repeated imports
         self._mimicry = HumanMimicry()
+        # CAPTCHA solver
+        self._captcha_solver: Optional[CaptchaSolver] = None
+        self._captcha_auto_solve = self.config.get("browser.captcha_auto_solve", False)
         # TLS proxy for real browser fingerprint
         self._tls_proxy: Optional[TLSProxyServer] = None
         self._tls_http: Optional[TLSHTTPClient] = None

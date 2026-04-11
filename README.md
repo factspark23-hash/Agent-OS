@@ -1,5 +1,4 @@
 # Agent-OS
-
 **Give any AI agent a real browser. Not a sandbox. Not a viewer. A real, persistent, UNDETECTABLE browser it actually owns.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
@@ -8,360 +7,220 @@
 
 ---
 
-## 🚨 The Problem
+## 🚨 Kya Problem Hai?
 
-Every AI agent struggles with the web:
+Har AI agent ko web se kaam karna padta hai, lekin:
 
-| What They Need | What They Get |
+| Chahiye | Milta hai |
 |---|---|
-| Persistent login sessions | Sandbox that resets every time |
-| Fill forms, click buttons, manage tabs | "Here's the page HTML, good luck" |
-| Browse without getting blocked | Instantly flagged as a bot |
-| Access Netflix, Bloomberg, Glassdoor | "Access Denied" or CAPTCHA hell |
-| Works with any AI platform | Locked into one provider's browser |
+| Persistent login sessions | Sandbox jo har baar reset ho jaata hai |
+| Forms bharo, buttons click karo | "Yeh lo HTML, khud figure out karo" |
+| Bina block hue browse karo | Turant "Access Denied" ya CAPTCHA |
+| Netflix, Bloomberg, Glassdoor access | "Bot detected" |
+| Kisi bhi AI platform ke saath kaam karo | Ek provider ke browser mein locked |
 
-**Claude MCP browser:** Sandboxed viewer. No cookies, no persistence.  
-**OpenClaw browser:** Basic Playwright. No stealth. Gets blocked.  
-**Browserbase/Browserless:** Cloud-hosted. Your data on their servers. $$$/month.  
-**Raw Playwright:** Good luck with bot detection. Gets caught in seconds.
-
-**Agent-OS:** Real Chromium. Persistent sessions. **GOD MODE Stealth.** Self-hosted. Free. Works with any AI.
+**Agent-OS:** Real Chromium. Persistent sessions. **Stealth Mode.** Self-hosted. Free. Kisi bhi AI ke saath kaam karta hai.
 
 ---
 
-## ✨ What You Get
+## ✨ Kya Milega
 
-### 🛡️ GOD MODE Stealth Engine v5.0
-**The ultimate anti-detection system.** Covers 20 detection vectors that sites use to catch bots:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  DETECTION METHOD          │  STATUS       │  HOW           │
-├─────────────────────────────────────────────────────────────┤
-│  navigator.webdriver       │  ✅ REMOVED   │  CDP Prototype │
-│  CDP Detection             │  ✅ BLOCKED   │  Property Filter│
-│  DevTools Detection        │  ✅ BLOCKED   │  Timing Random │
-│  Automation Artifacts      │  ✅ CLEANED   │  Global Scan   │
-│  WebGL Fingerprint         │  ✅ SPOOFED   │  Real GPU Data │
-│  Canvas Fingerprint        │  ✅ NOISED    │  Consistent    │
-│  Audio Fingerprint         │  ✅ NOISED    │  Consistent    │
-│  TLS Fingerprint           │  ✅ BYPASSED  │  curl_cffi     │
-│  HTTP/2 Fingerprint        │  ✅ SPOOFED   │  Real Browser  │
-│  IP Reputation             │  ✅ ROTATED   │  Residential   │
-│  Error Stack Traces        │  ✅ SANITIZED │  CDP Override  │
-│  Performance Timing        │  ✅ RANDOMIZED│  Seeded RNG    │
-│  Permissions API           │  ✅ REALISTIC │  Override      │
-│  Media Devices             │  ✅ SANITIZED │  Override      │
-│  Chrome Object             │  ✅ COMPLETE  │  Full Structure│
-│  Plugin List               │  ✅ REALISTIC │  Real Plugins  │
-│  Screen Properties         │  ✅ MATCHED   │  Hardware Cons │
-│  WebRTC IP Leak            │  ✅ BLOCKED   │  SDP Filter    │
-│  Fingerprint Libraries     │  ✅ ALL BLOCKED│ Fetch/XHR Block│
-│  BotD / Sardine / Kasada   │  ✅ BYPASSED  │  Multi-Layer   │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**Why it works:** All fingerprint values come from ONE seed. WebGL says Intel → Screen says 1920×1080 → Hardware says 8 cores → Canvas noise matches → Audio noise matches. Sites cross-check these values. Agent-OS makes them all consistent — just like a real computer.
-
-### 🔐 TLS Fingerprint Bypass
-**Sites detect Playwright's TLS signature.** Agent-OS uses `curl_cffi` to re-sign all requests with real Chrome TLS fingerprints.
+### 🛡️ Stealth Engine v4.0
+**Anti-detection system jo 20+ detection vectors cover karta hai:**
 
 ```
-Playwright → [TLS Proxy :8081] → curl_cffi (real Chrome TLS) → Target Site
+DETECTION METHOD              STATUS       KAISE
+navigator.webdriver           ✅ REMOVED    Prototype level
+CDP Detection                 ✅ BLOCKED    Property filter
+DevTools Detection            ✅ BLOCKED    Timing random
+Automation Artifacts          ✅ CLEANED    Global scan
+WebGL Fingerprint             ✅ SPOOFED    Real GPU data
+Canvas Fingerprint            ✅ NOISED     Consistent
+Audio Fingerprint             ✅ NOISED     Consistent
+TLS Fingerprint               ✅ BYPASSED   curl_cffi
+Fingerprinting Libraries      ✅ BLOCKED    40+ libs blocked
+Anti-Bot Vendors              ✅ BLOCKED    15+ vendors blocked
+Stack Traces                  ✅ SANITIZED  No Playwright refs
 ```
 
-**Bypasses:** JA3/JA4 fingerprinting, DataDome, PerimeterX, Imperva, Akamai TLS detection.
+### 🌐 Kya Kya Kar Sakta Hai
 
-### 🌍 Smart Proxy Rotation with Geo-Targeting
-**Datacenter IPs get blocked.** Agent-OS rotates residential proxies and auto-selects the right country for streaming sites.
+```python
+# Navigate — stealth ke saath
+result = await browser.navigate("https://example.com")
 
-| Site | Auto-Target |
-|------|-------------|
-| Netflix, Hulu, HBO, Disney+ | 🇺🇸 US |
-| BBC, ITV, Channel 4 | 🇬🇧 GB |
-| ZDF, Arte | 🇩🇪 DE / 🇫🇷 FR |
-| Amazon.co.uk | 🇬🇧 GB |
-| Crave, CTV | 🇨🇦 CA |
+# Form fill — human-like typing
+await browser.fill_form({"#email": "user@example.com", "#pass": "secret"})
 
-**8 Rotation Strategies:** `weighted`, `fastest`, `geo`, `sticky`, `per_domain`, `round_robin`, `random`, `least_used`
+# Click — realistic mouse movement
+await browser.click("#submit-btn")
 
-### 🔒 Persistent Browser Sessions
-Login once, stay logged in. Sessions survive across commands, restarts, and machine reboots.
+# Screenshot
+img = await browser.screenshot()
 
-### 🧠 Human Behavior Simulation
-Mouse movements follow Bezier curves. Typing has randomized delays. Scrolling feels natural. To bot detection systems, Agent-OS looks like a human — because it acts like one.
+# Page content lo
+content = await browser.get_content()
 
-### 🔐 Encrypted Credential Vault
-Save login credentials with AES-256 encryption. Auto-login to any site on command. Credentials never leave your machine.
+# JavaScript run karo
+result = await browser.evaluate_js("document.title")
+```
 
-### 🔌 Connect Any AI
-- **MCP** → Claude Desktop, Codex
-- **OpenAI API** → GPT-4, any OpenAI-compatible model
-- **Claude API** → Anthropic models
-- **OpenClaw** → OpenClaw agents
-- **CLI** → Bash, Python, Node.js
-- **HTTP/WebSocket** → Any language, any framework
+### 📡 REST API
+
+```bash
+# Health check
+curl http://localhost:8001/health
+
+# Navigate
+curl -X POST http://localhost:8001/command \
+  -H "Content-Type: application/json" \
+  -d '{"token":"YOUR_TOKEN","command":"navigate","url":"https://example.com"}'
+
+# Click
+curl -X POST http://localhost:8001/command \
+  -d '{"token":"YOUR_TOKEN","command":"click","selector":"#button"}'
+
+# Page content lo
+curl -X POST http://localhost:8001/command \
+  -d '{"token":"YOUR_TOKEN","command":"get-content"}'
+```
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Setup Kaise Karein
 
-### ⚡ One Command
+### Option 1: One-Command Install (Recommended)
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/factspark23-hash/Agent-OS/main/install.sh | bash
 ```
 
-**With options:**
+Options:
 ```bash
-# Custom token
+# Token ke saath
 curl -sSL ... | bash -s -- --token my-secret-token
 
-# Show browser window
+# Browser window dikhao
 curl -sSL ... | bash -s -- --headed
 
-# Custom port + RAM limit
-curl -sSL ... | bash -s -- --port 9000 --max-ram 1024
-
-# Install without starting
-curl -sSL ... | bash -s -- --no-start
+# Custom port
+curl -sSL ... | bash -s -- --port 9000
 ```
 
-### 🐳 Docker (Recommended)
-
-```bash
-docker run -d \
-  -p 8000:8000 \
-  -p 8001:8001 \
-  -p 8081:8081 \
-  --name agent-os \
-  agent-os
-```
-
-### Manual Install
+### Option 2: Docker
 
 ```bash
 git clone https://github.com/factspark23-hash/Agent-OS.git
 cd Agent-OS
-chmod +x setup.sh && ./setup.sh
-python3 main.py --agent-token "my-agent-123"
+docker compose up -d
+curl http://localhost:8001/health  # verify
 ```
 
-### Verify It's Running
+### Option 3: Manual
 
 ```bash
-curl -X POST http://localhost:8001/command \
-  -H "Content-Type: application/json" \
-  -d '{"token": "my-agent-123", "command": "navigate", "url": "https://github.com"}'
+git clone https://github.com/factspark23-hash/Agent-OS.git
+cd Agent-OS
+
+# Virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# Dependencies
+pip install -r requirements.txt
+
+# Playwright browser
+python3 -m playwright install chromium
+
+# JWT key generate karo
+export JWT_SECRET_KEY=$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')
+
+# Start
+python3 main.py --agent-token "your-token"
 ```
 
 ---
 
-## 📖 Usage Examples
+## 🔌 AI Platform Connectors
 
-### Navigate Any Site (Even Bot-Protected)
-
-```bash
-# Netflix (auto-selects US residential proxy)
-curl -X POST http://localhost:8001/command \
-  -d '{"token": "my-agent", "command": "navigate", "url": "https://www.netflix.com"}'
-
-# Bloomberg (GOD MODE stealth bypasses their bot detection)
-curl -X POST http://localhost:8001/command \
-  -d '{"token": "my-agent", "command": "navigate", "url": "https://www.bloomberg.com"}'
-
-# Force specific country
-curl -X POST http://localhost:8001/command \
-  -d '{"token": "my-agent", "command": "navigate", "url": "https://www.bbc.com", "country": "GB"}'
-```
-
-### Extract Content
-
-```bash
-# Get page text
-curl -X POST http://localhost:8001/command \
-  -d '{"token": "my-agent", "command": "get-content"}'
-
-# Get all links
-curl -X POST http://localhost:8001/command \
-  -d '{"token": "my-agent", "command": "get-links"}'
-
-# Take screenshot
-curl -X POST http://localhost:8001/command \
-  -d '{"token": "my-agent", "command": "screenshot"}'
-```
-
-### TLS Requests (No Browser Needed)
-
-```bash
-# Direct HTTP with real browser TLS fingerprint
-curl -X POST http://localhost:8001/command \
-  -d '{"token": "my-agent", "command": "tls-get", "url": "https://protected-site.com"}'
-
-# POST with TLS
-curl -X POST http://localhost:8001/command \
-  -d '{"token": "my-agent", "command": "tls-post", "url": "https://api.site.com", "json": {"key": "value"}}'
-```
-
-### Proxy Management
-
-```bash
-# Add residential proxy
-curl -X POST http://localhost:8001/command \
-  -d '{"token": "my-agent", "command": "proxy-add", "url": "http://user:pass@proxy.com:8080", "country": "US"}'
-
-# List all proxies
-curl -X POST http://localhost:8001/command \
-  -d '{"token": "my-agent", "command": "proxy-list"}'
-
-# Change rotation strategy
-curl -X POST http://localhost:8001/command \
-  -d '{"token": "my-agent", "command": "proxy-strategy", "strategy": "fastest"}'
-
-# Health check all proxies
-curl -X POST http://localhost:8001/command \
-  -d '{"token": "my-agent", "command": "proxy-check"}'
-```
-
-### Save Login & Auto-Login
-
-```bash
-# Save credentials after manually logging in
-curl -X POST http://localhost:8001/command \
-  -d '{"token": "my-agent", "command": "save-creds", "site": "github.com"}'
-
-# Auto-login on next session
-curl -X POST http://localhost:8001/command \
-  -d '{"token": "my-agent", "command": "auto-login", "site": "github.com"}'
-```
-
----
-
-## 🛠️ All Commands
-
-### Navigation & Content
-
-| Command | Description |
-|---------|-------------|
-| `navigate` | Navigate to URL (with proxy rotation + stealth) |
-| `back` / `forward` / `reload` | Browser navigation |
-| `get-content` | Get page HTML and text |
-| `get-dom` | Get structured DOM snapshot |
-| `get-links` | Get all page links |
-| `get-images` | Get all page images |
-| `get-text` | Get element text |
-| `get-attr` | Get element attribute |
-| `screenshot` | Take screenshot |
-
-### Interaction
-
-| Command | Description |
-|---------|-------------|
-| `click` / `double-click` / `right-click` | Click elements |
-| `type` / `press` | Type text / press keys |
-| `hover` | Hover over element |
-| `fill-form` | Fill form fields |
-| `fill-job` | Fill job application forms |
-| `select` / `checkbox` / `clear-input` | Form controls |
-| `drag-drop` / `drag-offset` | Drag and drop |
-| `upload` | Upload files |
-| `wait` | Wait for element |
-| `scroll` | Scroll page |
-
-### Stealth & Anti-Detection
-
-| Command | Description |
-|---------|-------------|
-| `tls-get` | HTTP GET with real browser TLS |
-| `tls-post` | HTTP POST with real browser TLS |
-| `tls-stats` | TLS proxy statistics |
-
-### Proxy Rotation
-
-| Command | Description |
-|---------|-------------|
-| `proxy-add` | Add proxy to pool |
-| `proxy-remove` | Remove proxy |
-| `proxy-list` | List all proxies |
-| `proxy-get` | Get proxy for domain/geo |
-| `proxy-rotate` | Manual rotation |
-| `proxy-check` | Health check proxies |
-| `proxy-stats` | Rotation statistics |
-| `proxy-strategy` | Change strategy |
-
-### Tabs & Sessions
-
-| Command | Description |
-|---------|-------------|
-| `tabs` | List/manage tabs |
-| `save-session` | Save browser session |
-| `restore-session` | Restore session |
-| `list-sessions` | List saved sessions |
-| `delete-session` | Delete session |
-
-### Auth & Credentials
-
-| Command | Description |
-|---------|-------------|
-| `save-creds` | Save login credentials |
-| `auto-login` | Auto-login to site |
-| `get-cookies` | Get cookies |
-| `set-cookie` | Set cookie |
-
-### Media & Analysis
-
-| Command | Description |
-|---------|-------------|
-| `transcribe` | Transcribe video/audio |
-| `page-summary` | Summarize page content |
-| `page-tables` | Extract tables |
-| `page-seo` | SEO analysis |
-| `page-accessibility` | Accessibility check |
-| `console-logs` | Get browser console logs |
-
-### Device Emulation
-
-| Command | Description |
-|---------|-------------|
-| `emulate-device` | Emulate mobile/tablet/desktop |
-| `list-devices` | List available devices |
-
----
-
-## 🔌 Connect Your Agent
-
-### MCP (Claude Desktop / Codex)
-
+### Claude Desktop (MCP)
 ```json
 {
   "mcpServers": {
     "agent-os": {
-      "command": "python3",
+      "command": "python",
       "args": ["/path/to/Agent-OS/connectors/mcp_server.py"],
-      "env": {
-        "AGENT_OS_URL": "http://localhost:8001",
-        "AGENT_OS_TOKEN": "your-token"
-      }
+      "env": {"AGENT_OS_TOKEN": "your-token"}
     }
   }
 }
 ```
 
-### OpenAI / Claude API
-
+### OpenAI Function Calling
 ```python
-from connectors.openai_connector import get_tools, call_tool
-
-tools = get_tools("openai")   # Tool definitions for GPT-4
-result = await call_tool("browser_navigate", {"url": "https://github.com"})
+from connectors.openai_connector import AgentOSTools
+tools = AgentOSTools(base_url="http://localhost:8001", token="your-token")
 ```
 
-### CLI (Any Language)
-
+### OpenClaw
 ```bash
-./connectors/agent-os-tool.sh navigate "https://github.com"
-./connectors/agent-os-tool.sh screenshot
-./connectors/agent-os-tool.sh get-content
+# Automatic — just point OpenClaw at the Agent-OS URL
+```
+
+---
+
+## 📋 Commands Reference
+
+| Command | Description |
+|---|---|
+| `navigate` | URL pe jao |
+| `get-content` | Page ka HTML + text lo |
+| `screenshot` | Screenshot lo |
+| `click` | Element click karo |
+| `fill` | Form fill karo |
+| `type-text` | Type karo |
+| `scroll` | Scroll karo |
+| `go-back` | Back jao |
+| `go-forward` | Forward jao |
+| `new-tab` | Naya tab kholo |
+| `close-tab` | Tab band karo |
+| `evaluate-js` | JavaScript run karo |
+| `get-cookies` | Cookies lo |
+| `set-cookie` | Cookie set karo |
+| `save-session` | Session save karo |
+| `restore-session` | Session restore karo |
+| `set-proxy` | Proxy set karo |
+| `emulate-device` | Mobile/tablet emulate karo |
+
+---
+
+## ⚙️ Configuration
+
+### Environment Variables (.env file)
+```bash
+# REQUIRED: JWT secret key
+JWT_SECRET_KEY=your-secret-key-here
+
+# Optional: Database
+DATABASE_DSN=postgresql+asyncpg://user:pass@localhost/agentos
+
+# Optional: Redis
+REDIS_URL=redis://localhost:6379/0
+
+# Optional: Proxy
+PROXY_URL=http://user:pass@proxy:8080
+```
+
+### CLI Arguments
+```bash
+python3 main.py \
+  --agent-token "my-token" \
+  --port 8000 \
+  --headed \
+  --max-ram 500 \
+  --proxy "http://proxy:8080" \
+  --device iphone_14 \
+  --persistent
 ```
 
 ---
@@ -369,251 +228,116 @@ result = await call_tool("browser_navigate", {"url": "https://github.com"})
 ## 🏗️ Architecture
 
 ```
-Agent-OS/
-├── main.py                          # Entry point
-├── Dockerfile                       # Docker build
-├── docker-compose.yml               # One-command deploy
-├── setup.sh                         # Auto-installer
+Agent-OS
 ├── src/
 │   ├── core/
-│   │   ├── browser.py               # Browser engine + stealth integration
-│   │   ├── stealth_god.py           # GOD MODE v5.0 (20 detection vectors)
-│   │   ├── cdp_stealth.py           # CDP-level stealth injection
-│   │   ├── tls_proxy.py             # TLS fingerprint bypass (curl_cffi)
-│   │   ├── tls_spoof.py             # TLS header spoofing
-│   │   ├── stealth.py               # Base stealth constants
-│   │   ├── config.py                # Configuration management
-│   │   ├── session.py               # Session lifecycle
-│   │   └── persistent_browser.py    # Persistent browser contexts
-│   ├── agents/
-│   │   └── server.py                # WebSocket + REST API (163 commands)
+│   │   ├── browser.py          # Main browser engine
+│   │   ├── stealth.py          # Anti-detection JS + request blocking
+│   │   ├── cdp_stealth.py      # CDP-level stealth injection
+│   │   ├── stealth_god.py      # GOD MODE stealth system
+│   │   ├── tls_spoof.py        # TLS fingerprint spoofing
+│   │   ├── tls_proxy.py        # TLS proxy for real browser fingerprints
+│   │   ├── config.py           # Configuration management
+│   │   ├── session.py          # Session management
+│   │   └── persistent_browser.py # Persistent Chromium engine
 │   ├── security/
-│   │   ├── evasion_engine.py        # Fingerprint generation
-│   │   ├── captcha_bypass.py        # Detection script blocking
-│   │   ├── human_mimicry.py         # Human behavior simulation
-│   │   └── auth_handler.py          # AES-256 credential vault
+│   │   ├── evasion_engine.py   # Fingerprint generation + injection
+│   │   ├── captcha_bypass.py   # CAPTCHA prevention (block, don't solve)
+│   │   ├── human_mimicry.py    # Human behavior simulation
+│   │   └── auth_handler.py     # Authentication
 │   ├── tools/
-│   │   ├── proxy_rotation.py        # Proxy pool + rotation engine
-│   │   ├── scanner.py               # Security scanners
-│   │   ├── transcriber.py           # Whisper transcription
-│   │   ├── form_filler.py           # Smart form detection
-│   │   ├── page_analyzer.py         # Page analysis tools
-│   │   ├── smart_finder.py          # Smart element finder
-│   │   ├── auto_heal.py             # Self-healing selectors
-│   │   └── workflow.py              # Workflow automation
-│   └── connectors/
-│       ├── mcp_server.py            # MCP connector
-│       ├── openai_connector.py      # OpenAI + Claude
-│       ├── openclaw_connector.py    # OpenClaw
-│       └── agent-os-tool.sh         # CLI
-└── tests/                           # Test suite
+│   │   ├── proxy_rotation.py   # Proxy pool management
+│   │   ├── smart_finder.py     # Smart element finder
+│   │   ├── form_filler.py      # Form filling engine
+│   │   └── ...
+│   ├── agents/
+│   │   └── server.py           # WebSocket + HTTP server
+│   └── infra/
+│       ├── database.py         # PostgreSQL integration
+│       ├── redis_client.py     # Redis integration
+│       └── logging.py          # Structured logging
+├── connectors/
+│   ├── mcp_server.py           # Claude MCP connector
+│   ├── openai_connector.py     # OpenAI connector
+│   └── openclaw_connector.py   # OpenClaw connector
+├── tests/
+├── docker-compose.yml
+├── Dockerfile
+└── main.py                     # Entry point
 ```
 
 ---
 
-## ⚙️ Configuration
+## 🛡️ Stealth Technology
 
-Default config at `~/.agent-os/config.yaml`:
+### Kaise Kaam Karta Hai (Layered Approach)
 
-```yaml
-server:
-  host: 127.0.0.1
-  ws_port: 8000                    # WebSocket port
-  http_port: 8001                  # HTTP API port
-
-browser:
-  headless: true                   # Run headless
-  viewport: {width: 1920, height: 1080}
-  max_ram_mb: 500                  # RAM limit
-  user_agent: "Mozilla/5.0 ..."    # Custom user agent
-  proxy: null                      # Single proxy (optional)
-  locale: "en-US"
-  timezone_id: "America/New_York"
-  
-  # TLS Fingerprint Bypass
-  tls_proxy_enabled: true          # Enable TLS proxy
-  tls_proxy_port: 8081             # TLS proxy port
-  
-  # Proxy Rotation
-  proxy_rotation_enabled: true     # Enable proxy rotation
-  proxy_rotation_strategy: "weighted"  # Strategy: weighted|fastest|geo|sticky
-  proxy_file: null                 # Path to proxy list file
-  proxy_api_url: null              # Proxy provider API URL
-  proxy_api_key: null              # Proxy provider API key
-
-session:
-  timeout_minutes: 15              # Session timeout
-  auto_wipe: true                  # Auto-wipe on timeout
-  max_concurrent: 3                # Max concurrent sessions
-
-security:
-  captcha_bypass: true             # Enable CAPTCHA bypass
-  human_mimicry: true              # Enable human behavior simulation
-  block_bot_queries: true          # Block bot detection requests
-  session_encryption: true         # Encrypt session data
 ```
+Layer 1: Network Level
+  ├── curl_cffi for real TLS fingerprint
+  ├── HTTP/2 fingerprint matching
+  └── Request blocking (bot detection scripts)
+
+Layer 2: CDP Level (Chrome DevTools Protocol)
+  ├── Page.addScriptToEvaluateOnNewDocument
+  ├── User-Agent metadata spoofing
+  ├── Timezone override
+  └── Locale override
+
+Layer 3: JavaScript Level
+  ├── navigator.webdriver removal (prototype level)
+  ├── CDP property filtering
+  ├── DevTools detection prevention
+  ├── WebGL/Canvas/Audio fingerprint consistency
+  ├── Chrome object completeness
+  ├── Plugin simulation
+  └── Stack trace sanitization
+
+Layer 4: Behavior Level
+  ├── Human-like mouse movement (Bezier curves)
+  ├── Typing rhythm simulation
+  ├── Scroll behavior
+  └── Page interaction timing
+```
+
+### Blocked Detection Vendors
+DataDome, PerimeterX, Imperva, Akamai, Cloudflare Bot Management,
+Kasada, Shape Security, F5, Arkose Labs, ThreatMetrix, Iovation,
+Sardine, SEON, IPQualityScore, FraudLabs, hCaptcha, reCAPTCHA
+
+### Blocked Fingerprinting Libraries
+FingerprintJS (v1-v3), ClientJS, ThumbmarkJS, CreepJS, BotD,
+Sardine, Iovation, ThreatMetrix, Nethra, and 30+ more
 
 ---
 
-## 🔒 Stealth Technology Deep Dive
-
-### GOD MODE v5.0 — How It Works
-
-Agent-OS uses **3 layers of stealth** that work together:
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    LAYER 1: CDP STEALTH                         │
-│  Injected BEFORE any page JavaScript via CDP protocol           │
-│  - Deletes navigator.webdriver from prototype                   │
-│  - Blocks CDP detection properties                              │
-│  - Filters automation artifacts from Object.getOwnPropertyNames │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                    LAYER 2: FINGERPRINT CONSISTENCY              │
-│  All values derived from ONE seed = consistent hardware profile │
-│  - WebGL says Intel → Screen says 1920×1080 → 8 cores           │
-│  - Canvas noise matches → Audio noise matches                   │
-│  - Sites can't find inconsistencies                              │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                    LAYER 3: NETWORK STEALTH                     │
-│  TLS + Proxy + Request interception                            │
-│  - curl_cffi re-signs TLS with real Chrome fingerprint          │
-│  - Residential proxy rotation (IP reputation clean)             │
-│  - Bot detection scripts blocked before execution               │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### What Gets Blocked (And How)
-
-| Detection Library | How Agent-OS Bypasses It |
-|-------------------|-------------------------|
-| **FingerprintJS** | Fetch/XHR to fpjs blocked, returns fake response |
-| **BotD** | CDP properties filtered, timing randomized |
-| **PerimeterX** | Detection scripts blocked, TLS spoofed |
-| **DataDome** | TLS fingerprint bypassed, JS challenges solved |
-| **Cloudflare** | Turnstile blocked, CF bypass via cloudscraper |
-| **Akamai** | TLS + HTTP/2 fingerprint spoofed |
-| **Kasada** | Detection scripts blocked at network level |
-| **Sardine/Iovation** | Canvas/WebGL/Audio consistency maintained |
-
-### Consistency Engine — The Secret Sauce
-
-```
-Traditional bots:
-  WebGL: NVIDIA RTX 3060    ← From spoofing
-  Screen: 1366×768          ← From another spoofing
-  Hardware: 4 cores         ← Random
-  Canvas: Random noise      ← Different each time
-  Result: INCONSISTENT → DETECTED
-
-Agent-OS:
-  WebGL: Intel UHD 630      ─┐
-  Screen: 1920×1080         ─┤ All from ONE seed
-  Hardware: 8 cores         ─┤ = Real hardware profile
-  Canvas: Deterministic     ─┤ = CONSISTENT
-  Audio: Deterministic      ─┘
-  Result: UNDETECTABLE
-```
-
----
-
-## 📊 Tested Sites
-
-### ✅ Successfully Bypasses
-
-| Category | Sites |
-|----------|-------|
-| **Streaming** | Netflix, Hulu, HBO Max, Disney+, IMDb |
-| **Finance** | Bloomberg, Yahoo Finance, Investing.com |
-| **Social** | LinkedIn, Reddit, Twitter/X |
-| **E-commerce** | Amazon, eBay, Walmart, Target |
-| **News** | NYT, CNN, BBC, Reuters, Guardian |
-| **Travel** | Booking.com, Expedia, TripAdvisor |
-| **Bot Detection** | DataDome, PerimeterX, Imperva sites |
-| **Cloudflare** | Any site using Cloudflare Bot Management |
-
-### ⚠️ Limitations (Honest)
-
-- **Residential proxies** required for streaming sites (datacenter IPs get blocked)
-- **Some sites** with advanced behavioral analysis may require longer wait times
-- **CAPTCHA challenges** are prevented, not solved (prevention > solving)
-
----
-
-## 📦 Requirements
-
-- **Python 3.10+**
-- **~500MB RAM** idle, ~800MB under load
-- **No GPU required**
-- **No external API keys needed** (for basic usage)
-- **curl_cffi** (for TLS fingerprint bypass)
-- **cloudscraper** (for Cloudflare bypass)
-
-### Optional Dependencies
+## 🧪 Testing
 
 ```bash
-# Full stealth stack
-pip install curl_cffi cloudscraper
+# All tests
+python3 -m pytest tests/ -v
 
-# For video transcription
-pip install openai-whisper
+# Specific test
+python3 -m pytest tests/test_all.py::TestCaptchaBypass -v
 
-# For proxy rotation (add your proxies)
-# No extra packages needed — just add proxy URLs
+# Linter check
+pip install ruff && ruff check src/ main.py --select E,F,W --ignore E501
 ```
-
----
-
-## 🔐 Privacy & Security
-
-- **Local only** — everything runs on your machine
-- **Zero telemetry** — no data leaves your server
-- **Session auto-wipe** — data destroyed after timeout
-- **AES-256 vault** — credentials encrypted at rest
-- **Token auth** — all commands require valid agent token
-- **Cookie encryption** — browser cookies encrypted on disk
-
----
-
-## 🤝 Contributing
-
-We welcome contributions! Areas where help is needed:
-
-- [ ] Mobile browser emulation improvements
-- [ ] More proxy provider integrations
-- [ ] Additional connector protocols
-- [ ] Performance optimizations
-- [ ] Documentation and examples
 
 ---
 
 ## 📄 License
 
-MIT License — see [LICENSE](LICENSE) for details.
+MIT License — free for commercial and personal use.
 
 ---
 
-## 🙏 Credits
+## 🤝 Contributing
 
-Built with:
-- [Playwright](https://playwright.dev/) — Browser automation
-- [curl_cffi](https://github.com/yifeikong/curl_cffi) — TLS fingerprint impersonation
-- [cloudscraper](https://github.com/VeNoMouS/cloudscraper) — Cloudflare bypass
-- [aiohttp](https://docs.aiohttp.org/) — Async HTTP server
-- [cryptography](https://cryptography.io/) — Encryption
+1. Fork the repo
+2. Create feature branch: `git checkout -b feature/my-feature`
+3. Commit: `git commit -m "feat: my feature"`
+4. Push: `git push origin feature/my-feature`
+5. Open PR
 
----
-
-<div align="center">
-
-**⭐ Star this repo if Agent-OS helps your AI agent!**
-
-[Report Bug](https://github.com/factspark23-hash/Agent-OS/issues) · 
-[Request Feature](https://github.com/factspark23-hash/Agent-OS/issues) · 
-[Documentation](https://github.com/factspark23-hash/Agent-OS#readme)
-
-</div>
+All tests must pass. Linter must be clean.

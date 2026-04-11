@@ -225,8 +225,10 @@ fi
 # ─── Step 9: Verify ─────────────────────────────────────
 step "Verifying installation..."
 ERRORS=0
-for mod in playwright websockets aiohttp httpx cryptography bs4 lxml yaml psutil numpy mcp; do
-    python -c "import $mod" 2>/dev/null || { warn "Import failed: $mod"; ERRORS=$((ERRORS+1)); }
+for pair in "playwright:playwright" "websockets:websockets" "aiohttp:aiohttp" "httpx:httpx" "cryptography:cryptography" "beautifulsoup4:bs4" "lxml:lxml" "PyYAML:yaml" "psutil:psutil" "numpy:numpy" "mcp:mcp" "curl_cffi:curl_cffi" "cloudscraper:cloudscraper" "redis:redis" "sqlalchemy:sqlalchemy" "pydantic:pydantic"; do
+    PKG="${pair%%:*}"
+    IMP="${pair##*:}"
+    python -c "import $IMP" 2>/dev/null || { warn "Import failed: $PKG (as $IMP)"; ERRORS=$((ERRORS+1)); }
 done
 
 if [ $ERRORS -gt 0 ]; then

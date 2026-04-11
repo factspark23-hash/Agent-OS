@@ -151,16 +151,36 @@ $PYTHON_CMD -c "
 import sys
 errors = []
 
-modules = [
-    'playwright', 'websockets', 'aiohttp', 'httpx', 'cryptography',
-    'bs4', 'lxml', 'yaml', 'psutil', 'numpy', 'mcp'
-]
+# Module name -> actual import name
+modules = {
+    'playwright': 'playwright',
+    'websockets': 'websockets',
+    'aiohttp': 'aiohttp',
+    'httpx': 'httpx',
+    'cryptography': 'cryptography',
+    'beautifulsoup4': 'bs4',
+    'lxml': 'lxml',
+    'PyYAML': 'yaml',
+    'psutil': 'psutil',
+    'numpy': 'numpy',
+    'mcp': 'mcp',
+    'curl_cffi': 'curl_cffi',
+    'cloudscraper': 'cloudscraper',
+    'redis': 'redis',
+    'sqlalchemy': 'sqlalchemy',
+    'pydantic': 'pydantic',
+    'structlog': 'structlog',
+    'bcrypt': 'bcrypt',
+    'passlib': 'passlib',
+    'requests': 'requests',
+    'aiofiles': 'aiofiles',
+}
 
-for mod in modules:
+for pkg_name, import_name in modules.items():
     try:
-        __import__(mod)
-    except ImportError as e:
-        errors.append(f'  ❌ {mod}: {e}')
+        __import__(import_name)
+    except ImportError:
+        errors.append(f'  ❌ {pkg_name} (import as {import_name})')
 
 if errors:
     print('❌ Import failures:')
