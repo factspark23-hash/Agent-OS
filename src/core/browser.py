@@ -9,6 +9,8 @@ import random
 import time
 import logging
 import os
+import hashlib
+from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 from urllib.parse import urlparse
@@ -32,6 +34,191 @@ from src.security.cloudflare_bypass import CloudflareBypassEngine, CloudflareCha
 from src.core.firefox_engine import FirefoxEngine, DualEngineManager
 
 logger = logging.getLogger("agent-os.browser")
+
+
+# ═══════════════════════════════════════════════════════════════
+# Browser Profiles — Realistic fingerprint bundles
+# ═══════════════════════════════════════════════════════════════
+
+@dataclass
+class BrowserProfile:
+    """A complete browser fingerprint profile for consistent anti-detection."""
+    user_agent: str
+    platform: str
+    viewport: Dict[str, int]
+    sec_ch_ua: str
+    sec_ch_ua_platform: str
+    hardware_concurrency: int
+    device_memory: int
+    screen_width: int
+    screen_height: int
+    timezone_id: str
+    locale: str
+
+
+# Exactly 12 profiles: 4x Windows, 4x macOS, 2x Ubuntu, 2x Windows+Edge
+BROWSER_PROFILES: List[BrowserProfile] = [
+    # ── Windows 10/11 × Chrome 130, 131, 132 ──────────────────
+    BrowserProfile(
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        platform="Win32",
+        viewport={"width": 1920, "height": 1080},
+        sec_ch_ua='"Chromium";v="130", "Google Chrome";v="130", "Not?A_Brand";v="99"',
+        sec_ch_ua_platform='"Windows"',
+        hardware_concurrency=8,
+        device_memory=16,
+        screen_width=1920,
+        screen_height=1080,
+        timezone_id="America/New_York",
+        locale="en-US",
+    ),
+    BrowserProfile(
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        platform="Win32",
+        viewport={"width": 2560, "height": 1440},
+        sec_ch_ua='"Chromium";v="131", "Google Chrome";v="131", "Not?A_Brand";v="99"',
+        sec_ch_ua_platform='"Windows"',
+        hardware_concurrency=12,
+        device_memory=16,
+        screen_width=2560,
+        screen_height=1440,
+        timezone_id="America/Chicago",
+        locale="en-US",
+    ),
+    BrowserProfile(
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
+        platform="Win32",
+        viewport={"width": 1366, "height": 768},
+        sec_ch_ua='"Chromium";v="132", "Google Chrome";v="132", "Not?A_Brand";v="99"',
+        sec_ch_ua_platform='"Windows"',
+        hardware_concurrency=4,
+        device_memory=8,
+        screen_width=1366,
+        screen_height=768,
+        timezone_id="Europe/London",
+        locale="en-GB",
+    ),
+    BrowserProfile(
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        platform="Win32",
+        viewport={"width": 1440, "height": 900},
+        sec_ch_ua='"Chromium";v="131", "Google Chrome";v="131", "Not?A_Brand";v="99"',
+        sec_ch_ua_platform='"Windows"',
+        hardware_concurrency=6,
+        device_memory=8,
+        screen_width=1440,
+        screen_height=900,
+        timezone_id="America/Denver",
+        locale="en-US",
+    ),
+    # ── macOS 14/15 × Chrome 130, 131, 132 ────────────────────
+    BrowserProfile(
+        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        platform="MacIntel",
+        viewport={"width": 2560, "height": 1600},
+        sec_ch_ua='"Chromium";v="130", "Google Chrome";v="130", "Not?A_Brand";v="99"',
+        sec_ch_ua_platform='"macOS"',
+        hardware_concurrency=10,
+        device_memory=16,
+        screen_width=2560,
+        screen_height=1600,
+        timezone_id="America/Los_Angeles",
+        locale="en-US",
+    ),
+    BrowserProfile(
+        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        platform="MacIntel",
+        viewport={"width": 1920, "height": 1200},
+        sec_ch_ua='"Chromium";v="131", "Google Chrome";v="131", "Not?A_Brand";v="99"',
+        sec_ch_ua_platform='"macOS"',
+        hardware_concurrency=8,
+        device_memory=8,
+        screen_width=1920,
+        screen_height=1200,
+        timezone_id="America/New_York",
+        locale="en-US",
+    ),
+    BrowserProfile(
+        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
+        platform="MacIntel",
+        viewport={"width": 2880, "height": 1800},
+        sec_ch_ua='"Chromium";v="132", "Google Chrome";v="132", "Not?A_Brand";v="99"',
+        sec_ch_ua_platform='"macOS"',
+        hardware_concurrency=10,
+        device_memory=16,
+        screen_width=2880,
+        screen_height=1800,
+        timezone_id="America/Los_Angeles",
+        locale="en-US",
+    ),
+    BrowserProfile(
+        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        platform="MacIntel",
+        viewport={"width": 1920, "height": 1080},
+        sec_ch_ua='"Chromium";v="131", "Google Chrome";v="131", "Not?A_Brand";v="99"',
+        sec_ch_ua_platform='"macOS"',
+        hardware_concurrency=8,
+        device_memory=16,
+        screen_width=1920,
+        screen_height=1080,
+        timezone_id="Europe/Paris",
+        locale="fr-FR",
+    ),
+    # ── Ubuntu 22.04 × Chrome 131, 132 ────────────────────────
+    BrowserProfile(
+        user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        platform="Linux x86_64",
+        viewport={"width": 1920, "height": 1080},
+        sec_ch_ua='"Chromium";v="131", "Google Chrome";v="131", "Not?A_Brand";v="99"',
+        sec_ch_ua_platform='"Linux"',
+        hardware_concurrency=4,
+        device_memory=8,
+        screen_width=1920,
+        screen_height=1080,
+        timezone_id="Europe/Berlin",
+        locale="de-DE",
+    ),
+    BrowserProfile(
+        user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
+        platform="Linux x86_64",
+        viewport={"width": 2560, "height": 1440},
+        sec_ch_ua='"Chromium";v="132", "Google Chrome";v="132", "Not?A_Brand";v="99"',
+        sec_ch_ua_platform='"Linux"',
+        hardware_concurrency=8,
+        device_memory=16,
+        screen_width=2560,
+        screen_height=1440,
+        timezone_id="America/New_York",
+        locale="en-US",
+    ),
+    # ── Windows 11 × Edge (Chromium-based) ────────────────────
+    BrowserProfile(
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
+        platform="Win32",
+        viewport={"width": 1920, "height": 1080},
+        sec_ch_ua='"Chromium";v="131", "Microsoft Edge";v="131", "Not?A_Brand";v="99"',
+        sec_ch_ua_platform='"Windows"',
+        hardware_concurrency=8,
+        device_memory=16,
+        screen_width=1920,
+        screen_height=1080,
+        timezone_id="America/New_York",
+        locale="en-US",
+    ),
+    BrowserProfile(
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 Edg/132.0.0.0",
+        platform="Win32",
+        viewport={"width": 2560, "height": 1440},
+        sec_ch_ua='"Chromium";v="132", "Microsoft Edge";v="132", "Not?A_Brand";v="99"',
+        sec_ch_ua_platform='"Windows"',
+        hardware_concurrency=12,
+        device_memory=16,
+        screen_width=2560,
+        screen_height=1440,
+        timezone_id="Europe/London",
+        locale="en-GB",
+    ),
+]
 
 
 class AgentBrowser:
@@ -113,6 +300,8 @@ class AgentBrowser:
         self._firefox_enabled = self.config.get("browser.firefox_fallback", True)
         # Dual engine manager
         self._dual_engine: Optional[DualEngineManager] = None
+        # Browser profile (picked once per session, consistent within session)
+        self._active_profile: Optional[BrowserProfile] = None
 
     def _get_or_create_cookie_key(self) -> bytes:
         """Get or create encryption key for cookie storage."""
@@ -124,6 +313,65 @@ class AgentBrowser:
         key_path.write_bytes(key)
         key_path.chmod(0o600)
         return key
+
+    def _pick_profile(self) -> BrowserProfile:
+        """Pick a browser profile for this session.
+
+        Uses a deterministic hash of the session cookie key so the same
+        installation always gets the same profile (consistency across restarts).
+        The profile is cached in self._active_profile and reused for the
+        lifetime of this AgentBrowser instance.
+        """
+        if self._active_profile is not None:
+            return self._active_profile
+
+        # Seed from the cookie key bytes — stable across restarts
+        seed_bytes = self._cookie_key
+        seed_hash = hashlib.sha256(seed_bytes).hexdigest()
+        seed_int = int(seed_hash[:8], 16)
+        index = seed_int % len(BROWSER_PROFILES)
+
+        self._active_profile = BROWSER_PROFILES[index]
+        logger.info(
+            "Browser profile #%d selected: %s | %s | %dx%d | %s",
+            index,
+            self._active_profile.platform,
+            self._active_profile.sec_ch_ua_platform,
+            self._active_profile.screen_width,
+            self._active_profile.screen_height,
+            self._active_profile.user_agent.split("Chrome/")[1].split(" ")[0]
+            if "Chrome/" in self._active_profile.user_agent
+            else "unknown",
+        )
+        return self._active_profile
+
+    def _build_headers(self, profile: BrowserProfile) -> Dict[str, str]:
+        """Build realistic HTTP request headers matching the browser profile.
+
+        These headers are set as extra HTTP headers on the Playwright context
+        so every request (navigation, XHR, fetch) carries them consistently.
+        The values mirror what a real Chrome browser sends, including the
+        Client Hints headers (sec-ch-ua) which are critical for passing
+        modern bot detection.
+        """
+        headers: Dict[str, str] = {
+            "Accept": (
+                "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                "image/avif,image/webp,image/apng,*/*;q=0.8,"
+                "application/signed-exchange;v=b3;q=0.7"
+            ),
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br, zstd",
+            "sec-ch-ua": profile.sec_ch_ua,
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": profile.sec_ch_ua_platform,
+            "Upgrade-Insecure-Requests": "1",
+            "sec-fetch-dest": "document",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-site": "none",
+            "sec-fetch-user": "?1",
+        }
+        return headers
 
     async def start(self):
         """Launch the browser with stealth settings."""
@@ -174,6 +422,9 @@ class AgentBrowser:
         """Internal: launch browser and set up context."""
         self.playwright = await async_playwright().start()
 
+        # Pick and lock browser profile for this session
+        profile = self._pick_profile()
+
         # Use headed or headless based on config
         headless = self.config.get("browser.headless", True)
 
@@ -222,27 +473,32 @@ class AgentBrowser:
 
         self.browser = await self.playwright.chromium.launch(**launch_options)
 
-        # Create context with realistic settings
+        # Create context with profile-driven realistic settings
         storage_state = self._load_cookies("default")
 
         context_options = {
-            "user_agent": self.config.get("browser.user_agent"),
-            "viewport": self.config.get("browser.viewport", {"width": 1920, "height": 1080}),
-            "locale": self.config.get("browser.locale", "en-US"),
-            "timezone_id": self.config.get("browser.timezone_id", "America/New_York"),
-            "permissions": ["geolocation", "notifications"],
-            "color_scheme": "light",
+            "user_agent": self._active_profile.user_agent,
+            "viewport": self._active_profile.viewport,
+            "locale": self._active_profile.locale,
+            "timezone_id": self._active_profile.timezone_id,
             "device_scale_factor": 1.0,
             "has_touch": False,
             "is_mobile": False,
             "java_script_enabled": True,
             "ignore_https_errors": True,
+            "permissions": ["geolocation", "notifications"],
+            "color_scheme": "light",
         }
 
         if storage_state:
             context_options["storage_state"] = storage_state
 
         self.context = await self.browser.new_context(**context_options)
+
+        # Set realistic HTTP headers matching the active profile
+        # This ensures sec-ch-ua, Accept-Language, sec-fetch-*, etc. are
+        # present on EVERY request — not just the initial navigation.
+        await self.context.set_extra_http_headers(self._build_headers(self._active_profile))
 
         # Generate fingerprint FIRST (before creating page)
         fp = self._evasion.generate_fingerprint(page_id="main")
