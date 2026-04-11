@@ -19,6 +19,7 @@ from src.core.stealth import (
     ANTI_DETECTION_JS,
     handle_request_interception,
 )
+from src.core.tls_spoof import apply_tls_spoofing
 from src.security.human_mimicry import HumanMimicry
 
 logger = logging.getLogger("agent-os.browser")
@@ -63,6 +64,10 @@ class AgentBrowser:
         self._max_crash_retries = 3
         self._launch_args = None  # cached launch args
         self._recovery_lock = asyncio.Lock()
+        # Proxy rotation
+        self._proxy_pool: List[Dict[str, Any]] = []
+        self._proxy_index: int = 0
+        self._proxy_rotation_enabled: bool = False
         # Import at class level to avoid repeated imports
         self._mimicry = HumanMimicry()
 
@@ -159,6 +164,9 @@ class AgentBrowser:
         # Set up download handler
         self.context.on("download", self._handle_download)
 
+        # Apply TLS fingerprint spoofing via CDP
+        await apply_tls_spoofing(self.page)
+
         self.page = await self.context.new_page()
         self._pages["main"] = self.page
         self._attach_console_listener("main", self.page)
@@ -225,6 +233,30 @@ class AgentBrowser:
     def _attach_console_listener(self, page_id: str, page: Page):
         """Attach console and error listeners to a page."""
         self._console_logs[page_id] = []
+        MAX_PER_PAGE = 150
+        MAX_GLOBAL = 500
+
+        def _enforce_global_cap():
+            """Hard cap total console entries across all pages."""
+            total = sum(len(v) for v in self._console_logs.values())
+            if total > MAX_GLOBAL:
+                # Trim oldest pages first
+                sorted_pages = sorted(
+                    self._console_logs.items(),
+                    key=lambda kv: kv[1][0]["timestamp"] if kv[1] else float("inf")
+                )
+                for pid, logs in sorted_pages:
+                    if total <= MAX_GLOBAL:
+                        break
+                    if pid == page_id:
+                        # Trim this page's logs by half
+                        half = len(logs) // 2
+                        self._console_logs[pid] = logs[half:]
+                        total -= half
+                    else:
+                        removed = len(logs)
+                        self._console_logs[pid] = []
+                        total -= removed
 
         def on_console(msg):
             entry = {
@@ -237,10 +269,13 @@ class AgentBrowser:
                 },
                 "timestamp": time.time(),
             }
-            self._console_logs[page_id].append(entry)
-            # Keep last 200 entries per page to cap memory
-            if len(self._console_logs[page_id]) > 200:
-                self._console_logs[page_id] = self._console_logs[page_id][-200:]
+            logs = self._console_logs[page_id]
+            logs.append(entry)
+            # Per-page cap: drop oldest
+            if len(logs) > MAX_PER_PAGE:
+                self._console_logs[page_id] = logs[-MAX_PER_PAGE:]
+            # Global cap
+            _enforce_global_cap()
 
         def on_page_error(error):
             entry = {
@@ -249,9 +284,11 @@ class AgentBrowser:
                 "location": {"url": "", "line": 0, "column": 0},
                 "timestamp": time.time(),
             }
-            self._console_logs[page_id].append(entry)
-            if len(self._console_logs[page_id]) > 200:
-                self._console_logs[page_id] = self._console_logs[page_id][-200:]
+            logs = self._console_logs[page_id]
+            logs.append(entry)
+            if len(logs) > MAX_PER_PAGE:
+                self._console_logs[page_id] = logs[-MAX_PER_PAGE:]
+            _enforce_global_cap()
 
         page.on("console", on_console)
         page.on("pageerror", on_page_error)
@@ -301,8 +338,11 @@ class AgentBrowser:
         await route.continue_()
 
     async def navigate(self, url: str, page_id: str = "main", wait_until: str = "domcontentloaded") -> Dict[str, Any]:
-        """Navigate to a URL with human-like timing."""
+        """Navigate to a URL with human-like timing and auto proxy rotation."""
         page = self._pages.get(page_id, self.page)
+
+        # Auto-rotate proxy if pool is configured
+        await self._maybe_rotate_proxy()
 
         # Human-like delay before navigation
         await asyncio.sleep(random.uniform(0.3, 1.2))
@@ -1037,6 +1077,115 @@ class AgentBrowser:
         if not self._proxy_config:
             return {"status": "success", "proxy": None, "message": "No proxy configured"}
         return {"status": "success", "proxy": self._proxy_config}
+
+    async def set_proxy_pool(self, proxy_urls: List[str], rotation_interval: int = 10) -> Dict[str, Any]:
+        """
+        Set a pool of proxies for automatic rotation. Rotates every N requests.
+
+        Args:
+            proxy_urls: List of proxy URLs
+                e.g. ["http://proxy1:8080", "socks5://proxy2:1080", "http://user:pass@proxy3:8080"]
+            rotation_interval: Rotate proxy every N requests (default: 10)
+
+        Returns:
+            Status and pool info
+        """
+        if not proxy_urls:
+            return {"status": "error", "error": "Proxy pool cannot be empty"}
+
+        self._proxy_pool = [self._parse_proxy_url(url) for url in proxy_urls]
+        self._proxy_index = 0
+        self._proxy_rotation_enabled = True
+        self._proxy_rotation_interval = rotation_interval
+        self._proxy_request_count = 0
+
+        logger.info(f"Proxy pool configured: {len(self._proxy_pool)} proxies, rotating every {rotation_interval} requests")
+
+        return {
+            "status": "success",
+            "pool_size": len(self._proxy_pool),
+            "rotation_interval": rotation_interval,
+            "proxies": [p.get("server", "N/A") for p in self._proxy_pool],
+            "note": "Proxy rotation requires browser restart. Use restart command.",
+        }
+
+    async def rotate_proxy(self) -> Dict[str, Any]:
+        """
+        Manually rotate to the next proxy in the pool.
+        Restarts the browser with the new proxy.
+
+        Returns:
+            Status and new proxy info
+        """
+        if not self._proxy_pool:
+            return {"status": "error", "error": "No proxy pool configured. Use set_proxy_pool first."}
+
+        self._proxy_index = (self._proxy_index + 1) % len(self._proxy_pool)
+        self._proxy_config = self._proxy_pool[self._proxy_index]
+
+        # Save cookies before restart
+        try:
+            await self._save_cookies("default")
+        except Exception:
+            pass
+
+        # Close and relaunch with new proxy
+        try:
+            if self.context:
+                await self.context.close()
+            if self.browser:
+                await self.browser.close()
+            if self.playwright:
+                await self.playwright.stop()
+        except Exception:
+            pass
+
+        self.browser = None
+        self.context = None
+        self.page = None
+        self._pages.clear()
+
+        await self._launch_browser()
+
+        current = self._proxy_pool[self._proxy_index]
+        logger.info(f"Rotated to proxy {self._proxy_index + 1}/{len(self._proxy_pool)}: {current.get('server', 'N/A')}")
+
+        return {
+            "status": "success",
+            "proxy_index": self._proxy_index,
+            "proxy": current,
+            "total_proxies": len(self._proxy_pool),
+        }
+
+    async def get_proxy_pool(self) -> Dict[str, Any]:
+        """Get current proxy pool status."""
+        if not self._proxy_pool:
+            return {"status": "success", "pool": None, "message": "No proxy pool configured"}
+
+        return {
+            "status": "success",
+            "pool_size": len(self._proxy_pool),
+            "current_index": self._proxy_index,
+            "rotation_enabled": self._proxy_rotation_enabled,
+            "proxies": [p.get("server", "N/A") for p in self._proxy_pool],
+        }
+
+    async def _maybe_rotate_proxy(self):
+        """Auto-rotate proxy if pool is configured and threshold is reached."""
+        if not self._proxy_rotation_enabled or not self._proxy_pool:
+            return
+
+        self._proxy_request_count = getattr(self, "_proxy_request_count", 0) + 1
+        interval = getattr(self, "_proxy_rotation_interval", 10)
+
+        if self._proxy_request_count >= interval:
+            self._proxy_request_count = 0
+            try:
+                result = await self.rotate_proxy()
+                if result.get("status") == "success":
+                    logger.info(f"Auto-rotated proxy to index {self._proxy_index}")
+            except Exception as e:
+                logger.warning(f"Proxy auto-rotation failed: {e}")
 
     async def emulate_device(self, device: str) -> Dict[str, Any]:
         """
