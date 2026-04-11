@@ -173,6 +173,12 @@ console.log('[Agent-OS] Stealth patches loaded v2.0');
 BOT_DETECTION_URLS = [
     "recaptcha", "captcha", "hcaptcha", "turnstile",
     "perimeterx", "datadome", "cloudflare-challenge",
+    "challenges.cloudflare.com",
+    "cloudflare.com/cdn-cgi/challenge",
+    "cloudflareinsights.com",
+    "static.cloudflareinsights.com",
+    "managed-challenge",
+    "no-connection",
     "check-bot", "verify-human", "bot-detection",
     "akamai-bot", "imperva", "f5-bot",
     "distil", "shape-security", "kasada",

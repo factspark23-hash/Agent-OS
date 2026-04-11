@@ -109,6 +109,7 @@ class AgentBrowser:
                 "--window-size=1920,1080",
                 "--disable-features=TranslateUI",
                 "--disable-ipc-flooding-protection",
+                "--disable-http2",
             ]
 
         # Build launch options
