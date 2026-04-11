@@ -20,6 +20,7 @@ from playwright.async_api import async_playwright, Browser, Page, BrowserContext
 
 from src.core.stealth import (
     ANTI_DETECTION_JS,
+    apply_screen_dimensions,
     handle_request_interception,
 )
 from src.core.tls_spoof import apply_browser_tls_spoofing
@@ -507,7 +508,14 @@ class AgentBrowser:
         # Inject stealth + fingerprint as a SINGLE context-level init script
         # This is the BACKUP layer — CDP stealth is the primary
         fingerprint_js = self._evasion.get_injection_js("main")
-        await self.context.add_init_script(ANTI_DETECTION_JS + "\n" + fingerprint_js)
+        # Apply profile-specific screen dimensions to stealth JS
+        stealth_js = apply_screen_dimensions(
+            ANTI_DETECTION_JS,
+            screen_width=self._active_profile.screen_width,
+            screen_height=self._active_profile.screen_height,
+            device_pixel_ratio=1.0,
+        )
+        await self.context.add_init_script(stealth_js + "\n" + fingerprint_js)
 
         # Set up request interception for bot detection blocking
         await self.context.route("**/*", self._handle_request)
