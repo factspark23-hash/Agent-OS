@@ -29,7 +29,7 @@ from src.core.session import SessionManager
 from src.infra.logging import setup_logging, get_logger
 
 
-__version__ = "3.0.1"
+__version__ = "3.1.0"
 
 
 class AgentOS:
@@ -160,12 +160,11 @@ class AgentOS:
         elif not self.config.get("server.agent_token") and not self.jwt_handler:
             auto_token = self.config.generate_agent_token("agent")
             self.config.set("server.agent_token", auto_token)
+            self.config.save()  # Only save when auto-generating a new token
             self.logger.info("Auto-generated legacy agent token")
 
         if args.rate_limit:
             self.config.set("server.rate_limit_max", args.rate_limit)
-
-        self.config.save()
 
     async def start(self):
         """Start all components after validating configuration."""

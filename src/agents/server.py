@@ -711,7 +711,7 @@ class AgentServer:
         """Handle HTTP GET /status."""
         status = {
             "status": "running",
-            "version": "3.0.1",
+            "version": "3.1.0",
             "uptime_seconds": int(time.time() - self._start_time),
             "active_sessions": len(self.session_manager.list_active_sessions()),
             "active_ws_clients": len(self._ws_clients),
@@ -1528,85 +1528,6 @@ class AgentServer:
     async def _cmd_tls_stats(self, data: Dict, session) -> Dict:
         """Get TLS proxy and fingerprinting statistics."""
         return {"status": "success", **self.browser.tls_stats}
-
-    # ─── High-Level Proxy Rotation ────────────────────────
-
-    async def _cmd_proxy_add(self, data: Dict, session) -> Dict:
-        """Add a proxy to the rotation pool."""
-        url = data.get("url")
-        if not url:
-            return {"status": "error", "error": "Missing 'url'"}
-        if not self.browser._proxy_manager:
-            return {"status": "error", "error": "Proxy rotation not enabled. Set proxy_rotation_enabled=true in config."}
-        kwargs = {}
-        for key in ["country", "region", "tags", "weight", "username", "password", "max_requests_per_minute"]:
-            if key in data:
-                kwargs[key] = data[key]
-        return self.browser._proxy_manager.add_proxy(url, **kwargs)
-
-    async def _cmd_proxy_remove(self, data: Dict, session) -> Dict:
-        """Remove a proxy from the pool."""
-        proxy_id = data.get("proxy_id")
-        if not proxy_id:
-            return {"status": "error", "error": "Missing 'proxy_id'"}
-        if not self.browser._proxy_manager:
-            return {"status": "error", "error": "Proxy rotation not enabled"}
-        return self.browser._proxy_manager.remove_proxy(proxy_id)
-
-    async def _cmd_proxy_list(self, data: Dict, session) -> Dict:
-        """List all proxies with stats."""
-        if not self.browser._proxy_manager:
-            return {"status": "error", "error": "Proxy rotation not enabled"}
-        status = data.get("status")
-        country = data.get("country")
-        return self.browser._proxy_manager.list_proxies(status=status, country=country)
-
-    async def _cmd_proxy_get(self, data: Dict, session) -> Dict:
-        """Get a proxy for a specific domain/geo-target."""
-        if not self.browser._proxy_manager:
-            return {"status": "error", "error": "Proxy rotation not enabled"}
-        return await self.browser._proxy_manager.get_proxy(
-            domain=data.get("domain"),
-            country=data.get("country"),
-            tags=data.get("tags"),
-            session_id=data.get("session_id"),
-        )
-
-    async def _cmd_proxy_rotate(self, data: Dict, session) -> Dict:
-        """Manually rotate to a new proxy."""
-        if not self.browser._proxy_manager:
-            return {"status": "error", "error": "Proxy rotation not enabled"}
-        proxy_id = await self.browser._rotate_to_next_proxy(
-            domain=data.get("domain"),
-            country=data.get("country"),
-        )
-        if proxy_id:
-            return {"status": "success", "proxy_id": proxy_id, "proxy": self.browser.current_proxy_info}
-        return {"status": "error", "error": "No proxy available"}
-
-    async def _cmd_proxy_check(self, data: Dict, session) -> Dict:
-        """Run health check on a proxy or all proxies."""
-        if not self.browser._proxy_manager:
-            return {"status": "error", "error": "Proxy rotation not enabled"}
-        proxy_id = data.get("proxy_id")
-        if proxy_id:
-            return await self.browser._proxy_manager.check_proxy(proxy_id)
-        return await self.browser._proxy_manager.check_all()
-
-    async def _cmd_proxy_stats(self, data: Dict, session) -> Dict:
-        """Get proxy rotation statistics."""
-        if not self.browser._proxy_manager:
-            return {"status": "error", "error": "Proxy rotation not enabled"}
-        return self.browser._proxy_manager.get_stats()
-
-    async def _cmd_proxy_strategy(self, data: Dict, session) -> Dict:
-        """Change proxy rotation strategy."""
-        strategy = data.get("strategy")
-        if not strategy:
-            return {"status": "error", "error": "Missing 'strategy'. Options: round_robin, random, weighted, least_used, sticky, per_domain, fastest, geo"}
-        if not self.browser._proxy_manager:
-            return {"status": "error", "error": "Proxy rotation not enabled"}
-        return self.browser._proxy_manager.set_strategy(strategy)
 
     # ─── Mobile Emulation ──────────────────────────────────
 

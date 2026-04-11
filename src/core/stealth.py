@@ -8,7 +8,7 @@ Used by both browser.py and persistent_browser.py.
 # Injected into every page via context.add_init_script()
 
 ANTI_DETECTION_JS = """
-// === AGENT-OS STEALTH MODE v2.0 ===
+// === AGENT-OS STEALTH MODE v3.0 ===
 
 // 1. Remove ALL webdriver traces
 Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
@@ -163,7 +163,7 @@ if (navigator.mediaDevices) {
     };
 }
 
-console.log('[Agent-OS] Stealth patches loaded v2.0');
+console.log('[Agent-OS] Stealth patches loaded v3.0');
 """
 
 # ─── Bot Detection URL Patterns ─────────────────────────────

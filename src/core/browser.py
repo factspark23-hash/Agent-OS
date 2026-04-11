@@ -71,6 +71,7 @@ class AgentBrowser:
         self._cookie_fernet = Fernet(self._cookie_key)
         self._crash_count = 0
         self._max_crash_retries = 3
+        self._session_warmed_up = False
         self._launch_args = None  # cached launch args
         self._recovery_lock = asyncio.Lock()
         # Proxy rotation
@@ -193,7 +194,6 @@ class AgentBrowser:
                 "--window-size=1920,1080",
                 "--disable-features=TranslateUI",
                 "--disable-ipc-flooding-protection",
-                "--disable-http2",
             ]
 
         # Build launch options
@@ -475,18 +475,169 @@ class AgentBrowser:
             return
         await route.continue_()
 
-    # Block indicators that suggest a challenge/block page
+    # Block indicators — only specific challenge/block page phrases.
+    # NOTE: Do NOT use generic words like "cloudflare", "challenge", "blocked"
+    # because legitimate sites contain those words in normal content.
     _BLOCK_INDICATORS = [
-        "access denied", "captcha", "bot detected", "just a moment",
-        "checking your browser", "please verify", "unusual traffic",
-        "challenge", "blocked", "not available in your region",
-        "cloudflare ray id", "attention required",
+        "access denied",
+        "captcha required",
+        "bot detected",
+        "just a moment",
+        "checking your browser",
+        "please verify you are human",
+        "unusual traffic from your computer",
+        "not available in your region",
+        "attention required! | cloudflare",
+        "cloudflare ray id",
+        "enable javascript and cookies",
+        "please enable js and disable any ad blocker",
+        "are you a robot",
+        "bot or not",
+        "verify you are human",
+        "help us protect",
+        "you have been blocked by network security",
+        "access to this page has been denied",
+        "rate limit exceeded",
+        "too many requests",
+        "blocked by waf",
+        "security check required",
+        "please complete the security check",
+        "press and hold",
+        "managed challenge",
     ]
 
-    def _is_blocked_page(self, title: str, text: str) -> bool:
-        """Check if the loaded page is a block/challenge page."""
+    # Sites that are KNOWN to show false positive block indicators
+    # even when serving real content. Skip block detection for these.
+    _SKIP_BLOCK_CHECK_DOMAINS = [
+        "cloudflare.com",
+        "amazon.com",
+        "amazon.co.uk",
+        "amazon.de",
+        "amazon.co.jp",
+    ]
+
+    def _should_skip_block_check(self, url: str) -> bool:
+        """Skip block detection for domains that naturally contain block keywords."""
+        url_lower = url.lower()
+        return any(domain in url_lower for domain in self._SKIP_BLOCK_CHECK_DOMAINS)
+
+    def _is_blocked_page(self, title: str, text: str, url: str = "") -> bool:
+        """
+        Check if the loaded page is a block/challenge page.
+        Uses strict phrase matching to avoid false positives.
+        """
+        if url and self._should_skip_block_check(url):
+            return False
+
         combined = (title + " " + text[:500]).lower()
-        return any(indicator in combined for indicator in self._BLOCK_INDICATORS)
+
+        for indicator in self._BLOCK_INDICATORS:
+            if indicator in combined:
+                return True
+        return False
+
+    # ─── Per-Site Bypass Strategies ────────────────────────────
+    # Maps domains to alternative URLs or fallback approaches.
+    # When a site blocks the main URL, try the fallback first.
+    _SITE_BYPASS_STRATEGIES: Dict[str, Dict[str, Any]] = {
+        "reddit.com": {
+            "fallback_url": "old.reddit.com",
+            "note": "Old Reddit has weaker bot detection",
+        },
+        "twitter.com": {
+            "fallback_url": "https://nitter.net",
+            "note": "Nitter is a lightweight Twitter frontend without tracking",
+        },
+        "x.com": {
+            "fallback_url": "https://nitter.net",
+            "note": "Nitter fallback for X/Twitter",
+        },
+        "instagram.com": {
+            "fallback_url": "https://www.instagram.com/?hl=en",
+            "note": "Explicit English locale helps bypass some geo-challenges",
+        },
+        "bloomberg.com": {
+            "fallback_url": "https://www.bloomberg.com/markets",
+            "note": "Markets page has lighter protection than homepage",
+        },
+        "glassdoor.com": {
+            "fallback_url": "https://www.glassdoor.com/Reviews/index.htm",
+            "note": "Reviews page often lighter protection",
+        },
+        "zillow.com": {
+            "fallback_url": "https://www.zillow.com/homes/",
+            "note": "Direct search page bypasses homepage challenge",
+        },
+        "washingtonpost.com": {
+            "fallback_url": "https://www.washingtonpost.com/news/",
+            "note": "News section often accessible when homepage fails",
+        },
+    }
+
+    def _get_bypass_url(self, url: str) -> Optional[str]:
+        """Get alternative URL for a blocked site, if a strategy exists."""
+        url_lower = url.lower()
+        for domain, strategy in self._SITE_BYPASS_STRATEGIES.items():
+            if domain in url_lower:
+                fallback = strategy.get("fallback_url")
+                if fallback:
+                    if fallback.startswith("http"):
+                        return fallback
+                    # Relative domain fallback — reconstruct URL
+                    from urllib.parse import urlparse
+                    parsed = urlparse(url)
+                    return f"{parsed.scheme}://{fallback}"
+        return None
+
+    # ─── User-Agent Rotation Pool ─────────────────────────────
+    # Real Chrome user agents for rotation on retries.
+    _ROTATION_USER_AGENTS: List[str] = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0",
+    ]
+
+    def _get_rotation_ua(self) -> str:
+        """Get a random user agent for rotation on retries."""
+        return random.choice(self._ROTATION_USER_AGENTS)
+
+    async def _warmup_session(self, target_url: str) -> None:
+        """
+        Warm up the browser session by visiting benign sites first.
+        This builds realistic cookies, referrer history, and browsing patterns
+        before hitting the target site. Sites see a natural browsing flow
+        instead of a direct bot navigation.
+        """
+        warmup_sites = [
+            "https://www.google.com",
+            "https://www.wikipedia.org",
+        ]
+
+        # Only warmup for sites that benefit from it (not simple test sites)
+        from urllib.parse import urlparse
+        target_domain = urlparse(target_url).hostname or ""
+        skip_warmup_domains = ["example.com", "httpbin.org", "localhost", "127.0.0.1"]
+
+        if any(d in target_domain for d in skip_warmup_domains):
+            return
+
+        logger.info(f"Warming up session before visiting {target_domain}...")
+        for warmup_url in warmup_sites:
+            try:
+                await self.page.goto(warmup_url, wait_until="domcontentloaded", timeout=10000)
+                await asyncio.sleep(random.uniform(1.0, 2.5))
+                # Simulate some scrolling
+                scroll_amount = random.randint(100, 400)
+                await self.page.mouse.wheel(0, scroll_amount)
+                await asyncio.sleep(random.uniform(0.5, 1.5))
+            except Exception:
+                # Warmup failures are non-critical — continue anyway
+                pass
 
     async def _try_cloudflare_bypass(self, url: str, page: Page) -> bool:
         """
@@ -555,7 +706,7 @@ class AgentBrowser:
         return None
 
     async def navigate(self, url: str, page_id: str = "main", wait_until: str = "domcontentloaded",
-                       retries: int = 3, country: str = None) -> Dict[str, Any]:
+                       retries: int = 3, country: str = None, warmup: bool = True) -> Dict[str, Any]:
         """
         Navigate to a URL with human-like timing, proxy rotation, auto retry, and Cloudflare bypass.
 
@@ -565,6 +716,7 @@ class AgentBrowser:
             wait_until: Playwright wait condition
             retries: Max retry attempts (will rotate proxy on each retry)
             country: Geo-target proxy selection (e.g., "US", "GB", "DE")
+            warmup: Whether to warm up session before first navigation
         """
         page = self._pages.get(page_id, self.page)
         domain = urlparse(url).hostname or ""
@@ -572,15 +724,36 @@ class AgentBrowser:
         # Get geo-targeting for known streaming sites
         geo_target = country or self._get_geo_target(domain)
 
+        # Session warmup — build realistic browsing history before target
+        if warmup and not self._session_warmed_up:
+            await self._warmup_session(url)
+            self._session_warmed_up = True
+
         last_error = None
         tried_proxies: List[str] = []
+        current_url = url  # May change if we try bypass URL
 
         for attempt in range(retries + 1):
             if attempt > 0:
-                # Backoff delay between retries
-                wait_time = random.uniform(2.0, 5.0) * attempt
-                logger.info(f"Retry {attempt}/{retries} for {url[:60]} (waiting {wait_time:.1f}s)")
+                # Exponential backoff with jitter
+                wait_time = random.uniform(3.0, 7.0) * attempt
+                logger.info(f"Retry {attempt}/{retries} for {current_url[:60]} (waiting {wait_time:.1f}s)")
                 await asyncio.sleep(wait_time)
+
+                # Rotate user agent on retry
+                new_ua = self._get_rotation_ua()
+                try:
+                    await self.page.set_extra_http_headers({"User-Agent": new_ua})
+                    logger.debug(f"Rotated UA for retry {attempt}")
+                except Exception:
+                    pass
+
+                # Try per-site bypass URL on 2nd retry
+                if attempt >= 2:
+                    bypass_url = self._get_bypass_url(url)
+                    if bypass_url and bypass_url != current_url:
+                        current_url = bypass_url
+                        logger.info(f"Trying bypass URL: {bypass_url[:60]}")
 
             # Rotate proxy if we have a proxy manager
             if self._proxy_manager and self._proxy_manager_enabled:
@@ -600,7 +773,7 @@ class AgentBrowser:
             await asyncio.sleep(random.uniform(0.3, 1.2))
 
             try:
-                response = await page.goto(url, wait_until=wait_until, timeout=30000)
+                response = await page.goto(current_url, wait_until=wait_until, timeout=30000)
 
                 # Wait for page to fully load (longer on retries for JS challenges)
                 load_wait = random.uniform(0.5, 1.5) + (attempt * 2.0)
@@ -623,27 +796,31 @@ class AgentBrowser:
                     self._record_proxy_result(success=True, status_code=status_code)
 
                 # If blocked and we have retries left, try with different proxy
-                if self._is_blocked_page(title, text) and attempt < retries:
-                    logger.warning(f"Block/challenge detected on {url[:60]} (attempt {attempt + 1})")
+                if self._is_blocked_page(title, text, url=current_url) and attempt < retries:
+                    block_reason = self._get_block_reason(title, text, status_code)
+                    logger.warning(
+                        f"Block/challenge detected on {current_url[:60]} "
+                        f"(attempt {attempt + 1}, reason: {block_reason})"
+                    )
 
                     # Record proxy failure (blocked = proxy is burned)
                     if self._current_proxy:
                         self._record_proxy_result(
                             success=False,
                             status_code=status_code,
-                            error="blocked_by_site"
+                            error=f"blocked_by_site: {block_reason}"
                         )
 
                     # Try Cloudflare bypass
                     if "cloudflare" in title.lower() or "just a moment" in title.lower():
-                        bypassed = await self._try_cloudflare_bypass(url, page)
+                        bypassed = await self._try_cloudflare_bypass(current_url, page)
                         if bypassed:
                             # Reload with clearance cookies
                             try:
                                 response = await page.reload(wait_until=wait_until, timeout=30000)
                                 await asyncio.sleep(random.uniform(2.0, 4.0))
                                 title = await page.title()
-                                if not self._is_blocked_page(title, ""):
+                                if not self._is_blocked_page(title, "", url=current_url):
                                     # Bypass worked!
                                     await self._save_cookies("default")
                                     return {
@@ -654,6 +831,9 @@ class AgentBrowser:
                                         "blocked_requests": self._blocked_requests,
                                         "cf_bypassed": True,
                                         "proxy_used": self._current_proxy.proxy_id if self._current_proxy else None,
+                                        "block_report": self._build_block_report(
+                                            url, status_code, block_reason, bypassed=True
+                                        ),
                                     }
                             except Exception as e:
                                 logger.warning(f"Reload after CF bypass failed: {e}")
@@ -664,6 +844,12 @@ class AgentBrowser:
                 # Save cookies after navigation
                 await self._save_cookies("default")
 
+                # Build block report if partially blocked (got page but content is limited)
+                block_report = None
+                if status_code in (403, 429, 503):
+                    block_reason = self._get_block_reason(title, text, status_code)
+                    block_report = self._build_block_report(url, status_code, block_reason, bypassed=False)
+
                 return {
                     "status": "success",
                     "url": page.url,
@@ -673,6 +859,7 @@ class AgentBrowser:
                     "attempt": attempt + 1,
                     "proxy_used": self._current_proxy.proxy_id if self._current_proxy else None,
                     "geo_target": geo_target,
+                    "block_report": block_report,
                 }
             except Exception as e:
                 last_error = str(e)
@@ -687,7 +874,132 @@ class AgentBrowser:
                     wait_until = "networkidle"
                     continue
 
-        return {"status": "error", "error": last_error or "All retries exhausted"}
+        # All retries exhausted — build failure report
+        return {
+            "status": "error",
+            "error": last_error or "All retries exhausted",
+            "block_report": self._build_block_report(
+                url, 0, last_error or "unknown", bypassed=False
+            ),
+        }
+
+    def _get_block_reason(self, title: str, text: str, status_code: int) -> str:
+        """Determine the specific reason a page was blocked."""
+        combined = (title + " " + text[:300]).lower()
+
+        if status_code == 429:
+            return "rate_limited"
+        if "cloudflare" in combined or "just a moment" in combined:
+            return "cloudflare_challenge"
+        if "captcha" in combined:
+            return "captcha_required"
+        if "bot detected" in combined or "bot or not" in combined:
+            return "bot_detection"
+        if "access denied" in combined:
+            return "access_denied_waf"
+        if "are you a robot" in combined:
+            return "robot_check"
+        if "enable javascript" in combined or "enable js" in combined:
+            return "js_required"
+        if "blocked" in combined:
+            return "ip_blocked"
+        if "please verify" in combined or "verify you are human" in combined:
+            return "human_verification"
+        if status_code == 403:
+            return "forbidden_403"
+        if status_code == 503:
+            return "service_unavailable"
+        return f"unknown_block_{status_code}"
+
+    def _build_block_report(
+        self, url: str, status_code: int, reason: str, bypassed: bool
+    ) -> Dict[str, Any]:
+        """
+        Build a detailed block report with recommended fixes.
+        Used for auto-reporting and debugging.
+        """
+        from urllib.parse import urlparse
+        domain = urlparse(url).hostname or ""
+
+        # Per-reason recommendations
+        recommendations: Dict[str, List[str]] = {
+            "rate_limited": [
+                "Increase retry delay (current: exponential backoff)",
+                "Use residential proxy rotation",
+                "Reduce request frequency per domain",
+            ],
+            "cloudflare_challenge": [
+                "Enable Turnstile solver",
+                "Use residential proxy with sticky sessions",
+                "Try Firefox fallback engine",
+                "Warm up session before target navigation",
+            ],
+            "captcha_required": [
+                "Enable CAPTCHA auto-solve (config: browser.captcha_auto_solve)",
+                "Use 2Captcha or Anti-Captcha integration",
+                "Try with residential proxy",
+            ],
+            "bot_detection": [
+                "Rotate user agent",
+                "Enable session warmup",
+                "Use residential proxy instead of datacenter",
+                "Check browser fingerprint consistency",
+            ],
+            "access_denied_waf": [
+                "Try different proxy/IP",
+                "Use residential proxy",
+                "Check if IP is blacklisted",
+            ],
+            "robot_check": [
+                "Enable session warmup",
+                "Use residential proxy",
+                "Try per-site bypass strategy",
+            ],
+            "js_required": [
+                "Ensure JavaScript is enabled",
+                "Wait longer for JS to execute",
+                "Check if ad blocker is interfering",
+            ],
+            "ip_blocked": [
+                "Change proxy/IP address",
+                "Use residential proxy",
+                "Contact site for unblock",
+            ],
+            "human_verification": [
+                "Enable CAPTCHA solver",
+                "Use residential proxy with good reputation",
+                "Try session warmup approach",
+            ],
+            "forbidden_403": [
+                "Try residential proxy",
+                "Check if site requires login",
+                "Try per-site bypass URL",
+            ],
+            "service_unavailable": [
+                "Site may be temporarily down — retry later",
+                "Try different region proxy",
+            ],
+        }
+
+        recs = recommendations.get(reason, [
+            "Try residential proxy",
+            "Enable session warmup",
+            "Check site-specific bypass strategy",
+        ])
+
+        bypass_strategy = self._SITE_BYPASS_STRATEGIES.get(domain, {})
+
+        return {
+            "url": url,
+            "domain": domain,
+            "status_code": status_code,
+            "block_reason": reason,
+            "bypassed": bypassed,
+            "recommendations": recs,
+            "site_bypass_available": bool(bypass_strategy),
+            "site_bypass_note": bypass_strategy.get("note", ""),
+            "timestamp": time.time(),
+        }
 
     async def navigate_with_fallback(self, url: str, page_id: str = "main",
                                       retries: int = 3, country: str = None) -> Dict[str, Any]:
@@ -1478,9 +1790,22 @@ class AgentBrowser:
             playwright_config = result["playwright_config"]
             proxy_id = proxy_data["proxy_id"]
 
-            # Store current proxy info
+            # Store current proxy info — CRITICAL: set _current_proxy for tracking
             self._current_proxy_config = playwright_config
-            self._domain_proxy_map[domain] = proxy_id
+            self._domain_proxy_map[domain or "_default"] = proxy_id
+
+            # Wrap proxy_data as a lightweight object with proxy_id attribute
+            # so that _record_proxy_result and other methods can access it
+            class _ProxyRef:
+                def __init__(self, data: Dict[str, Any]):
+                    self.proxy_id = data.get("proxy_id", "unknown")
+                    self.url = data.get("url", "")
+                    self.country = data.get("country", "")
+                    self.data = data
+                def to_dict(self):
+                    return self.data
+
+            self._current_proxy = _ProxyRef(proxy_data)
 
             # For Playwright, we need to recreate the browser with the new proxy
             # because Chromium doesn't support changing proxy at runtime
