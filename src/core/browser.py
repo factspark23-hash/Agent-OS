@@ -20,6 +20,7 @@ from src.core.stealth import (
     handle_request_interception,
 )
 from src.core.tls_spoof import apply_tls_spoofing
+from src.security.evasion_engine import FingerprintInjector
 from src.security.human_mimicry import HumanMimicry
 
 logger = logging.getLogger("agent-os.browser")
@@ -68,6 +69,8 @@ class AgentBrowser:
         self._proxy_pool: List[Dict[str, Any]] = []
         self._proxy_index: int = 0
         self._proxy_rotation_enabled: bool = False
+        # Fingerprint injector (replaces basic stealth)
+        self._fingerprint_injector = FingerprintInjector()
         # Import at class level to avoid repeated imports
         self._mimicry = HumanMimicry()
 
@@ -155,8 +158,11 @@ class AgentBrowser:
 
         self.context = await self.browser.new_context(**context_options)
 
-        # Inject stealth script on every page
+        # Inject stealth script on every page (base layer)
         await self.context.add_init_script(ANTI_DETECTION_JS)
+
+        # Inject realistic fingerprint (Apify fingerprint-suite approach)
+        await self._fingerprint_injector.inject_into_context(self.context)
 
         # Set up request interception for bot detection blocking
         await self.context.route("**/*", self._handle_request)
