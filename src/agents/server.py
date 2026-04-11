@@ -55,6 +55,7 @@ class AgentServer:
         self._analyzer = None
         self._agent_hub = None
         self._proxy_manager = None
+        self._smart_nav = None
 
         # In-memory rate limiting fallback
         self._rate_limits: Dict[str, deque] = defaultdict(lambda: deque(maxlen=200))
@@ -858,6 +859,8 @@ class AgentServer:
         handlers = {
             "navigate": self._cmd_navigate,
             "fetch": self._cmd_fetch,
+            "smart-navigate": self._cmd_smart_navigate,
+            "nav-stats": self._cmd_nav_stats,
             "fill-form": self._cmd_fill_form,
             "click": self._cmd_click,
             "type": self._cmd_type,
@@ -1095,12 +1098,39 @@ class AgentServer:
 
     # ─── Command Handlers (same as before) ──────────────────
 
+    def _get_smart_nav(self):
+        """Lazy-init SmartNavigator."""
+        if self._smart_nav is None:
+            from src.core.smart_navigator import SmartNavigator
+            self._smart_nav = SmartNavigator(self.browser)
+        return self._smart_nav
+
     async def _cmd_navigate(self, data: Dict, session) -> Dict:
         url = data.get("url")
         if not url:
             return {"status": "error", "error": "Missing 'url'"}
-        return await self.browser.navigate(url, page_id=data.get("page_id", "main"),
-                                           wait_until=data.get("wait_until", "domcontentloaded"))
+        smart = self._get_smart_nav()
+        return await smart.navigate(
+            url,
+            prefer_browser=data.get("prefer_browser", False),
+            max_retries=data.get("max_retries", 3),
+        )
+
+    async def _cmd_smart_navigate(self, data: Dict, session) -> Dict:
+        """Smart navigate with automatic HTTP/browser fallback and retry."""
+        url = data.get("url")
+        if not url:
+            return {"status": "error", "error": "Missing 'url'"}
+        smart = self._get_smart_nav()
+        return await smart.navigate(
+            url,
+            prefer_browser=data.get("prefer_browser", False),
+            max_retries=data.get("max_retries", 3),
+        )
+
+    async def _cmd_nav_stats(self, data: Dict, session) -> Dict:
+        """Return SmartNavigator strategy stats and per-domain success rates."""
+        return {"status": "success", "stats": self._get_smart_nav().get_stats()}
 
     async def _cmd_fetch(self, data: Dict, session) -> Dict:
         """Fetch URL via TLS-spoofed HTTP (no browser, faster)."""
@@ -2008,8 +2038,10 @@ class AgentServer:
     def _get_command_definitions(self) -> dict:
         """Return command definitions. Kept as dict for /commands endpoint."""
         return {
-            "navigate": {"params": {"url": "string"}, "description": "Navigate to a URL"},
+            "navigate": {"params": {"url": "string"}, "description": "Navigate to a URL (auto-selects HTTP or browser)"},
             "fetch": {"params": {"url": "string"}, "description": "Fetch URL via TLS-spoofed HTTP (no browser, faster)"},
+            "smart-navigate": {"params": {"url": "string", "prefer_browser": "bool", "max_retries": "int"}, "description": "Smart navigate with automatic fallback and retry"},
+            "nav-stats": {"params": {}, "description": "Get SmartNavigator strategy stats and per-domain success rates"},
             "click": {"params": {"selector": "string"}, "description": "Click an element"},
             "type": {"params": {"text": "string"}, "description": "Type text into focused element"},
             "screenshot": {"params": {"full_page": "bool"}, "description": "Take a screenshot"},

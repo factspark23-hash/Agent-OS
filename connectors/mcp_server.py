@@ -56,6 +56,27 @@ TOOLS = [
         }
     ),
     Tool(
+        name="browser_smart_navigate",
+        description="Smart navigate with automatic strategy selection. "
+        "Tries HTTP first (fast), falls back to browser for JS-heavy or blocked sites. "
+        "Retries with delays on rate limits. Returns strategy used and response time.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "URL to navigate to"},
+                "prefer_browser": {"type": "boolean", "description": "Start with browser instead of HTTP", "default": False},
+                "max_retries": {"type": "integer", "description": "Max retry attempts", "default": 3}
+            },
+            "required": ["url"]
+        }
+    ),
+    Tool(
+        name="browser_nav_stats",
+        description="Get navigation strategy statistics: per-domain success rates, "
+        "cached strategies, HTTP vs browser breakdown.",
+        inputSchema={"type": "object", "properties": {}}
+    ),
+    Tool(
         name="browser_get_content",
         description="Get the current page's HTML content and text.",
         inputSchema={"type": "object", "properties": {}}
@@ -475,6 +496,8 @@ async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[TextCon
     command_map = {
         "browser_navigate": ("navigate", ["url"]),
         "browser_fetch": ("fetch", ["url"]),
+        "browser_smart_navigate": ("smart-navigate", ["url", "prefer_browser", "max_retries"]),
+        "browser_nav_stats": ("nav-stats", []),
         "browser_get_content": ("get-content", []),
         "browser_get_dom": ("get-dom", []),
         "browser_screenshot": ("screenshot", []),
