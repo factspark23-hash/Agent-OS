@@ -8,8 +8,10 @@ Used by both browser.py and persistent_browser.py.
 # Injected into every page via context.add_init_script()
 
 ANTI_DETECTION_JS = """
-// === AGENT-OS STEALTH MODE v4.0 ===
+// === AGENT-OS STEALTH MODE v4.1 ===
 // Multi-layer anti-detection: CDP + JS + behavior + iframe propagation
+// 26 layers: WebDriver deep removal, Chrome runtime, Permissions, Notification,
+// Performance timing, Beacon API, and all prior layers.
 
 (function() {
 'use strict';
@@ -50,15 +52,45 @@ Function.prototype.toString = function toString() {
 spoofToString(Function.prototype.toString, 'toString');
 
 // ═══════════════════════════════════════════════════════════════
-// LAYER 1: navigator.webdriver removal
+// LAYER 1: Deep WebDriver Removal
 // ═══════════════════════════════════════════════════════════════
+// Advanced detection sites use Object.getOwnPropertyDescriptor to
+// inspect the property descriptor itself, not just read the value.
+// We must cover every known access path.
 
+// 1a. Standard property override
 Object.defineProperty(navigator, 'webdriver', {
     get: () => undefined,
     configurable: true,
     enumerable: false
 });
+
+// 1b. Delete from the prototype chain
 delete navigator.__proto__.webdriver;
+
+// 1c. Override Object.getOwnPropertyDescriptor
+//    When any script asks "what is the descriptor for navigator.webdriver?"
+//    we return undefined, making it look like the property never existed.
+const _origGetOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+Object.getOwnPropertyDescriptor = function getOwnPropertyDescriptor(obj, prop) {
+    if (obj === navigator && prop === 'webdriver') {
+        return undefined;
+    }
+    return _origGetOwnPropertyDescriptor.call(this, obj, prop);
+};
+spoofToString(Object.getOwnPropertyDescriptor, 'getOwnPropertyDescriptor');
+
+// 1d. Override Object.getOwnPropertyDescriptors
+//    Same idea but for bulk queries — strip 'webdriver' from navigator's map.
+const _origGetOwnPropertyDescriptors = Object.getOwnPropertyDescriptors;
+Object.getOwnPropertyDescriptors = function getOwnPropertyDescriptors(obj) {
+    var descs = _origGetOwnPropertyDescriptors.call(this, obj);
+    if (obj === navigator && descs && descs.webdriver) {
+        delete descs.webdriver;
+    }
+    return descs;
+};
+spoofToString(Object.getOwnPropertyDescriptors, 'getOwnPropertyDescriptors');
 
 // ═══════════════════════════════════════════════════════════════
 // LAYER 2: Realistic plugins (Chrome's actual plugin list)
@@ -116,39 +148,142 @@ Object.defineProperty(navigator, 'connection', {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// LAYER 7: Permissions override
+// LAYER 7: Permissions API Complete Spoof
 // ═══════════════════════════════════════════════════════════════
+// Advanced fingerprinting libraries query multiple permission names
+// to build a browser profile. We return realistic per-permission states.
 
-const _origPermissionsQuery = window.navigator.permissions.query;
-window.navigator.permissions.query = function(parameters) {
-    if (parameters.name === 'notifications') {
-        return Promise.resolve({state: Notification.permission});
-    }
-    return _origPermissionsQuery.call(this, parameters);
+const PERMISSION_STATES = {
+    'notifications': 'default',
+    'push': 'denied',
+    'midi': 'denied',
+    'camera': 'prompt',
+    'microphone': 'prompt',
+    'speaker': 'prompt',
+    'device-info': 'prompt',
+    'background-fetch': 'prompt',
+    'background-sync': 'prompt',
+    'bluetooth': 'prompt',
+    'persistent-storage': 'prompt',
+    'ambient-light-sensor': 'denied',
+    'accelerometer': 'denied',
+    'gyroscope': 'denied',
+    'magnetometer': 'denied',
+    'clipboard-read': 'prompt',
+    'clipboard-write': 'granted',
+    'geolocation': 'prompt'
 };
-spoofToString(window.navigator.permissions.query, 'query');
+
+// Build a fake PermissionStatus-like object
+function makePermissionStatus(name) {
+    var state = PERMISSION_STATES[name] || 'prompt';
+    return {
+        state: state,
+        onchange: null,
+        addEventListener: function() {},
+        removeEventListener: function() {},
+        dispatchEvent: function() { return true; }
+    };
+}
+
+// Override the permissions.query method entirely
+navigator.permissions.query = function query(parameters) {
+    var name = (parameters && parameters.name) ? parameters.name : '';
+    return Promise.resolve(makePermissionStatus(name));
+};
+spoofToString(navigator.permissions.query, 'query');
 
 // ═══════════════════════════════════════════════════════════════
-// LAYER 8: Chrome runtime (must exist for real Chrome)
+// LAYER 8: Chrome Runtime Complete Mock
 // ═══════════════════════════════════════════════════════════════
+// Detection scripts check window.chrome existence AND its internal
+// structure. An incomplete object is itself a detection signal.
+
+// Helper: create a listener object that passes toString checks
+function makeListenerObj() {
+    return {
+        addListener: function() {},
+        removeListener: function() {},
+        hasListener: function() { return false; }
+    };
+}
 
 window.chrome = {
     app: {
         isInstalled: false,
-        InstallState: {INSTALLED: 'installed', DISABLED: 'disabled', NOT_INSTALLED: 'not_installed'},
-        RunningState: {CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running'}
+        InstallState: {
+            INSTALLED: 'installed',
+            DISABLED: 'disabled',
+            NOT_INSTALLED: 'not_installed'
+        },
+        RunningState: {
+            CANNOT_RUN: 'cannot_run',
+            READY_TO_RUN: 'ready_to_run',
+            RUNNING: 'running'
+        }
     },
     runtime: {
-        OnInstalledReason: {CHROME_UPDATE: 'chrome_update', INSTALL: 'install', SHARED_MODULE_UPDATE: 'shared_module_update', UPDATE: 'update'},
-        OnRestartRequiredReason: {APP_UPDATE: 'app_update', OS_UPDATE: 'os_update', PERIODIC: 'periodic'},
-        PlatformArch: {ARM: 'arm', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64'},
-        PlatformNaclArch: {ARM: 'arm', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64'},
-        PlatformOs: {ANDROID: 'android', CROS: 'cros', LINUX: 'linux', MAC: 'mac', OPENBSD: 'openbsd', WIN: 'win'},
-        RequestUpdateCheckStatus: {NO_UPDATE: 'no_update', THROTTLED: 'throttled', UPDATE_AVAILABLE: 'update_available'},
-        connect: function() {},
-        sendMessage: function() {}
+        id: undefined,
+        connect: function(extensionId, connectInfo) {
+            return {
+                postMessage: function() {},
+                disconnect: function() {},
+                onMessage: makeListenerObj(),
+                onDisconnect: makeListenerObj()
+            };
+        },
+        sendMessage: function(message, responseCallback) {
+            if (typeof responseCallback === 'function') {
+                responseCallback();
+            }
+            return Promise.resolve();
+        },
+        getManifest: function() {
+            return {
+                manifest_version: 3,
+                version: '1.0.0',
+                name: 'Chrome App'
+            };
+        },
+        getURL: function(path) {
+            return 'chrome-extension://nmmhkkegccagdldgiimedpiccmgmieda/' + (path || '');
+        },
+        onMessage: makeListenerObj(),
+        onConnect: makeListenerObj(),
+        onInstalled: makeListenerObj(),
+        lastError: undefined,
+        OnInstalledReason: {
+            CHROME_UPDATE: 'chrome_update',
+            INSTALL: 'install',
+            SHARED_MODULE_UPDATE: 'shared_module_update',
+            UPDATE: 'update'
+        },
+        OnRestartRequiredReason: {
+            APP_UPDATE: 'app_update',
+            OS_UPDATE: 'os_update',
+            PERIODIC: 'periodic'
+        },
+        PlatformArch: {
+            ARM: 'arm', MIPS: 'mips', MIPS64: 'mips64',
+            X86_32: 'x86-32', X86_64: 'x86-64'
+        },
+        PlatformNaClArch: {
+            ARM: 'arm', MIPS: 'mips', MIPS64: 'mips64',
+            X86_32: 'x86-32', X86_64: 'x86-64'
+        },
+        PlatformOs: {
+            ANDROID: 'android', CROS: 'cros', LINUX: 'linux',
+            MAC: 'mac', OPENBSD: 'openbsd', WIN: 'win'
+        },
+        RequestUpdateCheckStatus: {
+            NO_UPDATE: 'no_update',
+            THROTTLED: 'throttled',
+            UPDATE_AVAILABLE: 'update_available'
+        }
     },
-    csi: function() { return {onloadT: Date.now(), pageT: Date.now(), startE: Date.now()}; },
+    csi: function() {
+        return { onloadT: Date.now(), pageT: Date.now(), startE: Date.now() };
+    },
     loadTimes: function() {
         var now = Date.now() / 1000;
         return {
@@ -165,14 +300,77 @@ window.chrome = {
             wasFetchedViaSpdy: true,
             wasNpnNegotiated: true
         };
+    },
+    webstore: {
+        onInstallStageChanged: makeListenerObj(),
+        onDownloadProgress: makeListenerObj()
     }
 };
 
 // ═══════════════════════════════════════════════════════════════
-// LAYER 9: WebGL fingerprint (real Intel GPU)
+// LAYER 9: Notification API Full Mock
+// ═══════════════════════════════════════════════════════════════
+// Fingerprinting libs probe Notification constructor, permission,
+// requestPermission, and instance methods. Every surface must look real.
+
+(function() {
+    // Only override if Notification exists
+    if (typeof Notification === 'undefined') return;
+
+    // Store reference for internal use
+    var _realPermission = 'default';
+
+    // Build a replacement constructor
+    function FakeNotification(title, options) {
+        this.title = title || '';
+        this.body = (options && options.body) || '';
+        this.icon = (options && options.icon) || '';
+        this.tag = (options && options.tag) || '';
+        this.data = (options && options.data) || null;
+        this.requireInteraction = (options && options.requireInteraction) || false;
+        this.silent = (options && options.silent) || false;
+        this.timestamp = Date.now();
+        this.dir = (options && options.dir) || 'auto';
+        this.lang = (options && options.lang) || 'en-US';
+    }
+
+    // Static properties
+    Object.defineProperty(FakeNotification, 'permission', {
+        get: function() { return _realPermission; },
+        configurable: true
+    });
+
+    Object.defineProperty(FakeNotification, 'maxActions', {
+        get: function() { return 2; },
+        configurable: true
+    });
+
+    // requestPermission — supports both callback and promise styles
+    FakeNotification.requestPermission = function requestPermission(callback) {
+        if (typeof callback === 'function') {
+            callback(_realPermission);
+            return Promise.resolve(_realPermission);
+        }
+        return Promise.resolve(_realPermission);
+    };
+    spoofToString(FakeNotification.requestPermission, 'requestPermission');
+
+    // Instance methods — all no-ops
+    FakeNotification.prototype.close = function() {};
+    FakeNotification.prototype.addEventListener = function() {};
+    FakeNotification.prototype.removeEventListener = function() {};
+    FakeNotification.prototype.dispatchEvent = function() { return true; };
+
+    // Replace globally
+    window.Notification = FakeNotification;
+    spoofToString(window.Notification, 'Notification');
+})();
+
+// ═══════════════════════════════════════════════════════════════
+// LAYER 10: WebGL fingerprint (real Intel GPU)
 // ═══════════════════════════════════════════════════════════════
 
-const _origGetParameter = WebGLRenderingContext.prototype.getParameter;
+var _origGetParameter = WebGLRenderingContext.prototype.getParameter;
 WebGLRenderingContext.prototype.getParameter = function(param) {
     // UNMASKED_VENDOR_WEBGL
     if (param === 37445) return 'Intel Inc.';
@@ -200,7 +398,7 @@ spoofToString(WebGLRenderingContext.prototype.getParameter, 'getParameter');
 
 // Also patch WebGL2 if present
 if (typeof WebGL2RenderingContext !== 'undefined') {
-    const _origGetParameter2 = WebGL2RenderingContext.prototype.getParameter;
+    var _origGetParameter2 = WebGL2RenderingContext.prototype.getParameter;
     WebGL2RenderingContext.prototype.getParameter = function(param) {
         if (param === 37445) return 'Intel Inc.';
         if (param === 37446) return 'Intel Iris OpenGL Engine';
@@ -218,10 +416,10 @@ if (typeof WebGL2RenderingContext !== 'undefined') {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// LAYER 10: Canvas fingerprint noise
+// LAYER 11: Canvas fingerprint noise
 // ═══════════════════════════════════════════════════════════════
 
-const _origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+var _origToDataURL = HTMLCanvasElement.prototype.toDataURL;
 HTMLCanvasElement.prototype.toDataURL = function(type) {
     var context = this.getContext('2d');
     if (context && this.width > 0 && this.height > 0) {
@@ -236,7 +434,7 @@ HTMLCanvasElement.prototype.toDataURL = function(type) {
 spoofToString(HTMLCanvasElement.prototype.toDataURL, 'toDataURL');
 
 // Also spoof toBlob
-const _origToBlob = HTMLCanvasElement.prototype.toBlob;
+var _origToBlob = HTMLCanvasElement.prototype.toBlob;
 HTMLCanvasElement.prototype.toBlob = function(callback, type, quality) {
     var context = this.getContext('2d');
     if (context && this.width > 0 && this.height > 0) {
@@ -251,7 +449,7 @@ HTMLCanvasElement.prototype.toBlob = function(callback, type, quality) {
 spoofToString(HTMLCanvasElement.prototype.toBlob, 'toBlob');
 
 // ═══════════════════════════════════════════════════════════════
-// LAYER 11: Audio context fingerprint
+// LAYER 12: Audio context fingerprint
 // ═══════════════════════════════════════════════════════════════
 
 var _AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -286,7 +484,7 @@ if (_AudioContext) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// LAYER 12: Block WebRTC IP leak
+// LAYER 13: Block WebRTC IP leak
 // ═══════════════════════════════════════════════════════════════
 
 var _origRTCPeerConnection = window.RTCPeerConnection;
@@ -304,12 +502,6 @@ if (_origRTCPeerConnection) {
     };
     window.RTCPeerConnection.prototype = _origRTCPeerConnection.prototype;
 }
-
-// ═══════════════════════════════════════════════════════════════
-// LAYER 13: Notification permission
-// ═══════════════════════════════════════════════════════════════
-
-Object.defineProperty(Notification, 'permission', {get: function() { return 'default'; }, configurable: true});
 
 // ═══════════════════════════════════════════════════════════════
 // LAYER 14: Media devices (fake realistic list)
@@ -410,13 +602,19 @@ if (document.fonts) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// LAYER 18: Timing consistency
+// LAYER 18: Performance Timing Spoof
 // ═══════════════════════════════════════════════════════════════
-// performance.timeOrigin reveals when the browser started.
-// Real browsers have this set to a value well before page load.
-// We set it to a realistic offset from Date.now().
+// performance.timeOrigin and performance.timing reveal when the
+// browser started and how long each phase took. Advanced detection
+// scripts compare timing deltas to detect headless/automated browsers.
+// We return a fully realistic, randomized PerformanceTiming object.
 
-var NAV_START = Date.now() - Math.floor(Math.random() * 300 + 500);
+var NAV_START = Date.now() - Math.floor(Math.random() * 500 + 800);
+
+// Helper: random offset in a range
+function _timingRand(min, max) {
+    return Math.floor(Math.random() * (max - min) + min);
+}
 
 // Override performance.timeOrigin
 try {
@@ -427,14 +625,76 @@ try {
 } catch(e) {}
 
 // Override performance.now() to stay consistent with our timeOrigin
-var _origPerfNow = performance.now.bind(performance);
 performance.now = function() {
     return Date.now() - NAV_START;
 };
 spoofToString(performance.now, 'now');
 
+// Build a complete, realistic PerformanceTiming object
+var FAKE_TIMING = {
+    navigationStart: NAV_START,
+    unloadEventStart: 0,
+    unloadEventEnd: 0,
+    redirectStart: 0,
+    redirectEnd: 0,
+    fetchStart: NAV_START + _timingRand(20, 60),
+    domainLookupStart: NAV_START + _timingRand(25, 70),
+    domainLookupEnd: NAV_START + _timingRand(60, 120),
+    connectStart: NAV_START + _timingRand(65, 130),
+    secureConnectionStart: NAV_START + _timingRand(70, 140),
+    connectEnd: NAV_START + _timingRand(130, 200),
+    requestStart: NAV_START + _timingRand(140, 210),
+    responseStart: NAV_START + _timingRand(300, 600),
+    responseEnd: NAV_START + _timingRand(400, 700),
+    domLoading: NAV_START + _timingRand(410, 720),
+    domInteractive: NAV_START + _timingRand(500, 900),
+    domContentLoadedEventStart: NAV_START + _timingRand(510, 920),
+    domContentLoadedEventEnd: NAV_START + _timingRand(520, 940),
+    domComplete: NAV_START + _timingRand(700, 1200),
+    loadEventStart: NAV_START + _timingRand(710, 1210),
+    loadEventEnd: NAV_START + _timingRand(720, 1250)
+};
+
+// Override performance.timing getter
+try {
+    var _origTimingDescriptor = Object.getOwnPropertyDescriptor(Performance.prototype, 'timing');
+    if (_origTimingDescriptor) {
+        Object.defineProperty(Performance.prototype, 'timing', {
+            get: function() { return FAKE_TIMING; },
+            configurable: true
+        });
+    }
+} catch(e) {}
+
 // ═══════════════════════════════════════════════════════════════
-// LAYER 19: Error stack cleaning
+// LAYER 19: Beacon API + sendBeacon
+// ═══════════════════════════════════════════════════════════════
+// Analytics and tracking libraries use navigator.sendBeacon() and
+// fetch() with keepalive:true to phone home. Both leak data and
+// create detectable network patterns. We intercept and silently
+// drop them while returning success to the caller.
+
+// 19a. Override navigator.sendBeacon
+navigator.sendBeacon = function sendBeacon(url, data) {
+    console.debug('[Agent-OS stealth] beacon intercepted:', url);
+    return true;
+};
+spoofToString(navigator.sendBeacon, 'sendBeacon');
+
+// 19b. Intercept fetch() for keepalive (beacon-style) requests
+var _origFetch = window.fetch;
+window.fetch = function fetch(resource, init) {
+    var url = (typeof resource === 'string') ? resource : (resource && resource.url) || '';
+    if (init && init.keepalive === true) {
+        console.debug('[Agent-OS stealth] keepalive fetch intercepted:', url);
+        return Promise.resolve(new Response('', { status: 200, statusText: 'OK' }));
+    }
+    return _origFetch.apply(this, arguments);
+};
+spoofToString(window.fetch, 'fetch');
+
+// ═══════════════════════════════════════════════════════════════
+// LAYER 20: Error stack cleaning
 // ═══════════════════════════════════════════════════════════════
 // Detection scripts parse Error stack traces looking for Playwright,
 // Node.js, or automation framework references. We sanitize these.
@@ -452,10 +712,10 @@ var STACK_SANITIZE_PATTERNS = [
     /node_modules/gi,
     /__puppeteer/gi,
     /__cdp/gi,
-    /at\s+.*?__evaluate/gi,
+    /at\\s+.*?__evaluate/gi,
     /InjectedScript/gi,
-    /Runtime\.evaluate/gi,
-    /Page\.addScriptToEvaluateOnNewDocument/gi
+    /Runtime\\.evaluate/gi,
+    /Page\\.addScriptToEvaluateOnNewDocument/gi
 ];
 
 // Override prepareStackTrace to clean automation references
@@ -495,7 +755,7 @@ try {
 } catch(e) {}
 
 // ═══════════════════════════════════════════════════════════════
-// LAYER 20: Iframe stealth propagation
+// LAYER 21: Iframe stealth propagation
 // ═══════════════════════════════════════════════════════════════
 // Pages with iframes can detect automation in the parent but not
 // the child (or vice versa). We propagate our patches to every
@@ -559,7 +819,7 @@ if (document.documentElement) {
 // DONE
 // ═══════════════════════════════════════════════════════════════
 
-console.log('[Agent-OS] Stealth patches loaded v4.0 (20 layers)');
+console.log('[Agent-OS] Stealth patches loaded v4.1 (21 layers)');
 
 })();
 """
