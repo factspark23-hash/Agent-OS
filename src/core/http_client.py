@@ -44,11 +44,12 @@ class TLSClient:
     """
 
     CHROME_PROFILES = [
-        "chrome120",
         "chrome124",
         "chrome131",
-        "chrome133a",
         "chrome136",
+        "chrome142",
+        "chrome145",
+        "chrome146",
     ]
 
     def __init__(self, profile: Optional[str] = None) -> None:
@@ -62,7 +63,7 @@ class TLSClient:
                     profile,
                     ", ".join(self.CHROME_PROFILES),
                 )
-                self._profile = "chrome131"
+                self._profile = "chrome136"
             else:
                 self._profile = profile
 

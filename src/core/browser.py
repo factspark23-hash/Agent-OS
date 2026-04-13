@@ -1056,6 +1056,7 @@ class AgentBrowser:
         _NAV_HARD_LIMIT = 30.0  # seconds — entire navigate including all retries
 
         async def _do_navigate() -> Dict[str, Any]:
+            nonlocal wait_until  # Allow retry with "networkidle"
             page = self._pages.get(page_id, self.page)
             domain = urlparse(url).hostname or ""
 

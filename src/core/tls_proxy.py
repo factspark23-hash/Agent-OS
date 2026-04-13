@@ -49,6 +49,20 @@ BROWSER_PROFILES = {
         "platform": '"Windows"',
         "mobile": "?0",
     },
+    "chrome145": {
+        "curl_type": None,  # Set at runtime
+        "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+        "sec_ch_ua": '"Chromium";v="145", "Google Chrome";v="145", "Not-A.Brand";v="99"',
+        "platform": '"Windows"',
+        "mobile": "?0",
+    },
+    "chrome142": {
+        "curl_type": None,  # Set at runtime
+        "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
+        "sec_ch_ua": '"Chromium";v="142", "Google Chrome";v="142", "Not-A.Brand";v="99"',
+        "platform": '"Windows"',
+        "mobile": "?0",
+    },
     "chrome136": {
         "curl_type": None,  # Set at runtime
         "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
@@ -126,6 +140,8 @@ def _init_profiles():
 
     _wanted = {
         "chrome146":   "chrome146",
+        "chrome145":   "chrome145",
+        "chrome142":   "chrome142",
         "chrome136":   "chrome136",
         "chrome133a":  "chrome133a",
         "chrome131":   "chrome131",

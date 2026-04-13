@@ -68,16 +68,7 @@ class AgentOS:
             )
             self.logger.info("Redis client initialized")
 
-        # Token setup (backward compat) — must run BEFORE auth middleware
-        if args.agent_token:
-            self.config.set("server.agent_token", args.agent_token)
-        elif not self.config.get("server.agent_token") and not self.jwt_handler:
-            auto_token = self.config.generate_agent_token("agent")
-            self.config.set("server.agent_token", auto_token)
-            self.config.save()  # Only save when auto-generating a new token
-            self.logger.info("Auto-generated legacy agent token")
-
-        # ─── Auth System (must be after token setup) ────────
+        # ─── Auth System (initialized first so token setup can check it) ────
         self.jwt_handler = None
         self.api_key_manager = None
         self.user_manager = None
@@ -124,6 +115,15 @@ class AgentOS:
                 legacy_tokens=legacy_tokens,
             )
             self.logger.info("Auth system enabled (JWT + API keys + legacy tokens)")
+
+        # Token setup (backward compat) — must run AFTER auth init
+        if args.agent_token:
+            self.config.set("server.agent_token", args.agent_token)
+        elif not self.config.get("server.agent_token") and not self.jwt_handler:
+            auto_token = self.config.generate_agent_token("agent")
+            self.config.set("server.agent_token", auto_token)
+            self.config.save()  # Only save when auto-generating a new token
+            self.logger.info("Auto-generated legacy agent token")
 
         # ─── Browser ─────────────────────────────────────
         self.browser = AgentBrowser(self.config)

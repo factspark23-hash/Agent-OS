@@ -36,7 +36,8 @@ def _get_profiles():
     profiles = {}
     _known = [
         "chrome116", "chrome119", "chrome120", "chrome124",
-        "chrome131", "chrome133a", "chrome136", "chrome146",
+        "chrome131", "chrome133a", "chrome136", "chrome142",
+        "chrome145", "chrome146",
         "firefox135", "firefox147",
         "safari15_3", "safari15_5", "safari17_0", "safari18_0",
         "edge99", "edge101",
@@ -219,6 +220,16 @@ CHROME_BRAND_VERSIONS = {
     "146": [
         {"brand": "Chromium", "version": "146"},
         {"brand": "Google Chrome", "version": "146"},
+        {"brand": "Not-A.Brand", "version": "99"},
+    ],
+    "145": [
+        {"brand": "Chromium", "version": "145"},
+        {"brand": "Google Chrome", "version": "145"},
+        {"brand": "Not-A.Brand", "version": "99"},
+    ],
+    "142": [
+        {"brand": "Chromium", "version": "142"},
+        {"brand": "Google Chrome", "version": "142"},
         {"brand": "Not-A.Brand", "version": "99"},
     ],
     "136": [
