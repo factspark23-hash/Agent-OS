@@ -379,6 +379,47 @@ curl -X POST http://localhost:8001/command \
 |---|---|
 | `transcribe` | Transcribe audio/video from URL (Whisper) |
 
+### Web Query Router (No LLM — Rule-Based)
+
+The Web Query Router tells AI agents **when** to use the browser and **when not to** — without using any LLM. This is critical: if an agent doesn't know which tasks need web access, the tool is useless.
+
+```bash
+# Classify a query — full analysis
+curl -X POST http://localhost:8001/command \
+  -d '{"token":"TOKEN","command":"classify-query","query":"What is the weather in Delhi?"}'
+
+# Quick yes/no — does this query need web?
+curl -X POST http://localhost:8001/command \
+  -d '{"token":"TOKEN","command":"needs-web","query":"What is 2+2?"}'
+
+# Get recommended strategy
+curl -X POST http://localhost:8001/command \
+  -d '{"token":"TOKEN","command":"query-strategy","query":"Search for latest AI news"}'
+```
+
+| Command | Description |
+|---|---|
+| `classify-query` | Full classification: needs_web, confidence, category, reason, strategy |
+| `needs-web` | Quick boolean: does this query need web access? |
+| `query-strategy` | Recommended strategy: use_browser, try_http_first, no_web_needed |
+| `router-stats` | Classification statistics |
+
+**How it works:**
+- 100+ weighted signal patterns across 20+ categories
+- Strong web signals: URLs, real-time keywords, web actions, location-specific queries
+- Strong no-web signals: math, code, historical facts, creative writing
+- Override rules for edge cases (currency conversion, programming + updates)
+- No LLM dependency — pure rule-based, instant, free
+
+**Strategies returned:**
+| Strategy | Meaning |
+|---|---|
+| `use_browser` | High confidence — use browser (confidence ≥ 0.7) |
+| `try_http_first` | Medium confidence — try HTTP client first, fall back to browser |
+| `no_web_needed` | High confidence — no web needed (confidence ≥ 0.7) |
+| `probably_no_web` | Medium confidence — likely no web needed |
+| `uncertain_consider_web` | Low confidence — agent should consider using web |
+
 ---
 
 ## Configuration
@@ -482,6 +523,7 @@ Agent-OS
 │   │   ├── auto_proxy.py            # Automatic proxy selection
 │   │   ├── session_recording.py     # Session recording & replay
 │   │   ├── multi_agent.py           # Multi-agent hub
+│   │   ├── web_query_router.py      # Query classification (web vs no-web, no LLM)
 │   │   └── transcriber.py           # Audio/video transcription
 │   ├── agents/
 │   │   └── server.py                # WebSocket + HTTP server (130+ handlers)

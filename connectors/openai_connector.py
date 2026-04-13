@@ -322,8 +322,40 @@ _TOOL_DEFS = [
         "name": "browser_restore_session",
         "description": "Restore a previously saved browser session.",
         "params": {
-            "name": {"type": "string", "description": "Session name to restore"},
+            "name": {"type": "string", "description": "Session name to restore", "default": "default"},
         },
+        "required": [],
+    },
+
+    # ─── Web Query Router (No LLM — Rule-Based) ──────────────
+    {
+        "name": "browser_classify_query",
+        "description": "Classify whether a query needs web/browser access. Returns needs_web (bool), confidence, category, reason, and suggested_strategy. Pure rule-based — no LLM. Call BEFORE deciding whether to use the browser.",
+        "params": {
+            "query": {"type": "string", "description": "The user's query to classify"},
+        },
+        "required": ["query"],
+    },
+    {
+        "name": "browser_needs_web",
+        "description": "Quick check: does this query need web access? Returns boolean + confidence. Lightweight endpoint for agents that need a yes/no before using browser.",
+        "params": {
+            "query": {"type": "string", "description": "The user's query to check"},
+        },
+        "required": ["query"],
+    },
+    {
+        "name": "browser_query_strategy",
+        "description": "Get recommended strategy for handling a query. Strategies: use_browser, try_http_first, no_web_needed, probably_no_web, uncertain_consider_web.",
+        "params": {
+            "query": {"type": "string", "description": "The user's query to analyze"},
+        },
+        "required": ["query"],
+    },
+    {
+        "name": "browser_router_stats",
+        "description": "Get Web Query Router classification statistics.",
+        "params": {},
         "required": [],
     },
 ]
@@ -369,6 +401,11 @@ _COMMAND_MAP = {
     "browser_set_proxy": ("set-proxy", ["proxy_url"]),
     "browser_save_session": ("save-session", ["name"]),
     "browser_restore_session": ("restore-session", ["name"]),
+    # Web Query Router
+    "browser_classify_query": ("classify-query", ["query"]),
+    "browser_needs_web": ("needs-web", ["query"]),
+    "browser_query_strategy": ("query-strategy", ["query"]),
+    "browser_router_stats": ("router-stats", []),
 }
 
 

@@ -294,6 +294,34 @@ TOOLS_MANIFEST = {
                 "name": {"type": "string", "required": False, "default": "default"},
             },
         },
+
+        # Web Query Router (No LLM — Rule-Based)
+        {
+            "name": "browser_classify_query",
+            "description": "Classify whether a query needs web/browser access. Returns needs_web, confidence, category, reason, strategy. No LLM — pure rules. Call BEFORE deciding to use browser.",
+            "parameters": {
+                "query": {"type": "string", "required": True, "description": "The user's query to classify"},
+            },
+        },
+        {
+            "name": "browser_needs_web",
+            "description": "Quick check: does this query need web access? Returns boolean + confidence.",
+            "parameters": {
+                "query": {"type": "string", "required": True, "description": "The user's query to check"},
+            },
+        },
+        {
+            "name": "browser_query_strategy",
+            "description": "Get recommended strategy: use_browser, try_http_first, no_web_needed, probably_no_web, uncertain_consider_web.",
+            "parameters": {
+                "query": {"type": "string", "required": True, "description": "The user's query to analyze"},
+            },
+        },
+        {
+            "name": "browser_router_stats",
+            "description": "Web Query Router classification statistics.",
+            "parameters": {},
+        },
     ],
 }
 
@@ -338,6 +366,11 @@ _COMMAND_MAP = {
     "browser_set_proxy": "set-proxy",
     "browser_save_session": "save-session",
     "browser_restore_session": "restore-session",
+    # Web Query Router
+    "browser_classify_query": "classify-query",
+    "browser_needs_web": "needs-web",
+    "browser_query_strategy": "query-strategy",
+    "browser_router_stats": "router-stats",
 }
 
 

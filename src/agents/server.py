@@ -56,6 +56,7 @@ class AgentServer:
         self._agent_hub = None
         self._proxy_manager = None
         self._smart_nav = None
+        self._web_query_router = None
 
         # In-memory rate limiting fallback
         self._rate_limits: Dict[str, deque] = defaultdict(lambda: deque(maxlen=200))
@@ -1038,6 +1039,11 @@ class AgentServer:
             "hub-memory-list": self._cmd_hub_memory_list,
             "hub-handoff": self._cmd_hub_handoff,
             "hub-audit": self._cmd_hub_audit,
+            # Web Query Router
+            "classify-query": self._cmd_classify_query,
+            "needs-web": self._cmd_needs_web,
+            "query-strategy": self._cmd_query_strategy,
+            "router-stats": self._cmd_router_stats,
         }
 
         handler = handlers.get(command)
@@ -1104,6 +1110,74 @@ class AgentServer:
             from src.core.smart_navigator import SmartNavigator
             self._smart_nav = SmartNavigator(self.browser)
         return self._smart_nav
+
+    def _get_web_query_router(self):
+        """Lazy-init WebQueryRouter."""
+        if self._web_query_router is None:
+            from src.tools.web_query_router import WebQueryRouter
+            self._web_query_router = WebQueryRouter()
+        return self._web_query_router
+
+    # ─── Web Query Router Commands ────────────────────────────────
+
+    async def _cmd_classify_query(self, data: Dict, session) -> Dict:
+        """Classify whether a query needs web/browser access.
+
+        Returns needs_web, confidence, category, reason, suggested_strategy.
+        No LLM used — pure rule-based classification.
+        """
+        query = data.get("query", "")
+        if not query:
+            return {"status": "error", "error": "Missing 'query' parameter"}
+
+        router = self._get_web_query_router()
+        result = router.classify(query)
+        return {"status": "success", **result}
+
+    async def _cmd_needs_web(self, data: Dict, session) -> Dict:
+        """Quick check: does this query need web access? Returns boolean.
+
+        Lightweight endpoint for agents that just need a yes/no answer.
+        """
+        query = data.get("query", "")
+        if not query:
+            return {"status": "error", "error": "Missing 'query' parameter"}
+
+        router = self._get_web_query_router()
+        result = router.classify(query)
+        return {
+            "status": "success",
+            "needs_web": result["needs_web"],
+            "confidence": result["confidence"],
+            "category": result["category"],
+            "reason": result["reason"],
+        }
+
+    async def _cmd_query_strategy(self, data: Dict, session) -> Dict:
+        """Get the recommended strategy for handling a query.
+
+        Strategies: use_browser, try_http_first, no_web_needed,
+        probably_no_web, uncertain_consider_web
+        """
+        query = data.get("query", "")
+        if not query:
+            return {"status": "error", "error": "Missing 'query' parameter"}
+
+        router = self._get_web_query_router()
+        result = router.classify(query)
+        return {
+            "status": "success",
+            "strategy": result["suggested_strategy"],
+            "needs_web": result["needs_web"],
+            "confidence": result["confidence"],
+            "category": result["category"],
+            "reason": result["reason"],
+        }
+
+    async def _cmd_router_stats(self, data: Dict, session) -> Dict:
+        """Get classification statistics from the Web Query Router."""
+        router = self._get_web_query_router()
+        return {"status": "success", **router.get_stats()}
 
     async def _cmd_navigate(self, data: Dict, session) -> Dict:
         url = data.get("url")

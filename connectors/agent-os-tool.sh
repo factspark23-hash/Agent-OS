@@ -128,6 +128,12 @@ if [ -z "$1" ]; then
     echo "  status                      Server status"
     echo "  commands                    List all commands"
     echo "  debug                       Debug info"
+    echo ""
+    echo "Web Query Router (No LLM — Rule-Based):"
+    echo "  classify-query <query>      Classify if query needs web access"
+    echo "  needs-web <query>           Quick yes/no: does query need web?"
+    echo "  query-strategy <query>      Get recommended strategy for query"
+    echo "  router-stats                Router classification statistics"
     exit 1
 fi
 
@@ -438,6 +444,20 @@ case "$COMMAND" in
     debug)
         curl -s "$AGENT_OS_URL/debug" | python3 -m json.tool
         exit 0
+        ;;
+
+    # ─── Web Query Router ─────────────────────────
+    classify-query)
+        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"classify-query\",\"query\":\"$1\"}"
+        ;;
+    needs-web)
+        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"needs-web\",\"query\":\"$1\"}"
+        ;;
+    query-strategy)
+        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"query-strategy\",\"query\":\"$1\"}"
+        ;;
+    router-stats)
+        DATA="{\"token\":\"$AGENT_OS_TOKEN\",\"command\":\"router-stats\"}"
         ;;
     *)
         echo "Unknown command: $COMMAND"

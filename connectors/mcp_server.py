@@ -449,6 +449,46 @@ TOOLS = [
             }
         }
     ),
+
+    # ─── Web Query Router (No LLM — Rule-Based) ──────────────
+    Tool(
+        name="browser_classify_query",
+        description="Classify whether a query needs web/browser access. Returns needs_web (bool), confidence, category, reason, and suggested strategy. Pure rule-based — no LLM used. Call this BEFORE deciding whether to use the browser for any task.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "The user's query to classify"}
+            },
+            "required": ["query"]
+        }
+    ),
+    Tool(
+        name="browser_needs_web",
+        description="Quick check: does this query need web access? Returns a boolean with confidence. Lightweight endpoint for agents that just need a yes/no answer before deciding to use the browser.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "The user's query to check"}
+            },
+            "required": ["query"]
+        }
+    ),
+    Tool(
+        name="browser_query_strategy",
+        description="Get the recommended strategy for handling a query. Strategies: use_browser, try_http_first, no_web_needed, probably_no_web, uncertain_consider_web. Call this to know HOW to handle a query.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "The user's query to analyze"}
+            },
+            "required": ["query"]
+        }
+    ),
+    Tool(
+        name="browser_router_stats",
+        description="Get classification statistics from the Web Query Router. Shows how many queries were classified as web-needed, no-web-needed, or uncertain.",
+        inputSchema={"type": "object", "properties": {}}
+    ),
 ]
 
 
@@ -535,6 +575,11 @@ async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[TextCon
         "browser_set_proxy": ("set-proxy", ["proxy_url"]),
         "browser_save_session": ("save-session", ["name"]),
         "browser_restore_session": ("restore-session", ["name"]),
+        # Web Query Router
+        "browser_classify_query": ("classify-query", ["query"]),
+        "browser_needs_web": ("needs-web", ["query"]),
+        "browser_query_strategy": ("query-strategy", ["query"]),
+        "browser_router_stats": ("router-stats", []),
     }
 
     if name == "browser_status":
