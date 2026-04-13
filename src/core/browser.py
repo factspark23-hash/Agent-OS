@@ -1002,171 +1002,191 @@ class AgentBrowser:
             retries: Max retry attempts (will rotate proxy on each retry)
             country: Geo-target proxy selection (e.g., "US", "GB", "DE")
             warmup: Whether to warm up session before first navigation
+
+        Hard wall-clock limit: 30 seconds for the entire navigation (all retries included).
         """
-        page = self._pages.get(page_id, self.page)
-        domain = urlparse(url).hostname or ""
+        import time as _time
 
-        # Get geo-targeting for known streaming sites
-        geo_target = country or self._get_geo_target(domain)
+        _NAV_HARD_LIMIT = 30.0  # seconds — entire navigate including all retries
 
-        # Session warmup — build realistic browsing history before target
-        if warmup and not self._session_warmed_up:
-            await self._warmup_session(url)
-            self._session_warmed_up = True
+        async def _do_navigate() -> Dict[str, Any]:
+            page = self._pages.get(page_id, self.page)
+            domain = urlparse(url).hostname or ""
 
-        last_error = None
-        tried_proxies: List[str] = []
-        current_url = url  # May change if we try bypass URL
+            # Get geo-targeting for known streaming sites
+            geo_target = country or self._get_geo_target(domain)
 
-        for attempt in range(retries + 1):
-            if attempt > 0:
-                # Exponential backoff with jitter
-                wait_time = random.uniform(3.0, 7.0) * attempt
-                logger.info(f"Retry {attempt}/{retries} for {current_url[:60]} (waiting {wait_time:.1f}s)")
-                await asyncio.sleep(wait_time)
+            # Session warmup — build realistic browsing history before target
+            if warmup and not self._session_warmed_up:
+                await self._warmup_session(url)
+                self._session_warmed_up = True
 
-                # Rotate user agent on retry
-                new_ua = self._get_rotation_ua()
-                try:
-                    await self.page.set_extra_http_headers({"User-Agent": new_ua})
-                    logger.debug(f"Rotated UA for retry {attempt}")
-                except Exception:
-                    pass
+            last_error = None
+            tried_proxies: List[str] = []
+            current_url = url  # May change if we try bypass URL
 
-                # Try per-site bypass URL on 2nd retry
-                if attempt >= 2:
-                    bypass_url = self._get_bypass_url(url)
-                    if bypass_url and bypass_url != current_url:
-                        current_url = bypass_url
-                        logger.info(f"Trying bypass URL: {bypass_url[:60]}")
+            for attempt in range(retries + 1):
+                if attempt > 0:
+                    # Exponential backoff with jitter
+                    wait_time = random.uniform(3.0, 7.0) * attempt
+                    logger.info(f"Retry {attempt}/{retries} for {current_url[:60]} (waiting {wait_time:.1f}s)")
+                    await asyncio.sleep(wait_time)
 
-            # Rotate proxy if we have a proxy manager
-            if self._proxy_manager and self._proxy_manager_enabled:
-                proxy_result = await self._rotate_to_next_proxy(
-                    domain=domain,
-                    country=geo_target,
-                    exclude=tried_proxies,
-                )
-                if proxy_result:
-                    tried_proxies.append(proxy_result)
+                    # Rotate user agent on retry
+                    new_ua = self._get_rotation_ua()
+                    try:
+                        await self.page.set_extra_http_headers({"User-Agent": new_ua})
+                        logger.debug(f"Rotated UA for retry {attempt}")
+                    except Exception:
+                        pass
 
-            # Fallback: auto-rotate proxy pool if configured
-            elif self._proxy_rotation_enabled:
-                await self._maybe_rotate_proxy()
+                    # Try per-site bypass URL on 2nd retry
+                    if attempt >= 2:
+                        bypass_url = self._get_bypass_url(url)
+                        if bypass_url and bypass_url != current_url:
+                            current_url = bypass_url
+                            logger.info(f"Trying bypass URL: {bypass_url[:60]}")
 
-            # Human-like delay before navigation
-            await asyncio.sleep(random.uniform(0.3, 1.2))
-
-            try:
-                response = await page.goto(current_url, wait_until=wait_until, timeout=30000)
-
-                # Wait for page to fully load (longer on retries for JS challenges)
-                load_wait = random.uniform(0.5, 1.5) + (attempt * 2.0)
-                await asyncio.sleep(load_wait)
-
-                # Check if we got a block/challenge page
-                title = await page.title()
-                text = ""
-                try:
-                    body = await page.query_selector("body")
-                    if body:
-                        text = await body.inner_text()
-                except Exception:
-                    pass
-
-                status_code = response.status if response else 200
-
-                # Record proxy success
-                if self._current_proxy:
-                    self._record_proxy_result(success=True, status_code=status_code)
-
-                # If blocked and we have retries left, try with different proxy
-                if self._is_blocked_page(title, text, url=current_url) and attempt < retries:
-                    block_reason = self._get_block_reason(title, text, status_code)
-                    logger.warning(
-                        f"Block/challenge detected on {current_url[:60]} "
-                        f"(attempt {attempt + 1}, reason: {block_reason})"
+                # Rotate proxy if we have a proxy manager
+                if self._proxy_manager and self._proxy_manager_enabled:
+                    proxy_result = await self._rotate_to_next_proxy(
+                        domain=domain,
+                        country=geo_target,
+                        exclude=tried_proxies,
                     )
+                    if proxy_result:
+                        tried_proxies.append(proxy_result)
 
-                    # Record proxy failure (blocked = proxy is burned)
+                # Fallback: auto-rotate proxy pool if configured
+                elif self._proxy_rotation_enabled:
+                    await self._maybe_rotate_proxy()
+
+                # Human-like delay before navigation
+                await asyncio.sleep(random.uniform(0.3, 1.2))
+
+                try:
+                    response = await page.goto(current_url, wait_until=wait_until, timeout=30000)
+
+                    # Wait for page to fully load (longer on retries for JS challenges)
+                    load_wait = random.uniform(0.5, 1.5) + (attempt * 2.0)
+                    await asyncio.sleep(load_wait)
+
+                    # Check if we got a block/challenge page
+                    title = await page.title()
+                    text = ""
+                    try:
+                        body = await page.query_selector("body")
+                        if body:
+                            text = await body.inner_text()
+                    except Exception:
+                        pass
+
+                    status_code = response.status if response else 200
+
+                    # Record proxy success
                     if self._current_proxy:
-                        self._record_proxy_result(
-                            success=False,
-                            status_code=status_code,
-                            error=f"blocked_by_site: {block_reason}"
+                        self._record_proxy_result(success=True, status_code=status_code)
+
+                    # If blocked and we have retries left, try with different proxy
+                    if self._is_blocked_page(title, text, url=current_url) and attempt < retries:
+                        block_reason = self._get_block_reason(title, text, status_code)
+                        logger.warning(
+                            f"Block/challenge detected on {current_url[:60]} "
+                            f"(attempt {attempt + 1}, reason: {block_reason})"
                         )
 
-                    # Try Cloudflare bypass
-                    if "cloudflare" in title.lower() or "just a moment" in title.lower():
-                        bypassed = await self._try_cloudflare_bypass(current_url, page)
-                        if bypassed:
-                            # Reload with clearance cookies
-                            try:
-                                response = await page.reload(wait_until=wait_until, timeout=30000)
-                                await asyncio.sleep(random.uniform(2.0, 4.0))
-                                title = await page.title()
-                                if not self._is_blocked_page(title, "", url=current_url):
-                                    # Bypass worked!
-                                    await self._save_cookies("default")
-                                    return {
-                                        "status": "success",
-                                        "url": page.url,
-                                        "title": title,
-                                        "status_code": response.status if response else 200,
-                                        "blocked_requests": self._blocked_requests,
-                                        "cf_bypassed": True,
-                                        "proxy_used": self._current_proxy.proxy_id if self._current_proxy else None,
-                                        "block_report": self._build_block_report(
-                                            url, status_code, block_reason, bypassed=True
-                                        ),
-                                    }
-                            except Exception as e:
-                                logger.warning(f"Reload after CF bypass failed: {e}")
+                        # Record proxy failure (blocked = proxy is burned)
+                        if self._current_proxy:
+                            self._record_proxy_result(
+                                success=False,
+                                status_code=status_code,
+                                error=f"blocked_by_site: {block_reason}"
+                            )
 
-                    # If not Cloudflare or bypass failed, rotate proxy and retry
-                    continue
+                        # Try Cloudflare bypass
+                        if "cloudflare" in title.lower() or "just a moment" in title.lower():
+                            bypassed = await self._try_cloudflare_bypass(current_url, page)
+                            if bypassed:
+                                # Reload with clearance cookies
+                                try:
+                                    response = await page.reload(wait_until=wait_until, timeout=30000)
+                                    await asyncio.sleep(random.uniform(2.0, 4.0))
+                                    title = await page.title()
+                                    if not self._is_blocked_page(title, "", url=current_url):
+                                        # Bypass worked!
+                                        await self._save_cookies("default")
+                                        return {
+                                            "status": "success",
+                                            "url": page.url,
+                                            "title": title,
+                                            "status_code": response.status if response else 200,
+                                            "blocked_requests": self._blocked_requests,
+                                            "cf_bypassed": True,
+                                            "proxy_used": self._current_proxy.proxy_id if self._current_proxy else None,
+                                            "block_report": self._build_block_report(
+                                                url, status_code, block_reason, bypassed=True
+                                            ),
+                                        }
+                                except Exception as e:
+                                    logger.warning(f"Reload after CF bypass failed: {e}")
 
-                # Save cookies after navigation
-                await self._save_cookies("default")
+                        # If not Cloudflare or bypass failed, rotate proxy and retry
+                        continue
 
-                # Build block report if partially blocked (got page but content is limited)
-                block_report = None
-                if status_code in (403, 429, 503):
-                    block_reason = self._get_block_reason(title, text, status_code)
-                    block_report = self._build_block_report(url, status_code, block_reason, bypassed=False)
+                    # Save cookies after navigation
+                    await self._save_cookies("default")
 
-                return {
-                    "status": "success",
-                    "url": page.url,
-                    "title": title,
-                    "status_code": status_code,
-                    "blocked_requests": self._blocked_requests,
-                    "attempt": attempt + 1,
-                    "proxy_used": self._current_proxy.proxy_id if self._current_proxy else None,
-                    "geo_target": geo_target,
-                    "block_report": block_report,
-                }
-            except Exception as e:
-                last_error = str(e)
-                logger.error(f"Navigation attempt {attempt + 1} failed: {e}")
+                    # Build block report if partially blocked (got page but content is limited)
+                    block_report = None
+                    if status_code in (403, 429, 503):
+                        block_reason = self._get_block_reason(title, text, status_code)
+                        block_report = self._build_block_report(url, status_code, block_reason, bypassed=False)
 
-                # Record proxy failure
-                if self._current_proxy:
-                    self._record_proxy_result(success=False, error=str(e)[:100])
+                    return {
+                        "status": "success",
+                        "url": page.url,
+                        "title": title,
+                        "status_code": status_code,
+                        "blocked_requests": self._blocked_requests,
+                        "attempt": attempt + 1,
+                        "proxy_used": self._current_proxy.proxy_id if self._current_proxy else None,
+                        "geo_target": geo_target,
+                        "block_report": block_report,
+                    }
+                except Exception as e:
+                    last_error = str(e)
+                    logger.error(f"Navigation attempt {attempt + 1} failed: {e}")
 
-                # Check if it's a timeout — try with networkidle instead
-                if "timeout" in last_error.lower() and attempt < retries:
-                    wait_until = "networkidle"
-                    continue
+                    # Record proxy failure
+                    if self._current_proxy:
+                        self._record_proxy_result(success=False, error=str(e)[:100])
 
-        # All retries exhausted — build failure report
-        return {
-            "status": "error",
-            "error": last_error or "All retries exhausted",
-            "block_report": self._build_block_report(
-                url, 0, last_error or "unknown", bypassed=False
-            ),
-        }
+                    # Check if it's a timeout — try with networkidle instead
+                    if "timeout" in last_error.lower() and attempt < retries:
+                        wait_until = "networkidle"
+                        continue
+
+            # All retries exhausted — build failure report
+            return {
+                "status": "error",
+                "error": last_error or "All retries exhausted",
+                "block_report": self._build_block_report(
+                    url, 0, last_error or "unknown", bypassed=False
+                ),
+            }
+
+        # Hard wall-clock timeout for the entire navigation
+        _t_start = _time.time()
+        try:
+            return await asyncio.wait_for(_do_navigate(), timeout=_NAV_HARD_LIMIT)
+        except asyncio.TimeoutError:
+            elapsed = round(_time.time() - _t_start, 1)
+            logger.error(f"Navigate hard timeout after {elapsed}s for {url[:80]}")
+            return {
+                "status": "error",
+                "error": "site_timeout_30s",
+                "time_seconds": elapsed,
+            }
 
     def _get_block_reason(self, title: str, text: str, status_code: int) -> str:
         """Determine the specific reason a page was blocked."""
