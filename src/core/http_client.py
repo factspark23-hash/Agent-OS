@@ -45,10 +45,10 @@ class TLSClient:
 
     CHROME_PROFILES = [
         "chrome120",
-        "chrome131",
-        "chrome132",
-        "chrome133a",
         "chrome124",
+        "chrome131",
+        "chrome133a",
+        "chrome136",
     ]
 
     def __init__(self, profile: Optional[str] = None) -> None:

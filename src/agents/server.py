@@ -2027,6 +2027,17 @@ class AgentServer:
     async def _cmd_proxy_stats(self, data: Dict, session) -> Dict:
         return self._get_proxy_manager().get_stats()
 
+    async def _cmd_proxy_rotate(self, data: Dict, session) -> Dict:
+        """Rotate to the next proxy in the pool."""
+        try:
+            manager = self._get_proxy_manager()
+            proxy = await manager.rotate()
+            if proxy:
+                return {"status": "success", "proxy": proxy.to_dict()}
+            return {"status": "error", "error": "No proxy available"}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
     async def _cmd_proxy_save(self, data: Dict, session) -> Dict:
         return self._get_proxy_manager().save(filename=data.get("filename", "proxies.json"))
 

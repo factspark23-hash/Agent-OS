@@ -73,8 +73,8 @@ DEVICE_MEMORY_GB = [
 
 # Chrome version distribution (approximate market share)
 CHROME_VERSIONS = [
-    ("124", 20), ("123", 18), ("122", 15), ("121", 12),
-    ("120", 10), ("119", 8), ("116", 5), ("110", 4),
+    ("131", 25), ("133", 20), ("136", 18), ("124", 12),
+    ("120", 10), ("119", 8), ("116", 5), ("110", 2),
 ]
 
 # Timezone distribution

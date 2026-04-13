@@ -36,15 +36,17 @@ def _get_profiles():
     profiles = {}
     _known = [
         "chrome116", "chrome119", "chrome120", "chrome124",
-        "safari15_3", "safari15_5", "safari17_0", "safari17_2_1",
+        "chrome131", "chrome133a", "chrome136", "chrome146",
+        "firefox135", "firefox147",
+        "safari15_3", "safari15_5", "safari17_0", "safari18_0",
         "edge99", "edge101",
     ]
     for name in _known:
         val = getattr(_curl_BrowserType, name, None)
         if val is not None:
             profiles[name] = val
-    # Ensure at least chrome124 exists
-    if "chrome124" not in profiles:
+    # Ensure at least one chrome profile exists
+    if not any(k.startswith("chrome") for k in profiles):
         # Fallback: use whatever chrome profile is available
         for attr in dir(_curl_BrowserType):
             if attr.startswith("chrome") and not attr.startswith("_"):
@@ -59,7 +61,7 @@ class TLSFingerprintEngine:
     HTTP/2 settings, and cipher suite order at the network level.
     """
 
-    def __init__(self, default_profile: str = "chrome124"):
+    def __init__(self, default_profile: str = "chrome131"):
         if not _CURL_AVAILABLE:
             logger.error(
                 "curl_cffi not installed! TLS fingerprinting will NOT work.\n"
@@ -70,6 +72,15 @@ class TLSFingerprintEngine:
 
         self._profiles = _get_profiles()
         self._sessions: Dict[str, Any] = {}
+        # Use requested profile, fall back to best available
+        if default_profile not in self._profiles:
+            # Pick the newest available Chrome profile
+            chrome_profiles = sorted(
+                [k for k in self._profiles if k.startswith("chrome")],
+                key=lambda x: int(x.replace("chrome", "").replace("a", "").replace("_android", "")) if x.replace("chrome", "").replace("a", "").replace("_android", "").isdigit() else 0,
+                reverse=True,
+            )
+            default_profile = chrome_profiles[0] if chrome_profiles else "chrome124"
         self._default_profile = default_profile
         self._session_cookies: Dict[str, Dict] = {}
         self._request_count: int = 0
@@ -205,6 +216,26 @@ class TLSFingerprintEngine:
 
 # Real Chrome sec-ch-ua brand strings per version
 CHROME_BRAND_VERSIONS = {
+    "146": [
+        {"brand": "Chromium", "version": "146"},
+        {"brand": "Google Chrome", "version": "146"},
+        {"brand": "Not-A.Brand", "version": "99"},
+    ],
+    "136": [
+        {"brand": "Chromium", "version": "136"},
+        {"brand": "Google Chrome", "version": "136"},
+        {"brand": "Not-A.Brand", "version": "99"},
+    ],
+    "133": [
+        {"brand": "Chromium", "version": "133"},
+        {"brand": "Google Chrome", "version": "133"},
+        {"brand": "Not?A_Brand", "version": "99"},
+    ],
+    "131": [
+        {"brand": "Chromium", "version": "131"},
+        {"brand": "Google Chrome", "version": "131"},
+        {"brand": "Not?A_Brand", "version": "99"},
+    ],
     "124": [
         {"brand": "Chromium", "version": "124"},
         {"brand": "Google Chrome", "version": "124"},

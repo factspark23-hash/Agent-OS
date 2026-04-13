@@ -383,13 +383,19 @@ class AgentBrowser:
         self._cookie_dir.mkdir(parents=True, exist_ok=True)
         self._download_dir.mkdir(parents=True, exist_ok=True)
 
-        # Start TLS proxy if curl_cffi is available
+        # NOTE: TLS proxy is disabled for browser traffic by default.
+        # Patchright (our browser engine) already patches Chromium's TLS
+        # fingerprint at the BoringSSL level, so an extra proxy layer is
+        # unnecessary and causes ERR_TUNNEL_CONNECTION_FAILED with HTTPS.
+        # The TLS HTTP client (TLSHTTPClient) is still available for direct
+        # HTTP requests where TLS fingerprinting matters (e.g. API calls,
+        # bot-protected endpoints that need curl_cffi impersonation).
         if self._tls_proxy_enabled and _CURL_AVAILABLE:
             try:
                 self._tls_proxy = TLSProxyServer(port=self._tls_proxy_port)
                 proxy_started = await self._tls_proxy.start()
                 if proxy_started:
-                    logger.info(f"TLS proxy active on port {self._tls_proxy_port}")
+                    logger.info(f"TLS proxy active on port {self._tls_proxy_port} (for HTTP client use only)")
                 else:
                     self._tls_proxy = None
                     logger.warning("TLS proxy failed to start, using direct connection")
@@ -462,23 +468,17 @@ class AgentBrowser:
             "args": self._launch_args,
         }
 
-        # Proxy support — prefer TLS proxy, then user-configured proxy
-        if self._tls_proxy:
-            # Route all traffic through our TLS proxy for real browser TLS fingerprint
-            tls_proxy_config = {
-                "server": self._tls_proxy.proxy_url,
-            }
-            launch_options["proxy"] = tls_proxy_config
-            self._proxy_config = tls_proxy_config
-            logger.info(f"TLS proxy configured: {self._tls_proxy.proxy_url}")
-        else:
-            # Fallback to user-configured proxy
-            proxy_url = self.config.get("browser.proxy")
-            if proxy_url:
-                proxy_config = self._parse_proxy_url(proxy_url)
-                launch_options["proxy"] = proxy_config
-                self._proxy_config = proxy_config
-                logger.info(f"Proxy configured: {proxy_config.get('server', 'N/A')}")
+        # Proxy support — use user-configured proxy only
+        # NOTE: TLS proxy is NOT used as a browser proxy because:
+        # 1. Patchright already patches Chromium TLS at BoringSSL level
+        # 2. HTTPS CONNECT tunneling through the TLS proxy fails
+        # 3. The TLS proxy is reserved for TLSHTTPClient (direct API calls)
+        proxy_url = self.config.get("browser.proxy")
+        if proxy_url:
+            proxy_config = self._parse_proxy_url(proxy_url)
+            launch_options["proxy"] = proxy_config
+            self._proxy_config = proxy_config
+            logger.info(f"Proxy configured: {proxy_config.get('server', 'N/A')}")
 
         self.browser = await self.playwright.chromium.launch(**launch_options)
 
@@ -564,14 +564,32 @@ class AgentBrowser:
         # Initialize Firefox fallback engine if enabled
         if self._firefox_enabled:
             try:
-                self._firefox_engine = FirefoxEngine(self.config)
-                await self._firefox_engine.start()
-                self._dual_engine = DualEngineManager(self.config, chromium_engine=self)
-                self._dual_engine.firefox = self._firefox_engine
-                self._dual_engine._started = True
-                logger.info("Firefox fallback engine initialized")
+                # Check if Firefox binary is available before attempting launch
+                import shutil
+                firefox_available = shutil.which("firefox") is not None
+                if not firefox_available:
+                    # Also check common install locations
+                    for path in [
+                        "/usr/bin/firefox",
+                        "/snap/bin/firefox",
+                        "/Applications/Firefox.app/Contents/MacOS/firefox",
+                        os.path.expanduser("~/Applications/Firefox.app/Contents/MacOS/firefox"),
+                    ]:
+                        if os.path.isfile(path):
+                            firefox_available = True
+                            break
+                if not firefox_available:
+                    logger.debug("Firefox browser not found — fallback engine disabled")
+                    self._firefox_engine = None
+                else:
+                    self._firefox_engine = FirefoxEngine(self.config)
+                    await self._firefox_engine.start()
+                    self._dual_engine = DualEngineManager(self.config, chromium_engine=self)
+                    self._dual_engine.firefox = self._firefox_engine
+                    self._dual_engine._started = True
+                    logger.info("Firefox fallback engine initialized")
             except Exception as e:
-                logger.warning(f"Firefox engine failed to start: {e}")
+                logger.debug(f"Firefox engine unavailable: {e}")
                 self._firefox_engine = None
 
     async def _get_browser_version(self) -> str:
@@ -2718,22 +2736,46 @@ class AgentBrowser:
                 await self._cookie_flush_task
             except asyncio.CancelledError:
                 pass
-        await self._flush_cookies("default")
-        if self.context:
-            await self.context.close()
-        if self.browser:
-            await self.browser.close()
-        if self.playwright:
-            await self.playwright.stop()
-        # Stop TLS proxy
-        if self._tls_proxy:
-            await self._tls_proxy.stop()
-        # Close HTTP client
-        if self._tls_http:
-            self._tls_http.close()
+        try:
+            await self._flush_cookies("default")
+        except Exception:
+            pass
+        try:
+            if self.context:
+                await self.context.close()
+        except Exception:
+            pass
+        try:
+            if self.browser:
+                await self.browser.close()
+        except Exception:
+            pass
+        try:
+            if self.playwright:
+                await self.playwright.stop()
+        except Exception:
+            pass
+        # Stop TLS proxy (must happen after browser close to release the port)
+        try:
+            if self._tls_proxy:
+                await self._tls_proxy.stop()
+                self._tls_proxy = None
+        except Exception:
+            logger.debug("TLS proxy stop failed (may already be stopped)")
+            self._tls_proxy = None
+        # Close TLS HTTP client
+        try:
+            if self._tls_http:
+                self._tls_http.close()
+                self._tls_http = None
+        except Exception:
+            self._tls_http = None
         # Stop proxy manager
-        if self._proxy_manager:
-            await self._proxy_manager.stop()
+        try:
+            if self._proxy_manager:
+                await self._proxy_manager.stop()
+        except Exception:
+            pass
         # Stop Firefox fallback engine
         if self._firefox_engine:
             await self._firefox_engine.stop()

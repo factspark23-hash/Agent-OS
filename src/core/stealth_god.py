@@ -119,8 +119,8 @@ class ConsistentFingerprint:
     ]
 
     CHROME_VERSIONS = [
-        ("124", 20), ("123", 18), ("122", 15), ("121", 12),
-        ("120", 10), ("119", 8),
+        ("131", 25), ("133", 20), ("136", 18), ("124", 12),
+        ("120", 10), ("119", 8), ("116", 5),
     ]
 
     TIMEZONES = [
@@ -948,15 +948,23 @@ class GodModeStealth:
                 },
             })
 
-            # Timezone override
-            await cdp.send("Emulation.setTimezoneOverride", {
-                "timezoneId": fp.timezone,
-            })
+            # Timezone override (ignore "already in effect" errors from duplicate calls)
+            try:
+                await cdp.send("Emulation.setTimezoneOverride", {
+                    "timezoneId": fp.timezone,
+                })
+            except Exception as e:
+                if "already in effect" not in str(e).lower():
+                    raise
 
-            # Locale override
-            await cdp.send("Emulation.setLocaleOverride", {
-                "locale": "en-US",
-            })
+            # Locale override (ignore "already in effect" errors from duplicate calls)
+            try:
+                await cdp.send("Emulation.setLocaleOverride", {
+                    "locale": "en-US",
+                })
+            except Exception as e:
+                if "already in effect" not in str(e).lower():
+                    raise
 
             logger.debug(f"CDP overrides applied for {fp.fp_id}")
 

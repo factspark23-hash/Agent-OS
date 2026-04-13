@@ -21,9 +21,10 @@ class AuthMiddleware:
     """
     Authentication and authorization middleware for aiohttp.
 
-    Supports two auth methods:
+    Supports three auth methods:
     1. Bearer JWT token (Authorization: Bearer <token>)
     2. API key (token field in JSON body, or X-API-Key header)
+    3. Legacy token (token field in JSON body, for backward compatibility)
 
     Provides:
     - Per-user rate limiting via Redis
@@ -34,14 +35,20 @@ class AuthMiddleware:
     """
 
     def __init__(self, jwt_handler: JWTHandler, api_key_manager: APIKeyManager,
-                 redis_client=None):
+                 redis_client=None, legacy_tokens: list = None):
         self.jwt = jwt_handler
         self.api_keys = api_key_manager
         self.redis = redis_client
+        self._legacy_tokens = legacy_tokens or []
         # Brute-force protection: in-memory failed attempt tracking
         self._login_attempts: Dict[str, list] = defaultdict(list)  # ip -> [timestamps]
         self._max_attempts = 5
         self._lockout_seconds = 15 * 60  # 15 minutes
+
+    def add_legacy_token(self, token: str):
+        """Add a legacy token for backward compatibility."""
+        if token and token not in self._legacy_tokens:
+            self._legacy_tokens.append(token)
 
     async def authenticate_request(self, request: web.Request,
                                    body: dict = None) -> Optional[dict]:
@@ -72,7 +79,7 @@ class AuthMiddleware:
                 return auth
             return None
 
-        # Method 3: API key from body (for POST requests)
+        # Method 3: Token from body (API key, JWT, or legacy)
         if body and body.get("token"):
             token = body["token"]
             # Check if it's an API key (starts with aos_)
@@ -81,7 +88,7 @@ class AuthMiddleware:
                 if auth:
                     auth["auth_method"] = "api_key"
                     return auth
-            # Otherwise try as JWT
+            # Try as JWT
             payload = self.jwt.verify_token(token, token_type="access")
             if payload:
                 return {
@@ -90,6 +97,16 @@ class AuthMiddleware:
                     "scopes": payload.get("scopes", []),
                     "auth_method": "jwt",
                 }
+            # Try as legacy token
+            import hmac as _hmac
+            for legacy_token in self._legacy_tokens:
+                if legacy_token and _hmac.compare_digest(token, legacy_token):
+                    return {
+                        "user_id": "legacy",
+                        "api_key_id": None,
+                        "scopes": ["browser"],
+                        "auth_method": "legacy_token",
+                    }
 
         return None
 
@@ -180,9 +197,11 @@ def create_auth_middleware(auth_mw: AuthMiddleware):
     """
     @web.middleware
     async def middleware(request: web.Request, handler):
-        # Skip auth for health/status endpoints
+        # Skip auth for public endpoints (no authentication required)
         skip_paths = {"/status", "/health", "/commands", "/favicon.ico"}
-        if request.path in skip_paths:
+        # Skip auth for auth endpoints (register, login, refresh — they handle their own auth)
+        skip_prefixes = ("/auth/register", "/auth/login", "/auth/refresh")
+        if request.path in skip_paths or any(request.path.startswith(p) for p in skip_prefixes):
             return await handler(request)
 
         # Skip auth for OPTIONS (CORS preflight)

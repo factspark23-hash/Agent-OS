@@ -57,7 +57,7 @@ DEFAULT_CONFIG = {
         "device": "desktop_1080",
         "locale": "en-US",
         "timezone_id": "America/New_York",
-        "tls_proxy_enabled": True,
+        "tls_proxy_enabled": False,  # Disabled for browser — Patchright handles TLS natively
         "tls_proxy_port": 8081,
         "proxy_rotation_enabled": True,
         "proxy_rotation_strategy": "weighted",
@@ -77,7 +77,7 @@ DEFAULT_CONFIG = {
         "session_encryption": True,
         "enable_api_key_auth": True,
         "enable_jwt_auth": True,
-        "allow_legacy_token_auth": False,
+        "allow_legacy_token_auth": True,
         "max_login_attempts": 5,
         "lockout_duration_minutes": 15,
     },

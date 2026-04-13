@@ -985,10 +985,14 @@ class CDPStealthInjector:
             # Timezone is already set by GodModeStealth (stealth_god.py)
             # to avoid duplicate CDP "Timezone override is already in effect" warning
 
-            # Set locale
-            await cdp.send("Emulation.setLocaleOverride", {
-                "locale": "en-US",
-            })
+            # Set locale (ignore "already in effect" errors from duplicate calls)
+            try:
+                await cdp.send("Emulation.setLocaleOverride", {
+                    "locale": "en-US",
+                })
+            except Exception as e:
+                if "already in effect" not in str(e).lower():
+                    raise
 
             logger.debug("CDP overrides applied (UA, locale)")
 

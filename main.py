@@ -68,7 +68,16 @@ class AgentOS:
             )
             self.logger.info("Redis client initialized")
 
-        # ─── Auth System ─────────────────────────────────
+        # Token setup (backward compat) — must run BEFORE auth middleware
+        if args.agent_token:
+            self.config.set("server.agent_token", args.agent_token)
+        elif not self.config.get("server.agent_token") and not self.jwt_handler:
+            auto_token = self.config.generate_agent_token("agent")
+            self.config.set("server.agent_token", auto_token)
+            self.config.save()  # Only save when auto-generating a new token
+            self.logger.info("Auto-generated legacy agent token")
+
+        # ─── Auth System (must be after token setup) ────────
         self.jwt_handler = None
         self.api_key_manager = None
         self.user_manager = None
@@ -100,12 +109,21 @@ class AgentOS:
             self.user_manager = UserManager(db_session_factory=db_factory)
 
             from src.auth.middleware import AuthMiddleware
+            # Collect legacy tokens for backward compatibility
+            legacy_tokens = []
+            agent_token = self.config.get("server.agent_token")
+            if agent_token:
+                legacy_tokens.append(agent_token)
+            for t in self.config.get("server.allowed_tokens", []):
+                if t:
+                    legacy_tokens.append(t)
             self.auth_middleware = AuthMiddleware(
                 jwt_handler=self.jwt_handler,
                 api_key_manager=self.api_key_manager,
                 redis_client=self.redis,
+                legacy_tokens=legacy_tokens,
             )
-            self.logger.info("Auth system enabled (JWT + API keys)")
+            self.logger.info("Auth system enabled (JWT + API keys + legacy tokens)")
 
         # ─── Browser ─────────────────────────────────────
         self.browser = AgentBrowser(self.config)
@@ -154,14 +172,7 @@ class AgentOS:
         if args.device:
             self.config.set("browser.device", args.device)
 
-        # Token setup (backward compat)
-        if args.agent_token:
-            self.config.set("server.agent_token", args.agent_token)
-        elif not self.config.get("server.agent_token") and not self.jwt_handler:
-            auto_token = self.config.generate_agent_token("agent")
-            self.config.set("server.agent_token", auto_token)
-            self.config.save()  # Only save when auto-generating a new token
-            self.logger.info("Auto-generated legacy agent token")
+        # Token already set up before auth middleware
 
         if args.rate_limit:
             self.config.set("server.rate_limit_max", args.rate_limit)
@@ -380,6 +391,21 @@ async def main():
         await app.start()
     except KeyboardInterrupt:
         await app.stop()
+    except OSError as e:
+        if "address already in use" in str(e).lower() or e.errno == 98:
+            ws_port = app.config.get("server.ws_port", 8000)
+            http_port = app.config.get("server.http_port", 8001)
+            app.logger.error(
+                f"Port conflict detected! Another process is using port {ws_port} or {http_port}.\n"
+                f"  Fix: Change the port with --port <number> (e.g., --port 9000)\n"
+                f"  Or:  Kill the existing process: lsof -i :{ws_port} -i :{http_port}"
+            )
+            await app.stop()
+            sys.exit(1)
+        else:
+            app.logger.error(f"Network error: {e}", exc_info=True)
+            await app.stop()
+            sys.exit(1)
     except Exception as e:
         app.logger.error(f"Fatal error: {e}", exc_info=True)
         await app.stop()

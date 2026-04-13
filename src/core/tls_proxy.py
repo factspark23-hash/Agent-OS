@@ -42,6 +42,34 @@ except ImportError:
 
 # Browser profiles with their curl_cffi mappings
 BROWSER_PROFILES = {
+    "chrome146": {
+        "curl_type": None,  # Set at runtime
+        "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+        "sec_ch_ua": '"Chromium";v="146", "Google Chrome";v="146", "Not-A.Brand";v="99"',
+        "platform": '"Windows"',
+        "mobile": "?0",
+    },
+    "chrome136": {
+        "curl_type": None,  # Set at runtime
+        "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+        "sec_ch_ua": '"Chromium";v="136", "Google Chrome";v="136", "Not-A.Brand";v="99"',
+        "platform": '"Windows"',
+        "mobile": "?0",
+    },
+    "chrome133a": {
+        "curl_type": None,  # Set at runtime
+        "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+        "sec_ch_ua": '"Chromium";v="133", "Google Chrome";v="133", "Not-A.Brand";v="99"',
+        "platform": '"Windows"',
+        "mobile": "?0",
+    },
+    "chrome131": {
+        "curl_type": None,  # Set at runtime
+        "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "sec_ch_ua": '"Chromium";v="131", "Google Chrome";v="131", "Not?A_Brand";v="99"',
+        "platform": '"Windows"',
+        "mobile": "?0",
+    },
     "chrome124": {
         "curl_type": None,  # Set at runtime
         "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -63,9 +91,16 @@ BROWSER_PROFILES = {
         "platform": '"Windows"',
         "mobile": "?0",
     },
-    "safari17_0": {
+    "firefox147": {
         "curl_type": None,
-        "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+        "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:147.0) Gecko/20100101 Firefox/147.0",
+        "sec_ch_ua": None,
+        "platform": '"Windows"',
+        "mobile": "?0",
+    },
+    "safari18_0": {
+        "curl_type": None,
+        "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_4) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
         "sec_ch_ua": None,
         "platform": '"macOS"',
         "mobile": "?0",
@@ -90,12 +125,18 @@ def _init_profiles():
         return
 
     _wanted = {
+        "chrome146":   "chrome146",
+        "chrome136":   "chrome136",
+        "chrome133a":  "chrome133a",
+        "chrome131":   "chrome131",
         "chrome124":   "chrome124",
         "chrome120":   "chrome120",
         "chrome119":   "chrome119",
         "chrome116":   "chrome116",
+        "firefox147":  "firefox147",
+        "firefox135":  "firefox135",
+        "safari18_0":  "safari18_0",
         "safari17_0":  "safari17_0",
-        "safari17_2_1":"safari17_2_1",
         "safari15_5":  "safari15_5",
         "edge101":     "edge101",
         "edge99":      "edge99",
@@ -414,7 +455,7 @@ class TLSProxyServer:
             "booking.com", "expedia", "investing.com",
         ]
         if any(d in domain.lower() for d in heavy_protection_domains):
-            profile = "chrome124"
+            profile = "chrome133a"
 
         proxied_req = ProxiedRequest(
             method=method,
