@@ -1013,6 +1013,29 @@ class AgentBrowser:
             page = self._pages.get(page_id, self.page)
             domain = urlparse(url).hostname or ""
 
+            # ── Pre-flight: fast TCP connect check ────────────────────
+            # Skip the entire Playwright flow if the site is completely
+            # unreachable (DNS failure, server down, connection refused).
+            # 5-second timeout — no browser launch, no retries.
+            _pf_start = time.time()
+            try:
+                import socket
+                port = 443 if url.startswith("https") else 80
+                _, writer = await asyncio.wait_for(
+                    asyncio.open_connection(domain, port),
+                    timeout=5.0,
+                )
+                writer.close()
+                await writer.wait_closed()
+            except (asyncio.TimeoutError, OSError, Exception) as _pf_err:
+                _pf_elapsed = round(time.time() - _pf_start, 1)
+                logger.warning(f"Pre-flight failed for {domain}: {_pf_err} ({_pf_elapsed}s)")
+                return {
+                    "status": "error",
+                    "error": "site_unreachable",
+                    "time_seconds": _pf_elapsed,
+                }
+
             # Get geo-targeting for known streaming sites
             geo_target = country or self._get_geo_target(domain)
 
