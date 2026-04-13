@@ -260,10 +260,44 @@ ok "Python packages installed"
 
 # ─── Step 7: Playwright Chromium ────────────────────────
 step "Installing Chromium browser..."
-python -m playwright install chromium 2>&1 | tail -1
-# Also install system deps if available
-python -m playwright install-deps chromium 2>&1 | tail -1 || true
-ok "Chromium ready"
+
+# Try patchright first (project dependency), fall back to playwright
+BROWSER_CMD=""
+if python -c "import patchright" 2>/dev/null; then
+    BROWSER_CMD="patchright"
+elif python -c "import playwright" 2>/dev/null; then
+    BROWSER_CMD="playwright"
+else
+    warn "Neither patchright nor playwright installed — skipping browser download"
+fi
+
+if [ -n "$BROWSER_CMD" ]; then
+    echo -e "  ${CYAN}Downloading Chromium via ${BROWSER_CMD}...${NC}"
+    # Capture output but show last few lines on failure
+    INSTALL_OUTPUT=$(python -m "$BROWSER_CMD" install chromium 2>&1)
+    INSTALL_EXIT=$?
+    if [ $INSTALL_EXIT -eq 0 ]; then
+        ok "Chromium downloaded"
+    else
+        warn "Browser install exited with code $INSTALL_EXIT"
+        echo "$INSTALL_OUTPUT" | tail -5
+    fi
+
+    # Install system deps (may need sudo, may fail on non-Debian)
+    if python -m "$BROWSER_CMD" install-deps chromium 2>&1 | tail -3; then
+        ok "System dependencies installed"
+    else
+        warn "System deps install skipped (non-Debian or no sudo)"
+    fi
+
+    # Verify the binary actually exists
+    CHROME_BIN=$(find ~/.cache/ms-playwright -name "chrome" -o -name "chrome-headless-shell" 2>/dev/null | head -1)
+    if [ -n "$CHROME_BIN" ] && [ -x "$CHROME_BIN" ]; then
+        ok "Chromium binary verified: $CHROME_BIN"
+    else
+        warn "Chromium binary not found in playwright cache — may need manual install"
+    fi
+fi
 
 # ─── Step 8: Environment File ───────────────────────────
 step "Configuring environment..."
