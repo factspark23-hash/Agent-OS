@@ -59,12 +59,12 @@ class BrowserProfile:
 
 # Exactly 12 profiles: 4x Windows, 4x macOS, 2x Ubuntu, 2x Windows+Edge
 BROWSER_PROFILES: List[BrowserProfile] = [
-    # ── Windows 10/11 × Chrome 130, 131, 132 ──────────────────
+    # ── Windows 10/11 × Chrome 145, 146 ──────────────────
     BrowserProfile(
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
         platform="Win32",
         viewport={"width": 1920, "height": 1080},
-        sec_ch_ua='"Chromium";v="130", "Google Chrome";v="130", "Not?A_Brand";v="99"',
+        sec_ch_ua='"Chromium";v="146", "Google Chrome";v="146", "Not?A_Brand";v="99"',
         sec_ch_ua_platform='"Windows"',
         hardware_concurrency=8,
         device_memory=16,
@@ -74,10 +74,10 @@ BROWSER_PROFILES: List[BrowserProfile] = [
         locale="en-US",
     ),
     BrowserProfile(
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
         platform="Win32",
         viewport={"width": 2560, "height": 1440},
-        sec_ch_ua='"Chromium";v="131", "Google Chrome";v="131", "Not?A_Brand";v="99"',
+        sec_ch_ua='"Chromium";v="145", "Google Chrome";v="145", "Not?A_Brand";v="99"',
         sec_ch_ua_platform='"Windows"',
         hardware_concurrency=12,
         device_memory=16,
@@ -87,10 +87,10 @@ BROWSER_PROFILES: List[BrowserProfile] = [
         locale="en-US",
     ),
     BrowserProfile(
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
         platform="Win32",
         viewport={"width": 1366, "height": 768},
-        sec_ch_ua='"Chromium";v="132", "Google Chrome";v="132", "Not?A_Brand";v="99"',
+        sec_ch_ua='"Chromium";v="146", "Google Chrome";v="146", "Not?A_Brand";v="99"',
         sec_ch_ua_platform='"Windows"',
         hardware_concurrency=4,
         device_memory=8,
@@ -100,10 +100,10 @@ BROWSER_PROFILES: List[BrowserProfile] = [
         locale="en-GB",
     ),
     BrowserProfile(
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
         platform="Win32",
         viewport={"width": 1440, "height": 900},
-        sec_ch_ua='"Chromium";v="131", "Google Chrome";v="131", "Not?A_Brand";v="99"',
+        sec_ch_ua='"Chromium";v="145", "Google Chrome";v="145", "Not?A_Brand";v="99"',
         sec_ch_ua_platform='"Windows"',
         hardware_concurrency=6,
         device_memory=8,
@@ -112,12 +112,12 @@ BROWSER_PROFILES: List[BrowserProfile] = [
         timezone_id="America/Denver",
         locale="en-US",
     ),
-    # ── macOS 14/15 × Chrome 130, 131, 132 ────────────────────
+    # ── macOS 14/15 × Chrome 145, 146 ────────────────────
     BrowserProfile(
-        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
         platform="MacIntel",
         viewport={"width": 2560, "height": 1600},
-        sec_ch_ua='"Chromium";v="130", "Google Chrome";v="130", "Not?A_Brand";v="99"',
+        sec_ch_ua='"Chromium";v="146", "Google Chrome";v="146", "Not?A_Brand";v="99"',
         sec_ch_ua_platform='"macOS"',
         hardware_concurrency=10,
         device_memory=16,
@@ -127,10 +127,10 @@ BROWSER_PROFILES: List[BrowserProfile] = [
         locale="en-US",
     ),
     BrowserProfile(
-        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
         platform="MacIntel",
         viewport={"width": 1920, "height": 1200},
-        sec_ch_ua='"Chromium";v="131", "Google Chrome";v="131", "Not?A_Brand";v="99"',
+        sec_ch_ua='"Chromium";v="145", "Google Chrome";v="145", "Not?A_Brand";v="99"',
         sec_ch_ua_platform='"macOS"',
         hardware_concurrency=8,
         device_memory=8,
@@ -140,10 +140,10 @@ BROWSER_PROFILES: List[BrowserProfile] = [
         locale="en-US",
     ),
     BrowserProfile(
-        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
+        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
         platform="MacIntel",
         viewport={"width": 2880, "height": 1800},
-        sec_ch_ua='"Chromium";v="132", "Google Chrome";v="132", "Not?A_Brand";v="99"',
+        sec_ch_ua='"Chromium";v="146", "Google Chrome";v="146", "Not?A_Brand";v="99"',
         sec_ch_ua_platform='"macOS"',
         hardware_concurrency=10,
         device_memory=16,
@@ -153,10 +153,10 @@ BROWSER_PROFILES: List[BrowserProfile] = [
         locale="en-US",
     ),
     BrowserProfile(
-        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
         platform="MacIntel",
         viewport={"width": 1920, "height": 1080},
-        sec_ch_ua='"Chromium";v="131", "Google Chrome";v="131", "Not?A_Brand";v="99"',
+        sec_ch_ua='"Chromium";v="145", "Google Chrome";v="145", "Not?A_Brand";v="99"',
         sec_ch_ua_platform='"macOS"',
         hardware_concurrency=8,
         device_memory=16,
@@ -165,12 +165,12 @@ BROWSER_PROFILES: List[BrowserProfile] = [
         timezone_id="Europe/Paris",
         locale="fr-FR",
     ),
-    # ── Ubuntu 22.04 × Chrome 131, 132 ────────────────────────
+    # ── Ubuntu 22.04 × Chrome 145, 146 ────────────────────────
     BrowserProfile(
-        user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
         platform="Linux x86_64",
         viewport={"width": 1920, "height": 1080},
-        sec_ch_ua='"Chromium";v="131", "Google Chrome";v="131", "Not?A_Brand";v="99"',
+        sec_ch_ua='"Chromium";v="146", "Google Chrome";v="146", "Not?A_Brand";v="99"',
         sec_ch_ua_platform='"Linux"',
         hardware_concurrency=4,
         device_memory=8,
@@ -180,10 +180,10 @@ BROWSER_PROFILES: List[BrowserProfile] = [
         locale="de-DE",
     ),
     BrowserProfile(
-        user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
+        user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
         platform="Linux x86_64",
         viewport={"width": 2560, "height": 1440},
-        sec_ch_ua='"Chromium";v="132", "Google Chrome";v="132", "Not?A_Brand";v="99"',
+        sec_ch_ua='"Chromium";v="145", "Google Chrome";v="145", "Not?A_Brand";v="99"',
         sec_ch_ua_platform='"Linux"',
         hardware_concurrency=8,
         device_memory=16,
@@ -194,10 +194,10 @@ BROWSER_PROFILES: List[BrowserProfile] = [
     ),
     # ── Windows 11 × Edge (Chromium-based) ────────────────────
     BrowserProfile(
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0",
         platform="Win32",
         viewport={"width": 1920, "height": 1080},
-        sec_ch_ua='"Chromium";v="131", "Microsoft Edge";v="131", "Not?A_Brand";v="99"',
+        sec_ch_ua='"Chromium";v="146", "Microsoft Edge";v="146", "Not?A_Brand";v="99"',
         sec_ch_ua_platform='"Windows"',
         hardware_concurrency=8,
         device_memory=16,
@@ -207,10 +207,10 @@ BROWSER_PROFILES: List[BrowserProfile] = [
         locale="en-US",
     ),
     BrowserProfile(
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 Edg/132.0.0.0",
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36 Edg/145.0.0.0",
         platform="Win32",
         viewport={"width": 2560, "height": 1440},
-        sec_ch_ua='"Chromium";v="132", "Microsoft Edge";v="132", "Not?A_Brand";v="99"',
+        sec_ch_ua='"Chromium";v="145", "Microsoft Edge";v="145", "Not?A_Brand";v="99"',
         sec_ch_ua_platform='"Windows"',
         hardware_concurrency=12,
         device_memory=16,
@@ -232,9 +232,9 @@ class AgentBrowser:
         "iphone_14_pro_max": {"width": 430, "height": 932, "device_scale_factor": 3, "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"},
         "ipad": {"width": 768, "height": 1024, "device_scale_factor": 2, "user_agent": "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"},
         "ipad_pro": {"width": 1024, "height": 1366, "device_scale_factor": 2, "user_agent": "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"},
-        "galaxy_s23": {"width": 360, "height": 780, "device_scale_factor": 3, "user_agent": "Mozilla/5.0 (Linux; Android 14; SM-S911B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"},
-        "galaxy_tab_s9": {"width": 800, "height": 1280, "device_scale_factor": 2, "user_agent": "Mozilla/5.0 (Linux; Android 14; SM-X810) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"},
-        "pixel_8": {"width": 412, "height": 915, "device_scale_factor": 2.625, "user_agent": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"},
+        "galaxy_s23": {"width": 360, "height": 780, "device_scale_factor": 3, "user_agent": "Mozilla/5.0 (Linux; Android 14; SM-S911B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Mobile Safari/537.36"},
+        "galaxy_tab_s9": {"width": 800, "height": 1280, "device_scale_factor": 2, "user_agent": "Mozilla/5.0 (Linux; Android 14; SM-X810) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"},
+        "pixel_8": {"width": 412, "height": 915, "device_scale_factor": 2.625, "user_agent": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Mobile Safari/537.36"},
         "desktop_1080": {"width": 1920, "height": 1080, "device_scale_factor": 1, "user_agent": None},
         "desktop_1440": {"width": 2560, "height": 1440, "device_scale_factor": 1, "user_agent": None},
         "desktop_4k": {"width": 3840, "height": 2160, "device_scale_factor": 2, "user_agent": None},

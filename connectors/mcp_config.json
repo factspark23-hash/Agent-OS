@@ -2,10 +2,10 @@
   "mcpServers": {
     "agent-os": {
       "command": "python3",
-      "args": ["/root/.openclaw/workspace/Agent-OS/connectors/mcp_server.py"],
+      "args": ["./connectors/mcp_server.py"],
       "env": {
         "AGENT_OS_URL": "http://localhost:8001",
-        "AGENT_OS_TOKEN": "mcp-agent-default"
+        "AGENT_OS_TOKEN": "your-agent-token-here"
       }
     }
   }

@@ -1,33 +1,33 @@
-# Agent-OS — Kaise Use Karein 🚀
+# Agent-OS — Usage Guide
 
 ## Step 1: Install & Start
 
-### Docker se (Recommended)
+### Using Docker (Recommended)
 ```bash
-# Clone karo
+# Clone the repository
 git clone https://github.com/factspark23-hash/Agent-OS.git
 cd Agent-OS
 
-# Start karo (PostgreSQL + Redis + Agent-OS sab ek saath)
+# Start everything (PostgreSQL + Redis + Agent-OS)
 docker compose up -d
 
-# Check karo sab chal raha hai ya nahi
+# Verify it's running
 curl http://localhost:8001/health
 ```
 
 **Output:** `{"status": "healthy", "checks": {...}}`
 
-### Bina Docker ke (Manual)
+### Without Docker (Manual)
 ```bash
 git clone https://github.com/factspark23-hash/Agent-OS.git
 cd Agent-OS
 chmod +x setup.sh && ./setup.sh
-python3 main.py --agent-token "apna-token-yahan-dalo"
+python3 main.py --agent-token "your-token-here"
 ```
 
 ---
 
-## Step 2: Verify Running
+## Step 2: Verify Installation
 
 ```bash
 # Health check
@@ -39,25 +39,25 @@ curl http://localhost:8001/status
 
 ---
 
-## Step 3: Use Karo! 
+## Step 3: Start Using It!
 
-### 🔑 Auth Setup (Production ke liye)
+### Authentication Setup (For Production)
 
 ```bash
-# Register new user
+# Register a new user
 curl -X POST http://localhost:8001/auth/register \
   -H "Content-Type: application/json" \
   -d '{
     "email": "you@example.com",
-    "username": "dude",
+    "username": "admin",
     "password": "StrongPass123!"
   }'
 
-# Login — JWT token milega
+# Login — you'll receive a JWT token
 curl -X POST http://localhost:8001/auth/login \
   -H "Content-Type: application/json" \
   -d '{
-    "username": "dude",
+    "username": "admin",
     "password": "StrongPass123!"
   }'
 
@@ -66,10 +66,10 @@ curl -X POST http://localhost:8001/auth/login \
 #   "status": "success",
 #   "access_token": "eyJhbGciOi...",
 #   "refresh_token": "eyJhbGciOi...",
-#   "user": {"id": "...", "username": "dude", "plan": "free"}
+#   "user": {"id": "...", "username": "admin", "plan": "free"}
 # }
 
-# API Key banao (JWT token se)
+# Create an API key (using JWT token)
 curl -X POST http://localhost:8001/auth/api-keys \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer eyJhbGciOi..." \
@@ -78,7 +78,7 @@ curl -X POST http://localhost:8001/auth/api-keys \
 
 ---
 
-### 🌐 Browser Commands (Sabse Important!)
+### Browser Commands (Most Important!)
 
 #### Navigate to any website
 ```bash
@@ -91,7 +91,7 @@ curl -X POST http://localhost:8001/command \
   }'
 ```
 
-#### Screenshot lo
+#### Take a screenshot
 ```bash
 curl -X POST http://localhost:8001/command \
   -H "Content-Type: application/json" \
@@ -99,7 +99,7 @@ curl -X POST http://localhost:8001/command \
   -d '{"command": "screenshot"}'
 ```
 
-#### Page ka content nikalo
+#### Get page content
 ```bash
 curl -X POST http://localhost:8001/command \
   -H "Content-Type: application/json" \
@@ -107,7 +107,7 @@ curl -X POST http://localhost:8001/command \
   -d '{"command": "get-content"}'
 ```
 
-#### Links nikalo
+#### Extract all links
 ```bash
 curl -X POST http://localhost:8001/command \
   -H "Content-Type: application/json" \
@@ -115,7 +115,7 @@ curl -X POST http://localhost:8001/command \
   -d '{"command": "get-links"}'
 ```
 
-#### Click karo
+#### Click an element
 ```bash
 curl -X POST http://localhost:8001/command \
   -H "Content-Type: application/json" \
@@ -126,7 +126,7 @@ curl -X POST http://localhost:8001/command \
   }'
 ```
 
-#### Type karo (Form fill)
+#### Fill a form
 ```bash
 curl -X POST http://localhost:8001/command \
   -H "Content-Type: application/json" \
@@ -139,7 +139,7 @@ curl -X POST http://localhost:8001/command \
   }'
 ```
 
-#### Scroll karo
+#### Scroll the page
 ```bash
 curl -X POST http://localhost:8001/command \
   -H "Content-Type: application/json" \
@@ -153,24 +153,24 @@ curl -X POST http://localhost:8001/command \
 
 ---
 
-### 🤖 AI Agent ke saath use karna
+### Using with AI Agents
 
-#### OpenAI / GPT ke saath
+#### With OpenAI / GPT-4
 ```python
 from connectors.openai_connector import get_tools, call_tool
 
-# Tool definitions le lo
-tools = get_tools("openai")  # GPT-4 function calling ke liye
+# Get tool definitions
+tools = get_tools("openai")  # For GPT-4 function calling
 
-# Tool call karo
+# Execute tools
 result = await call_tool("browser_navigate", {"url": "https://github.com"})
 result = await call_tool("browser_screenshot", {})
 result = await call_tool("browser_click", {"selector": "a[href='/login']"})
 ```
 
-#### Claude / MCP ke saath
+#### With Claude / MCP
 ```json
-// Claude Desktop config mein add karo
+// Add to Claude Desktop config
 {
   "mcpServers": {
     "agent-os": {
@@ -185,7 +185,7 @@ result = await call_tool("browser_click", {"selector": "a[href='/login']"})
 }
 ```
 
-#### CLI se (Bash/Python/Node kuch bhi)
+#### From CLI (Bash/Python/Node/Any Language)
 ```bash
 ./connectors/agent-os-tool.sh navigate "https://github.com"
 ./connectors/agent-os-tool.sh screenshot
@@ -194,46 +194,49 @@ result = await call_tool("browser_click", {"selector": "a[href='/login']"})
 
 ---
 
-### 🔐 Login Save Karo (Auto-Login)
+### Login & Credential Management
 
 ```bash
-# Pehle manually login karo browser mein, phir credentials save karo
+# Save credentials for a site (AES-256 encrypted)
 curl -X POST http://localhost:8001/command \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -d '{
     "command": "save-creds",
-    "site": "github.com"
+    "domain": "github.com",
+    "username": "you@example.com",
+    "password": "your-password"
   }'
 
-# Baad mein auto-login
+# Auto-login later
 curl -X POST http://localhost:8001/command \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -d '{
     "command": "auto-login",
-    "site": "github.com"
+    "url": "https://github.com/login",
+    "domain": "github.com"
   }'
 ```
 
 ---
 
-### 📋 Real-World Examples
+### Real-World Examples
 
-#### Example 1: GitHub se repo list nikalo
+#### Example 1: List repositories from a GitHub profile
 ```bash
-# Navigate
+# Navigate to profile
 curl -X POST http://localhost:8001/command \
   -H "Authorization: Bearer TOKEN" \
   -d '{"command": "navigate", "url": "https://github.com/factspark23-hash"}'
 
-# Content lo
+# Get the content
 curl -X POST http://localhost:8001/command \
   -H "Authorization: Bearer TOKEN" \
   -d '{"command": "get-content"}'
 ```
 
-#### Example 2: Amazon pe product search
+#### Example 2: Search for a product on Amazon
 ```bash
 curl -X POST http://localhost:8001/command \
   -H "Authorization: Bearer TOKEN" \
@@ -248,7 +251,7 @@ curl -X POST http://localhost:8001/command \
   -d '{"command": "click", "selector": "input[type=submit]"}'
 ```
 
-#### Example 3: Multi-step workflow
+#### Example 3: Multi-step workflow in a single command
 ```bash
 curl -X POST http://localhost:8001/command \
   -H "Authorization: Bearer TOKEN" \
@@ -266,51 +269,53 @@ curl -X POST http://localhost:8001/command \
 
 ---
 
-## 📊 All Commands Reference
+## All Commands Reference
 
 | Category | Commands |
 |----------|----------|
-| **Navigation** | `navigate`, `back`, `forward`, `reload` |
+| **Navigation** | `navigate`, `back`, `forward`, `reload`, `smart-navigate` |
 | **Click/Type** | `click`, `type`, `press`, `hover`, `double-click`, `right-click` |
 | **Content** | `get-content`, `get-dom`, `get-links`, `get-images`, `get-text`, `screenshot` |
 | **Forms** | `fill-form`, `fill-job`, `select`, `checkbox`, `upload`, `clear-input` |
 | **Scroll** | `scroll` (up/down/left/right) |
 | **Auth** | `save-creds`, `auto-login`, `get-cookies`, `set-cookie` |
 | **Tabs** | `tabs` (list/new/switch/close) |
-| **Smart** | `smart-click`, `smart-fill`, `smart-find`, `smart-wait` |
-| **Workflow** | `workflow`, `workflow-save`, `workflow-list` |
-| **Network** | `network-start`, `network-stop`, `network-get`, `network-apis` |
+| **Smart** | `smart-click`, `smart-fill`, `smart-find`, `smart-find-all`, `smart-wait` |
+| **Workflow** | `workflow`, `workflow-save`, `workflow-template`, `workflow-list` |
+| **Network** | `network-start`, `network-stop`, `network-get`, `network-apis`, `network-stats` |
 | **Security** | `scan-xss`, `scan-sqli`, `scan-sensitive` |
 | **Recording** | `record-start`, `record-stop`, `replay-play` |
 | **Multi-Agent** | `hub-register`, `hub-task-create`, `hub-broadcast` |
-| **Proxy** | `proxy-add`, `proxy-get`, `proxy-list`, `proxy-stats` |
+| **Proxy** | `set-proxy`, `get-proxy`, `proxy-add`, `proxy-list`, `proxy-stats` |
 | **Media** | `transcribe` |
+| **Sessions** | `save-session`, `restore-session`, `list-sessions`, `delete-session` |
+| **Analysis** | `page-summary`, `page-tables`, `page-seo`, `page-structured`, `page-emails` |
 
 ---
 
-## 🐳 Production Deployment
+## Production Deployment
 
 ```bash
 # Full stack deploy (PostgreSQL + Redis + Agent-OS + Nginx)
 docker compose --profile with-nginx up -d
 
-# Environment variables set karo
+# Set environment variables
 export JWT_SECRET_KEY="your-super-secret-key-here"
 export POSTGRES_PASSWORD="strong-db-password"
 
-# Logs dekho
+# View logs
 docker compose logs -f agent-os
 ```
 
 ---
 
-## ⚠️ Important Notes
+## Important Notes
 
-1. **Localhost pe chalao** — Ye local server hai, internet pe expose mat karo bina nginx/SSL ke
-2. **Token safe rakho** — Legacy token browser-only access deta hai, production mein JWT use karo
-3. **CORS** — Default mein cross-origin blocked hai, `server.cors_allowed_origins` mein apna domain add karo
-4. **RAM** — ~500MB idle, ~800MB under load. Zyada tabs = zyada RAM
+1. **Run locally or behind a firewall** — This is a local server. Do not expose it to the internet without Nginx/SSL.
+2. **Keep your tokens secure** — Legacy tokens provide browser-only access. Use JWT authentication for production.
+3. **CORS** — Cross-origin requests are blocked by default. Add your domain to `server.cors_allowed_origins` in the config.
+4. **RAM** — ~500MB idle, ~800MB under load. More tabs = more RAM. Use `--max-ram` to set limits.
 
 ---
 
-_Built with ❤️ by Agent-OS team_
+_Built with dedication by the Agent-OS team_
