@@ -81,20 +81,32 @@ BROWSER_PROFILES = {
 
 
 def _init_profiles():
-    """Initialize curl_cffi browser types at runtime."""
+    """Initialize curl_cffi browser types at runtime.
+
+    Uses getattr with a fallback so missing attributes in newer/older
+    curl_cffi versions are silently skipped instead of crashing.
+    """
     if not _CURL_AVAILABLE:
         return
-    _type_map = {
-        "chrome124": _curl_BrowserType.chrome124,
-        "chrome120": _curl_BrowserType.chrome120,
-        "chrome119": _curl_BrowserType.chrome119,
-        "chrome116": _curl_BrowserType.chrome116,
-        "safari17_0": _curl_BrowserType.safari17_0,
-        "safari17_2_1": _curl_BrowserType.safari17_2_1,
-        "safari15_5": _curl_BrowserType.safari15_5,
-        "edge101": _curl_BrowserType.edge101,
-        "edge99": _curl_BrowserType.edge99,
+
+    _wanted = {
+        "chrome124":   "chrome124",
+        "chrome120":   "chrome120",
+        "chrome119":   "chrome119",
+        "chrome116":   "chrome116",
+        "safari17_0":  "safari17_0",
+        "safari17_2_1":"safari17_2_1",
+        "safari15_5":  "safari15_5",
+        "edge101":     "edge101",
+        "edge99":      "edge99",
     }
+
+    _type_map = {}
+    for profile_name, attr_name in _wanted.items():
+        attr = getattr(_curl_BrowserType, attr_name, None)
+        if attr is not None:
+            _type_map[profile_name] = attr
+
     for name, profile in BROWSER_PROFILES.items():
         if name in _type_map:
             profile["curl_type"] = _type_map[name]
