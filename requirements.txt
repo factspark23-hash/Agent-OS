@@ -13,7 +13,7 @@ httpx==0.28.1
 cryptography==44.0.2
 
 # Anti-detection evasion engines
-curl_cffi>=0.7.0           # curl-impersonate: browser-grade TLS fingerprint
+curl_cffi==0.7.0           # curl-impersonate: browser-grade TLS fingerprint
 tls-client>=1.0.0          # TLS fingerprint matching
 cloudscraper>=1.2.71       # Cloudflare v1/v2/v3 + Turnstile challenge solver
 nodriver>=0.32             # Undetected Chrome driver (optional)
