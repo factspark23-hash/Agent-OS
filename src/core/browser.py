@@ -262,6 +262,10 @@ class AgentBrowser:
         self._session_warmed_up = False
         self._launch_args = None  # cached launch args
         self._recovery_lock = asyncio.Lock()
+        # Cookie batching — dirty flag + periodic flush to reduce I/O
+        self._cookies_dirty: bool = False
+        self._last_cookie_save: float = 0.0
+        self._cookie_flush_task: Optional[asyncio.Task] = None
         # Proxy rotation
         self._proxy_pool: List[Dict[str, Any]] = []
         self._proxy_index: int = 0
@@ -417,6 +421,10 @@ class AgentBrowser:
             logger.info(f"Proxy rotation enabled (strategy: {self._proxy_rotation_strategy})")
 
         await self._launch_browser()
+
+        # Start background cookie flush (save dirty cookies every 60s)
+        self._cookie_flush_task = asyncio.create_task(self._cookie_flush_loop())
+
         logger.info("Browser started with stealth patches v2.0 + TLS fingerprinting + proxy rotation")
 
     async def _launch_browser(self):
@@ -729,14 +737,34 @@ class AgentBrowser:
         return None
 
     async def _save_cookies(self, profile: str = "default"):
-        """Save current cookies for persistence (encrypted)."""
-        if self.context:
+        """Mark cookies as dirty — actual save is deferred to reduce I/O."""
+        self._cookies_dirty = True
+
+    async def _flush_cookies(self, profile: str = "default"):
+        """Write dirty cookies to disk (called periodically or on shutdown)."""
+        if not self._cookies_dirty or not self.context:
+            return
+        try:
             state = await self.context.storage_state()
             cookie_file = self._cookie_dir / f"{profile}.enc"
             encrypted = self._cookie_fernet.encrypt(json.dumps(state).encode())
             cookie_file.write_bytes(encrypted)
             cookie_file.chmod(0o600)
+            self._cookies_dirty = False
+            self._last_cookie_save = time.time()
             logger.info(f"Cookies saved (encrypted) for profile: {profile}")
+        except Exception as e:
+            logger.warning(f"Cookie flush failed: {e}")
+
+    async def _cookie_flush_loop(self, interval: float = 60.0):
+        """Background task: flush dirty cookies every `interval` seconds."""
+        try:
+            while True:
+                await asyncio.sleep(interval)
+                await self._flush_cookies()
+        except asyncio.CancelledError:
+            # Final flush on shutdown
+            await self._flush_cookies()
 
     async def _handle_download(self, download):
         """Handle file downloads."""
@@ -2500,6 +2528,9 @@ class AgentBrowser:
         Save full browser session state: cookies, localStorage, sessionStorage.
         Can be restored later with restore_session().
         """
+        # Flush any pending cookie writes first
+        await self._flush_cookies()
+
         session_dir = Path(os.path.expanduser("~/.agent-os/sessions"))
         session_dir.mkdir(parents=True, exist_ok=True)
 
@@ -2680,8 +2711,14 @@ class AgentBrowser:
 
     async def stop(self):
         """Clean shutdown."""
-        # Save cookies before closing
-        await self._save_cookies("default")
+        # Cancel cookie flush loop and do final save
+        if self._cookie_flush_task:
+            self._cookie_flush_task.cancel()
+            try:
+                await self._cookie_flush_task
+            except asyncio.CancelledError:
+                pass
+        await self._flush_cookies("default")
         if self.context:
             await self.context.close()
         if self.browser:
