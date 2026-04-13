@@ -982,18 +982,15 @@ class CDPStealthInjector:
                 },
             })
 
-            # Set timezone
-            timezone = fingerprint.get("timezone", "America/New_York")
-            await cdp.send("Emulation.setTimezoneOverride", {
-                "timezoneId": timezone,
-            })
+            # Timezone is already set by GodModeStealth (stealth_god.py)
+            # to avoid duplicate CDP "Timezone override is already in effect" warning
 
             # Set locale
             await cdp.send("Emulation.setLocaleOverride", {
                 "locale": "en-US",
             })
 
-            logger.debug(f"CDP overrides applied (UA, timezone: {timezone})")
+            logger.debug("CDP overrides applied (UA, locale)")
 
         except Exception as e:
             logger.warning(f"CDP overrides partially failed: {e}")
