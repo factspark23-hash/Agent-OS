@@ -150,28 +150,80 @@ cd "$INSTALL_DIR"
 # ─── Step 4: Virtual Environment ────────────────────────
 step "Setting up virtual environment..."
 if [ ! -d "venv" ]; then
-    # Ensure venv module is available
-    if ! $PYTHON -m venv --help > /dev/null 2>&1; then
-        warn "python3-venv not found. Installing..."
-        PY_VER=$($PYTHON -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+    PY_VER=$($PYTHON -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+
+    # --- Try 1: venv module already works ---
+    if $PYTHON -m venv --help > /dev/null 2>&1; then
+        if $PYTHON -m venv venv 2>/dev/null; then
+            ok "Virtual environment created (native venv)"
+        else
+            # venv module exists but creation failed (e.g. ensurepip missing)
+            warn "venv module present but creation failed — installing pip manually"
+            $PYTHON -m venv --without-pip venv 2>/dev/null || $PYTHON -m venv venv
+            source venv/bin/activate
+            curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py 2>/dev/null
+            if [ -f /tmp/get-pip.py ]; then
+                python /tmp/get-pip.py -q 2>&1 | tail -1
+                rm -f /tmp/get-pip.py
+                ok "pip installed via get-pip.py"
+            else
+                warn "Could not download get-pip.py — pip may be missing from venv"
+            fi
+        fi
+    else
+        # --- Try 2: venv module missing — install the OS package ---
+        warn "python${PY_VER}-venv not found. Attempting package install..."
+        VENV_INSTALLED=false
+
         if command -v apt-get > /dev/null 2>&1; then
-            run_privileged apt-get update -qq 2>/dev/null
-            run_privileged apt-get install -y -qq "python${PY_VER}-venv" python3-pip python3-dev build-essential 2>/dev/null
+            run_privileged apt-get update -qq 2>/dev/null || true
+            # Try version-specific first (python3.12-venv), then generic
+            for pkg in "python${PY_VER}-venv" "python3-venv"; do
+                if run_privileged apt-get install -y -qq "$pkg" 2>/dev/null; then
+                    ok "Installed $pkg"
+                    VENV_INSTALLED=true
+                    break
+                fi
+            done
         elif command -v dnf > /dev/null 2>&1; then
-            run_privileged dnf install -y -q python3-venv python3-pip python3-devel gcc 2>/dev/null
+            if run_privileged dnf install -y -q python3-venv 2>/dev/null; then
+                ok "Installed python3-venv (dnf)"
+                VENV_INSTALLED=true
+            fi
         elif command -v yum > /dev/null 2>&1; then
-            run_privileged yum install -y -q python3-venv python3-pip python3-devel gcc 2>/dev/null
+            if run_privileged yum install -y -q python3-venv 2>/dev/null; then
+                ok "Installed python3-venv (yum)"
+                VENV_INSTALLED=true
+            fi
+        elif command -v pacman > /dev/null 2>&1; then
+            if run_privileged pacman -S --noconfirm python 2>/dev/null; then
+                ok "Installed python (pacman — venv included)"
+                VENV_INSTALLED=true
+            fi
+        fi
+
+        if $VENV_INSTALLED && $PYTHON -m venv venv 2>/dev/null; then
+            ok "Virtual environment created (after package install)"
+        else
+            # --- Try 3: everything failed — use --without-pip + get-pip.py ---
+            warn "Package install unavailable or failed — using --without-pip fallback"
+            $PYTHON -m venv --without-pip venv 2>/dev/null
+            if [ ! -d "venv" ]; then
+                # Last resort: even --without-pip failed
+                fail "Cannot create virtual environment. Install python3-venv manually."
+            fi
+            source venv/bin/activate
+            curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py 2>/dev/null
+            if [ -f /tmp/get-pip.py ]; then
+                python /tmp/get-pip.py -q 2>&1 | tail -1
+                rm -f /tmp/get-pip.py
+                ok "pip installed via get-pip.py"
+            else
+                warn "Could not download get-pip.py — pip may be missing from venv"
+            fi
+            ok "Virtual environment created (without-pip fallback)"
         fi
     fi
-
-    $PYTHON -m venv venv 2>/dev/null || {
-        $PYTHON -m venv --without-pip venv
-        source venv/bin/activate
-        curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
-        python /tmp/get-pip.py -q
-        rm -f /tmp/get-pip.py
-    }
-    ok "Virtual environment created"
 else
     ok "Virtual environment exists"
 fi
