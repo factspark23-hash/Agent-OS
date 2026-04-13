@@ -35,6 +35,12 @@ class SmartNavigator:
         "glassdoor.com", "linkedin.com", "twitter.com",
         "x.com", "instagram.com", "facebook.com",
         "zillow.com", "trulia.com", "redfin.com",
+        # Anti-bot sites that block HTTP requests (need Patchright browser)
+        "homedepot.com", "etsy.com", "wayfair.com",
+        "dickssportinggoods.com", "crateandbarrel.com",
+        "realtor.com", "expedia.com", "booking.com",
+        "wsj.com", "peacocktv.com", "espn.com",
+        "underarmour.com",
     ]
 
     # Sites known to need delays between requests

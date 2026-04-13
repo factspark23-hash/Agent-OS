@@ -6,7 +6,9 @@ Falls back to standard httpx if curl-cffi is unavailable.
 """
 import logging
 import random
+import time
 from typing import Any, Dict, Optional
+from urllib.parse import urlparse
 
 logger = logging.getLogger("agent-os.http_client")
 
@@ -51,6 +53,42 @@ class TLSClient:
         "chrome145",
         "chrome146",
     ]
+
+    # Chrome version → Sec-CH-UA brand string mapping
+    CHROME_BRAND_VERSIONS = {
+        "chrome124": "124",
+        "chrome131": "131",
+        "chrome136": "136",
+        "chrome142": "142",
+        "chrome145": "145",
+        "chrome146": "146",
+    }
+
+    # Domains known for aggressive anti-bot (need extra stealth headers)
+    STEALTH_REQUIRED_DOMAINS = {
+        "glassdoor.com", "homedepot.com", "etsy.com", "wayfair.com",
+        "realtor.com", "expedia.com", "dickssportinggoods.com",
+        "crateandbarrel.com", "wsj.com", "underarmour.com",
+        "reddit.com", "peacocktv.com", "paramountplus.com",
+        "espn.com", "loc.gov", "berkeley.edu",
+        "bloomberg.com", "airbnb.com", "booking.com",
+        "zillow.com", "coinbase.com", "binance.com",
+    }
+
+    # Default browser-like headers that real Chrome sends
+    DEFAULT_BROWSER_HEADERS = {
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"Windows"',
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Upgrade-Insecure-Requests": "1",
+    }
 
     def __init__(self, profile: Optional[str] = None) -> None:
         if profile is None:
@@ -99,6 +137,53 @@ class TLSClient:
         """Currently active TLS profile name."""
         return self._profile
 
+    # ── Header Building ─────────────────────────────────────────
+
+    def _build_headers(self, url: str, user_headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+        """
+        Build realistic browser headers for the given URL.
+        
+        Automatically adds Sec-CH-UA and stealth headers for anti-bot sites.
+        User-provided headers override defaults.
+        """
+        headers = dict(self.DEFAULT_BROWSER_HEADERS)
+
+        # Add Sec-CH-UA based on profile version
+        chrome_ver = self.CHROME_BRAND_VERSIONS.get(self._profile, "146")
+        headers["Sec-Ch-Ua"] = (
+            f'"Chromium";v="{chrome_ver}", '
+            f'"Google Chrome";v="{chrome_ver}", '
+            f'"Not-A.Brand";v="99"'
+        )
+
+        # Add User-Agent matching the profile
+        headers["User-Agent"] = (
+            f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            f"AppleWebKit/537.36 (KHTML, like Gecko) "
+            f"Chrome/{chrome_ver}.0.0.0 Safari/537.36"
+        )
+
+        # Add Referer for same-origin requests (helps with WAF)
+        parsed = urlparse(url)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        headers["Origin"] = origin
+
+        # Stealth mode: extra headers for anti-bot domains
+        domain = parsed.hostname or ""
+        bare_domain = domain.replace("www.", "")
+        if bare_domain in self.STEALTH_REQUIRED_DOMAINS or any(
+            d in bare_domain for d in self.STEALTH_REQUIRED_DOMAINS
+        ):
+            # Add DNT and more realistic browser signals
+            headers["Dnt"] = "1"
+            headers["Sec-Fetch-Site"] = "same-origin"  # Looks like internal nav
+
+        # User headers override everything
+        if user_headers:
+            headers.update(user_headers)
+
+        return headers
+
     # ── Core Methods ───────────────────────────────────────────
 
     async def get(
@@ -116,11 +201,14 @@ class TLSClient:
             Dict with keys: status, headers, text, url, cookies, ok.
             On error: status=0, ok=False, error=<message>.
         """
+        # Build realistic browser headers
+        final_headers = self._build_headers(url, headers)
+
         try:
             if _CURL_CFFI_AVAILABLE and self._session:
                 resp = await self._session.get(
                     url,
-                    headers=headers,
+                    headers=final_headers,
                     cookies=cookies,
                     timeout=timeout,
                     allow_redirects=follow_redirects,
@@ -128,7 +216,7 @@ class TLSClient:
             else:
                 resp = await self._fallback_client.get(
                     url,
-                    headers=headers,
+                    headers=final_headers,
                     cookies=cookies,
                     timeout=timeout,
                     follow_redirects=follow_redirects,
@@ -160,7 +248,7 @@ class TLSClient:
                         follow_redirects=follow_redirects,
                         http2=False,
                     ) as fallback:
-                        resp = await fallback.get(url, headers=headers, cookies=cookies)
+                        resp = await fallback.get(url, headers=final_headers, cookies=cookies)
                         return {
                             "status": resp.status_code,
                             "headers": dict(resp.headers),
@@ -198,13 +286,20 @@ class TLSClient:
         Returns:
             Same dict format as :meth:`get`.
         """
+        # Build realistic browser headers
+        final_headers = self._build_headers(url, headers)
+        # Override Accept for POST
+        final_headers.setdefault("Accept", "application/json, text/plain, */*")
+        final_headers["Sec-Fetch-Dest"] = "empty"
+        final_headers["Sec-Fetch-Mode"] = "cors"
+
         try:
             if _CURL_CFFI_AVAILABLE and self._session:
                 resp = await self._session.post(
                     url,
                     data=data,
                     json=json,
-                    headers=headers,
+                    headers=final_headers,
                     timeout=timeout,
                 )
             else:
@@ -212,7 +307,7 @@ class TLSClient:
                     url,
                     data=data,
                     json=json,
-                    headers=headers,
+                    headers=final_headers,
                     timeout=timeout,
                 )
 
