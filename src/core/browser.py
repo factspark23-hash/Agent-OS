@@ -1136,11 +1136,30 @@ class AgentBrowser:
                     # Save cookies after navigation
                     await self._save_cookies("default")
 
-                    # Build block report if partially blocked (got page but content is limited)
+                    # Build block report — but only if the page is ACTUALLY blocked.
+                    # Some sites (e.g. Reddit) return HTTP 403 while serving full content.
+                    # Real block = error status AND (tiny page OR block phrases in content).
                     block_report = None
                     if status_code in (403, 429, 503):
-                        block_reason = self._get_block_reason(title, text, status_code)
-                        block_report = self._build_block_report(url, status_code, block_reason, bypassed=False)
+                        text_lower = text.lower() if text else ""
+                        has_block_phrases = any(
+                            phrase in text_lower
+                            for phrase in ("access denied", "blocked", "are you a robot",
+                                           "just a moment", "captcha", "verify you are human")
+                        )
+                        is_actually_blocked = len(text) < 200 or has_block_phrases
+
+                        if is_actually_blocked:
+                            block_reason = self._get_block_reason(title, text, status_code)
+                            block_report = self._build_block_report(
+                                url, status_code, block_reason, bypassed=False
+                            )
+                        else:
+                            # HTTP error code but real content loaded — not a block
+                            logger.info(
+                                f"HTTP {status_code} from {domain} but page has "
+                                f"{len(text)} chars of real content — treating as success"
+                            )
 
                     return {
                         "status": "success",
