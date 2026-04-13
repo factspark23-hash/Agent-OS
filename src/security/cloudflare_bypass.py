@@ -458,7 +458,7 @@ class TurnstileSolver:
     """
 
     async def solve(self, page, detection: ChallengeDetection,
-                    timeout: int = 45) -> Dict[str, Any]:
+                    timeout: int = 8) -> Dict[str, Any]:
         """
         Solve Turnstile challenge.
 
@@ -466,6 +466,10 @@ class TurnstileSolver:
         1. Load the Turnstile script
         2. Execute the proof-of-work challenge
         3. Submit the token back to the page
+
+        Note: In headless mode Turnstile NEVER auto-solves, so the timeout
+        is intentionally short (8s). After expiry we return failure immediately
+        rather than wasting more time on checkbox-click fallbacks.
         """
         start = time.time()
 
@@ -536,36 +540,14 @@ class TurnstileSolver:
                 except Exception:
                     pass
 
-            # Strategy 2: Try clicking the Turnstile checkbox if visible
-            try:
-                # Look for Turnstile iframe and try to interact
-                turnstile_iframe = page.frame_locator("iframe[src*='challenges.cloudflare.com']")
-                checkbox = turnstile_iframe.locator("input[type='checkbox'], .cb-lb, [role='checkbox']")
-                if await checkbox.count() > 0:
-                    await checkbox.first.click()
-                    logger.info("Clicked Turnstile checkbox")
-                    await asyncio.sleep(3.0)
-
-                    # Check if solved after click
-                    result = await page.evaluate("""
-                        () => {
-                            const resp = document.querySelector('[name="cf-turnstile-response"]');
-                            return {solved: !!(resp && resp.value && resp.value.length > 10)};
-                        }
-                    """)
-                    if result.get("solved"):
-                        return {
-                            "status": "success",
-                            "method": "checkbox_click",
-                            "time": round(time.time() - start, 2),
-                        }
-            except Exception as e:
-                logger.debug(f"Turnstile checkbox click failed: {e}")
-
+            # Auto-solve timed out — headless browsers never solve Turnstile,
+            # so skip checkbox-click fallback and fail fast.
+            elapsed = round(time.time() - start, 2)
+            logger.warning(f"Turnstile auto-solve timed out after {elapsed}s (headless never auto-solves)")
             return {
                 "status": "timeout",
                 "error": f"Turnstile not solved within {timeout}s",
-                "time": round(time.time() - start, 2),
+                "time": elapsed,
                 "suggestion": "Try with different browser engine or add CAPTCHA solver API keys",
             }
 
