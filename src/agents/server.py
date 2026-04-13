@@ -712,7 +712,7 @@ class AgentServer:
         """Handle HTTP GET /status."""
         status = {
             "status": "running",
-            "version": "3.1.0",
+            "version": "3.2.0",
             "uptime_seconds": int(time.time() - self._start_time),
             "active_sessions": len(self.session_manager.list_active_sessions()),
             "active_ws_clients": len(self._ws_clients),

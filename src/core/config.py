@@ -49,7 +49,7 @@ DEFAULT_CONFIG = {
     },
     "browser": {
         "headless": True,
-        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
         "viewport": {"width": 1920, "height": 1080},
         "max_ram_mb": 500,
         "page_timeout_ms": 30000,
@@ -101,7 +101,7 @@ DEFAULT_CONFIG = {
     },
     "logging": {
         "level": "INFO",
-        "json_logs": True,
+        "json_logs": False,
         "service_name": "agent-os",
     },
 }

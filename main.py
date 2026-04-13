@@ -29,7 +29,7 @@ from src.core.session import SessionManager
 from src.infra.logging import setup_logging, get_logger
 
 
-__version__ = "3.1.0"
+__version__ = "3.2.0"
 
 
 class AgentOS:
@@ -41,7 +41,7 @@ class AgentOS:
 
         # ─── Logging ─────────────────────────────────────
         log_level = args.log_level or self.config.get("logging.level", "INFO")
-        json_logs = args.json_logs or self.config.get("logging.json_logs", True)
+        json_logs = args.json_logs or self.config.get("logging.json_logs", False)
         setup_logging(level=log_level, json_logs=json_logs)
         self.logger = get_logger("agent-os")
 
@@ -364,8 +364,8 @@ def parse_args():
     # Production options
     parser.add_argument("--database", type=str, help="PostgreSQL DSN (postgresql+asyncpg://user:pass@host/db)")
     parser.add_argument("--redis", type=str, help="Redis URL (redis://host:6379/0)")
-    parser.add_argument("--json-logs", action="store_true", default=True, help="JSON structured logging (default: on)")
-    parser.add_argument("--no-json-logs", action="store_true", help="Disable JSON logging (use console)")
+    parser.add_argument("--json-logs", action="store_true", default=False, help="Enable JSON structured logging (default: off, human-readable console)")
+    parser.add_argument("--no-json-logs", action="store_true", help="Alias for default behavior (console logging)")
     parser.add_argument("--log-level", type=str, choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="Log level")
     parser.add_argument("--create-tables", action="store_true", help="Create database tables on startup")
     return parser.parse_args()
@@ -381,8 +381,10 @@ async def main():
     app = AgentOS(args)
 
     # Handle shutdown signals
+    shutdown_event = asyncio.Event()
+
     def signal_handler(sig, frame):
-        asyncio.create_task(app.stop())
+        shutdown_event.set()
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)

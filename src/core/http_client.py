@@ -149,6 +149,29 @@ class TLSClient:
             return result
 
         except Exception as exc:
+            exc_str = str(exc)
+            # HTTP/2 stream errors — retry with HTTP/1.1 via fallback
+            if "HTTP/2 stream" in exc_str or "INTERNAL_ERROR" in exc_str or "http2" in exc_str.lower():
+                logger.warning("HTTP/2 protocol error for %s, retrying with httpx (HTTP/1.1): %s", url, exc_str[:120])
+                try:
+                    import httpx
+                    async with httpx.AsyncClient(
+                        timeout=timeout,
+                        follow_redirects=follow_redirects,
+                        http2=False,
+                    ) as fallback:
+                        resp = await fallback.get(url, headers=headers, cookies=cookies)
+                        return {
+                            "status": resp.status_code,
+                            "headers": dict(resp.headers),
+                            "text": resp.text,
+                            "url": str(resp.url),
+                            "cookies": dict(resp.cookies),
+                            "ok": resp.status_code < 400,
+                        }
+                except Exception as fallback_exc:
+                    logger.error("HTTP/1.1 fallback also failed for %s: %s", url, fallback_exc)
+
             logger.error("TLS GET failed for %s: %s", url, exc)
             return {
                 "status": 0,
