@@ -177,6 +177,13 @@ class AgentOS:
         if args.rate_limit:
             self.config.set("server.rate_limit_max", args.rate_limit)
 
+        # ─── Agent Swarm ───────────────────────────────────
+        if args.swarm or self.config.get("swarm.enabled", False):
+            self.config.set("swarm.enabled", True)
+            if args.swarm_api_key:
+                self.config.set("swarm.api_key", args.swarm_api_key)
+            self.logger.info("Agent Swarm (search) module enabled")
+
     async def start(self):
         """Start all components after validating configuration."""
         self._running = True
@@ -214,6 +221,16 @@ class AgentOS:
         # Start agent server
         self.logger.info("Starting agent server...")
         await self.server.start()
+
+        # Log swarm status
+        if self.config.get("swarm.enabled", False):
+            http_port = self.config.get("server.http_port", 8001)
+            self.logger.info(f"  Swarm Endpoints:")
+            self.logger.info(f"    Health:  GET  http://0.0.0.0:{http_port}/swarm/health")
+            self.logger.info(f"    Search:  POST http://0.0.0.0:{http_port}/swarm/search")
+            self.logger.info(f"    Route:   POST http://0.0.0.0:{http_port}/swarm/route")
+            self.logger.info(f"    Agents:  GET  http://0.0.0.0:{http_port}/swarm/agents")
+            self.logger.info(f"    Config:  GET  http://0.0.0.0:{http_port}/swarm/config")
 
         # Start debug UI server
         if self.debug_server:
@@ -319,6 +336,12 @@ class AgentOS:
         if self.persistent_manager:
             await self.persistent_manager.stop()
 
+        # Clean up swarm resources
+        if self.server._swarm_backend:
+            self.server._swarm_backend.close()
+        if self.server._swarm_pool:
+            self.server._swarm_pool.close()
+
         await self.server.stop()
         await self.session_manager.stop()
         await self.browser.stop()
@@ -360,6 +383,8 @@ def parse_args():
     parser.add_argument("--persistent", action="store_true", help="Enable persistent Chromium (production mode)")
     parser.add_argument("--debug", action="store_true", help="Enable debug UI server (disabled by default)")
     parser.add_argument("--rate-limit", type=int, default=60, help="Max requests per minute per token (default: 60)")
+    parser.add_argument("--swarm", action="store_true", help="Enable Agent Swarm (search) module")
+    parser.add_argument("--swarm-api-key", type=str, help="API key for swarm search endpoints")
 
     # Production options
     parser.add_argument("--database", type=str, help="PostgreSQL DSN (postgresql+asyncpg://user:pass@host/db)")

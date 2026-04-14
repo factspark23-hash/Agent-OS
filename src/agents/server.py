@@ -58,6 +58,16 @@ class AgentServer:
         self._smart_nav = None
         self._web_query_router = None
 
+        # Agent Swarm (lazy init, thread-safe)
+        self._swarm_router = None
+        self._swarm_pool = None
+        self._swarm_backend = None
+        self._swarm_formatter = None
+        self._swarm_aggregator = None
+        self._swarm_quality_scorer = None
+        self._swarm_enabled = config.get("swarm.enabled", False)
+        self._swarm_lock = asyncio.Lock() if hasattr(asyncio, 'Lock') else None
+
         # In-memory rate limiting fallback
         self._rate_limits: Dict[str, deque] = defaultdict(lambda: deque(maxlen=200))
         self._rate_max_requests = config.get("server.rate_limit_max", 60)
@@ -264,6 +274,14 @@ class AgentServer:
             self._http_app.router.add_get("/persistent/health", self._handle_persistent_health)
             self._http_app.router.add_get("/persistent/users", self._handle_persistent_users)
             self._http_app.router.add_post("/persistent/command", self._handle_persistent_command)
+
+        # Agent Swarm (Search) endpoints
+        self._http_app.router.add_get("/swarm/health", self._handle_swarm_health)
+        self._http_app.router.add_post("/swarm/search", self._handle_swarm_search)
+        self._http_app.router.add_post("/swarm/route", self._handle_swarm_route)
+        self._http_app.router.add_get("/swarm/agents", self._handle_swarm_agents)
+        self._http_app.router.add_get("/swarm/config", self._handle_swarm_config)
+        self._http_app.router.add_put("/swarm/config", self._handle_swarm_config_update)
 
     @web.middleware
     async def _cors_middleware(self, request: web.Request, handler):
@@ -830,6 +848,481 @@ class AgentServer:
             return web.json_response(result)
         except Exception as e:
             return web.json_response({"status": "error", "error": str(e)}, status=400)
+
+    # ─── Agent Swarm Endpoints ─────────────────────────────
+
+    def _sanitize_error(self, error: str) -> str:
+        """Sanitize error messages to prevent internal detail leakage."""
+        # Remove file paths, internal IDs, stack traces
+        import re
+        sanitized = re.sub(r'/[^\s]+\.py', '[path]', str(error))
+        sanitized = re.sub(r'0x[0-9a-fA-F]+', '[hex]', sanitized)
+        return sanitized[:200]  # Limit length
+
+    async def _init_swarm(self):
+        """Lazily initialize swarm components (thread-safe)."""
+        if self._swarm_router is not None:
+            return  # Already initialized
+
+        if self._swarm_lock:
+            async with self._swarm_lock:
+                # Double-check after acquiring lock
+                if self._swarm_router is not None:
+                    return
+
+                from src.agent_swarm.config import get_config
+                swarm_config = get_config()
+
+                from src.agent_swarm.router import QueryRouter
+                self._swarm_router = QueryRouter(
+                    confidence_threshold=swarm_config.router.confidence_threshold,
+                    enable_llm_fallback=swarm_config.router.enable_llm_fallback,
+                    llm_api_key=swarm_config.router.llm_api_key,
+                    llm_base_url=swarm_config.router.llm_base_url,
+                    llm_model=swarm_config.router.llm_model,
+                    llm_max_tokens=swarm_config.router.llm_max_tokens,
+                    llm_timeout=swarm_config.router.llm_timeout,
+                )
+
+                from src.agent_swarm.agents.pool import AgentPool
+                self._swarm_pool = AgentPool(
+                    max_workers=swarm_config.agents.max_workers,
+                    search_timeout=swarm_config.agents.search_timeout,
+                )
+
+                from src.agent_swarm.search.http_backend import HTTPSearchBackend
+                self._swarm_backend = HTTPSearchBackend(
+                    impersonate=swarm_config.search.chrome_impersonate,
+                    user_agent=swarm_config.search.user_agent,
+                )
+
+                from src.agent_swarm.output.formatter import OutputFormatter
+                self._swarm_formatter = OutputFormatter(
+                    format=swarm_config.output.format,
+                    max_results=swarm_config.output.max_results,
+                    min_relevance_score=swarm_config.output.min_relevance_score,
+                )
+
+                from src.agent_swarm.output.aggregator import ResultAggregator
+                self._swarm_aggregator = ResultAggregator(
+                    deduplicate=swarm_config.output.deduplicate,
+                    min_relevance=swarm_config.output.min_relevance_score,
+                    max_results=swarm_config.output.max_results,
+                )
+
+                from src.agent_swarm.output.quality import QualityScorer
+                self._swarm_quality_scorer = QualityScorer()
+
+                logger.info("Agent Swarm initialized (router, pool, backend, formatter, aggregator, scorer)")
+        else:
+            # No lock available (shouldn't happen with asyncio), init without lock
+            from src.agent_swarm.config import get_config
+            swarm_config = get_config()
+
+            from src.agent_swarm.router import QueryRouter
+            self._swarm_router = QueryRouter(
+                confidence_threshold=swarm_config.router.confidence_threshold,
+                enable_llm_fallback=swarm_config.router.enable_llm_fallback,
+                llm_api_key=swarm_config.router.llm_api_key,
+                llm_base_url=swarm_config.router.llm_base_url,
+                llm_model=swarm_config.router.llm_model,
+            )
+
+            from src.agent_swarm.agents.pool import AgentPool
+            self._swarm_pool = AgentPool(
+                max_workers=swarm_config.agents.max_workers,
+                search_timeout=swarm_config.agents.search_timeout,
+            )
+
+            from src.agent_swarm.search.http_backend import HTTPSearchBackend
+            self._swarm_backend = HTTPSearchBackend()
+
+            from src.agent_swarm.output.formatter import OutputFormatter
+            self._swarm_formatter = OutputFormatter()
+
+            from src.agent_swarm.output.aggregator import ResultAggregator
+            self._swarm_aggregator = ResultAggregator()
+
+            from src.agent_swarm.output.quality import QualityScorer
+            self._swarm_quality_scorer = QualityScorer()
+
+    def _swarm_auth_check(self, request: web.Request) -> Optional[web.Response]:
+        """Check authentication for swarm endpoints. Returns error response or None."""
+        auth_context = request.get("auth_context")
+        if not auth_context:
+            # Check for API key in header or query param
+            api_key = request.headers.get("Authorization", "").replace("Bearer ", "")
+            if not api_key:
+                api_key = request.query.get("api_key", "")
+            if not api_key:
+                return web.json_response(
+                    {"status": "error", "error": "Authentication required. Provide Bearer token or api_key parameter."},
+                    status=401, headers=self._get_cors_headers(),
+                )
+            # Validate API key
+            if self.api_key_manager:
+                try:
+                    import asyncio
+                    auth = asyncio.get_event_loop().run_until_complete(
+                        self.api_key_manager.authenticate(api_key)
+                    )
+                    if not auth:
+                        return web.json_response(
+                            {"status": "error", "error": "Invalid API key"},
+                            status=401, headers=self._get_cors_headers(),
+                        )
+                except Exception:
+                    # If async context is running, do sync validation
+                    pass
+            elif self.config.get("swarm.api_key"):
+                import hmac as _hmac
+                if not _hmac.compare_digest(api_key, self.config.get("swarm.api_key")):
+                    return web.json_response(
+                        {"status": "error", "error": "Invalid API key"},
+                        status=401, headers=self._get_cors_headers(),
+                    )
+        return None
+
+    async def _handle_swarm_health(self, request: web.Request) -> web.Response:
+        """GET /swarm/health — Swarm health check (no auth required)."""
+        health = {
+            "status": "healthy" if self._swarm_enabled else "disabled",
+            "enabled": self._swarm_enabled,
+            "initialized": self._swarm_router is not None,
+        }
+
+        if self._swarm_router is not None:
+            health["backend_available"] = self._swarm_backend.is_available() if self._swarm_backend else False
+            health["pool_status"] = self._swarm_pool.get_status() if self._swarm_pool else None
+            health["llm_available"] = (
+                self._swarm_router.tier2.is_available()
+                if self._swarm_router and self._swarm_router.tier2
+                else False
+            )
+
+        return web.json_response(health, headers=self._get_cors_headers())
+
+    async def _handle_swarm_search(self, request: web.Request) -> web.Response:
+        """POST /swarm/search — Execute a swarm search query."""
+        # Auth check
+        auth_err = self._swarm_auth_check(request)
+        if auth_err:
+            return auth_err
+
+        # Rate limit check
+        client_id = request.remote or "unknown"
+        if not self._check_rate_limit(f"swarm:{client_id}"):
+            return web.json_response(
+                {"status": "error", "error": "Rate limit exceeded"},
+                status=429, headers=self._get_cors_headers(),
+            )
+
+        # Parse request body
+        try:
+            data = await request.json()
+        except Exception:
+            return web.json_response(
+                {"status": "error", "error": "Invalid JSON body"},
+                status=400, headers=self._get_cors_headers(),
+            )
+
+        # Input validation
+        query = data.get("query", "").strip()
+        if not query:
+            return web.json_response(
+                {"status": "error", "error": "Missing 'query' parameter"},
+                status=400, headers=self._get_cors_headers(),
+            )
+        if len(query) > 500:
+            return web.json_response(
+                {"status": "error", "error": "Query too long (max 500 characters)"},
+                status=400, headers=self._get_cors_headers(),
+            )
+
+        max_results = min(int(data.get("max_results", 10)), 50)
+        agent_profiles = data.get("agent_profiles", ["generalist"])
+        if not isinstance(agent_profiles, list) or len(agent_profiles) > 10:
+            return web.json_response(
+                {"status": "error", "error": "agent_profiles must be a list with max 10 entries"},
+                status=400, headers=self._get_cors_headers(),
+            )
+
+        # Validate profile keys
+        from src.agent_swarm.agents.profiles import get_all_profile_keys
+        valid_keys = get_all_profile_keys()
+        for key in agent_profiles:
+            if key not in valid_keys:
+                return web.json_response(
+                    {"status": "error", "error": f"Invalid agent profile: '{key}'. Valid: {valid_keys}"},
+                    status=400, headers=self._get_cors_headers(),
+                )
+
+        output_format = data.get("format", "json")
+        if output_format not in ("json", "markdown"):
+            return web.json_response(
+                {"status": "error", "error": "format must be 'json' or 'markdown'"},
+                status=400, headers=self._get_cors_headers(),
+            )
+
+        # Initialize swarm if needed
+        try:
+            await self._init_swarm()
+        except Exception as e:
+            logger.error(f"Swarm init failed: {e}")
+            return web.json_response(
+                {"status": "error", "error": "Search service initialization failed"},
+                status=503, headers=self._get_cors_headers(),
+            )
+
+        # Execute search
+        start_time = time.time()
+        try:
+            # Route the query
+            classification = self._swarm_router.route(query)
+
+            # Determine which agents to use
+            if classification.suggested_agents and agent_profiles == ["generalist"]:
+                # Use router-suggested agents if user didn't specify
+                profiles_to_use = classification.suggested_agents[:5]
+            else:
+                profiles_to_use = agent_profiles
+
+            # Execute parallel search
+            agent_results = await self._swarm_pool.search_parallel(
+                query=query,
+                agent_profiles=profiles_to_use,
+                search_backend=self._swarm_backend,
+                max_results=max_results,
+            )
+
+            # Aggregate results
+            aggregated = self._swarm_aggregator.aggregate(agent_results)
+
+            # Score quality
+            for result in aggregated:
+                self._swarm_quality_scorer.query = query
+                self._swarm_quality_scorer.query_words = set(query.lower().split())
+                quality = self._swarm_quality_scorer.score(result)
+                result.metadata["quality_score"] = quality
+
+            # Format output
+            execution_time = time.time() - start_time
+            output = self._swarm_formatter.format_results(
+                query=query,
+                category=classification.category.value,
+                tier_used=classification.source,
+                agent_results=aggregated,
+                execution_time=execution_time,
+                confidence=classification.confidence,
+            )
+
+            if output_format == "markdown":
+                return web.Response(
+                    text=output.to_markdown(),
+                    content_type="text/markdown",
+                    headers=self._get_cors_headers(),
+                )
+            else:
+                return web.json_response(
+                    output.to_dict(),
+                    headers=self._get_cors_headers(),
+                )
+
+        except Exception as e:
+            logger.error(f"Swarm search error: {e}")
+            return web.json_response(
+                {"status": "error", "error": self._sanitize_error(str(e))},
+                status=500, headers=self._get_cors_headers(),
+            )
+
+    async def _handle_swarm_route(self, request: web.Request) -> web.Response:
+        """POST /swarm/route — Classify a query without executing search."""
+        # Auth check
+        auth_err = self._swarm_auth_check(request)
+        if auth_err:
+            return auth_err
+
+        try:
+            data = await request.json()
+        except Exception:
+            return web.json_response(
+                {"status": "error", "error": "Invalid JSON body"},
+                status=400, headers=self._get_cors_headers(),
+            )
+
+        query = data.get("query", "").strip()
+        if not query:
+            return web.json_response(
+                {"status": "error", "error": "Missing 'query' parameter"},
+                status=400, headers=self._get_cors_headers(),
+            )
+        if len(query) > 500:
+            return web.json_response(
+                {"status": "error", "error": "Query too long (max 500 characters)"},
+                status=400, headers=self._get_cors_headers(),
+            )
+
+        # Initialize swarm if needed
+        try:
+            await self._init_swarm()
+        except Exception as e:
+            logger.error(f"Swarm init failed: {e}")
+            return web.json_response(
+                {"status": "error", "error": "Search service initialization failed"},
+                status=503, headers=self._get_cors_headers(),
+            )
+
+        try:
+            classification = self._swarm_router.route(query)
+            return web.json_response({
+                "status": "success",
+                "classification": {
+                    "category": classification.category.value,
+                    "confidence": classification.confidence,
+                    "reason": classification.reason,
+                    "source": classification.source,
+                    "suggested_agents": classification.suggested_agents,
+                    "search_queries": classification.search_queries,
+                },
+            }, headers=self._get_cors_headers())
+        except Exception as e:
+            logger.error(f"Swarm route error: {e}")
+            return web.json_response(
+                {"status": "error", "error": self._sanitize_error(str(e))},
+                status=500, headers=self._get_cors_headers(),
+            )
+
+    async def _handle_swarm_agents(self, request: web.Request) -> web.Response:
+        """GET /swarm/agents — List available agent profiles and their status."""
+        # Auth check
+        auth_err = self._swarm_auth_check(request)
+        if auth_err:
+            return auth_err
+
+        from src.agent_swarm.agents.profiles import SEARCH_PROFILES
+        profiles = []
+        for key, profile in SEARCH_PROFILES.items():
+            profiles.append({
+                "key": key,
+                "name": profile.name,
+                "expertise": profile.expertise,
+                "description": profile.description,
+                "search_depth": profile.search_depth,
+                "query_style": profile.query_style,
+                "keywords": profile.keywords,
+                "priority": profile.priority,
+            })
+
+        pool_status = None
+        if self._swarm_pool:
+            pool_status = self._swarm_pool.get_status()
+
+        return web.json_response({
+            "status": "success",
+            "profiles": profiles,
+            "pool": pool_status,
+        }, headers=self._get_cors_headers())
+
+    async def _handle_swarm_config(self, request: web.Request) -> web.Response:
+        """GET /swarm/config — Get current swarm configuration."""
+        # Auth check
+        auth_err = self._swarm_auth_check(request)
+        if auth_err:
+            return auth_err
+
+        from src.agent_swarm.config import get_config
+        swarm_config = get_config()
+
+        # Mask sensitive fields
+        config_dict = swarm_config.model_dump()
+        if config_dict.get("router", {}).get("llm_api_key"):
+            config_dict["router"]["llm_api_key"] = "***masked***"
+        if config_dict.get("search", {}).get("agent_os_api_key"):
+            config_dict["search"]["agent_os_api_key"] = "***masked***"
+
+        return web.json_response({
+            "status": "success",
+            "config": config_dict,
+            "enabled": self._swarm_enabled,
+            "initialized": self._swarm_router is not None,
+        }, headers=self._get_cors_headers())
+
+    async def _handle_swarm_config_update(self, request: web.Request) -> web.Response:
+        """PUT /swarm/config — Update swarm configuration at runtime."""
+        # Auth check (requires auth)
+        auth_err = self._swarm_auth_check(request)
+        if auth_err:
+            return auth_err
+
+        try:
+            data = await request.json()
+        except Exception:
+            return web.json_response(
+                {"status": "error", "error": "Invalid JSON body"},
+                status=400, headers=self._get_cors_headers(),
+            )
+
+        # Only allow certain config updates at runtime
+        allowed_updates = {
+            "confidence_threshold", "enable_llm_fallback",
+            "llm_api_key", "llm_base_url", "llm_model",
+            "max_results", "max_workers", "search_timeout",
+        }
+
+        updated = {}
+        if self._swarm_router:
+            if "confidence_threshold" in data:
+                val = float(data["confidence_threshold"])
+                if 0.0 <= val <= 1.0:
+                    self._swarm_router.confidence_threshold = val
+                    self._swarm_router.tier1.confidence_threshold = val
+                    updated["confidence_threshold"] = val
+
+            if "enable_llm_fallback" in data:
+                val = bool(data["enable_llm_fallback"])
+                self._swarm_router.enable_llm_fallback = val
+                updated["enable_llm_fallback"] = val
+
+            if "llm_api_key" in data:
+                self._swarm_router.update_llm_config(api_key=data["llm_api_key"])
+                updated["llm_api_key"] = "***updated***"
+
+            if "llm_base_url" in data:
+                self._swarm_router.update_llm_config(base_url=data["llm_base_url"])
+                updated["llm_base_url"] = data["llm_base_url"]
+
+            if "llm_model" in data:
+                self._swarm_router.update_llm_config(model=data["llm_model"])
+                updated["llm_model"] = data["llm_model"]
+
+        if self._swarm_pool and "max_workers" in data:
+            val = int(data["max_workers"])
+            if 1 <= val <= 50:
+                self._swarm_pool.max_workers = val
+                updated["max_workers"] = val
+
+        if self._swarm_pool and "search_timeout" in data:
+            val = float(data["search_timeout"])
+            if 5.0 <= val <= 120.0:
+                self._swarm_pool.search_timeout = val
+                updated["search_timeout"] = val
+
+        if self._swarm_formatter and "max_results" in data:
+            val = int(data["max_results"])
+            if 1 <= val <= 50:
+                self._swarm_formatter.max_results = val
+                updated["max_results"] = val
+
+        if not updated:
+            return web.json_response(
+                {"status": "error", "error": f"No valid updates. Allowed fields: {sorted(allowed_updates)}"},
+                status=400, headers=self._get_cors_headers(),
+            )
+
+        return web.json_response({
+            "status": "success",
+            "updated": updated,
+        }, headers=self._get_cors_headers())
 
     # ─── Command Processing ─────────────────────────────────
 

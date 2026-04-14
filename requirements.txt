@@ -59,3 +59,8 @@ pydantic==2.12.5
 
 # Structured logging
 structlog==25.5.0
+
+# ─── Agent Swarm Dependencies ─────────────────────────────────
+
+# OpenAI-compatible LLM client (for Tier 2 routing fallback)
+openai>=1.30.0

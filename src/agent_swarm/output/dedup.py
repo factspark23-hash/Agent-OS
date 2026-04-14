@@ -1,0 +1,72 @@
+"""Advanced deduplication utilities."""
+
+import re
+import hashlib
+import logging
+from difflib import SequenceMatcher
+
+from src.agent_swarm.agents.base import AgentResult
+
+logger = logging.getLogger(__name__)
+
+
+class Deduplicator:
+    """Advanced deduplication using content similarity and URL matching."""
+
+    def __init__(self, similarity_threshold: float = 0.85):
+        self.similarity_threshold = similarity_threshold
+
+    def deduplicate(self, results: list[AgentResult]) -> list[AgentResult]:
+        """Remove duplicate and near-duplicate results."""
+        if len(results) <= 1:
+            return results
+
+        unique = [results[0]]
+
+        for result in results[1:]:
+            is_duplicate = False
+            for existing in unique:
+                if self._urls_similar(result.url, existing.url):
+                    is_duplicate = True
+                    break
+                if self._texts_similar(result.title, existing.title, self.similarity_threshold):
+                    is_duplicate = True
+                    break
+                if result.content and existing.content:
+                    if self._texts_similar(result.content[:500], existing.content[:500], 0.9):
+                        is_duplicate = True
+                        break
+            if not is_duplicate:
+                unique.append(result)
+
+        return unique
+
+    def _urls_similar(self, url1: str, url2: str) -> bool:
+        """Check if two URLs are similar enough to be considered duplicates."""
+        norm1 = self._normalize_url(url1)
+        norm2 = self._normalize_url(url2)
+        if norm1 == norm2:
+            return True
+        if norm1 in norm2 or norm2 in norm1:
+            return True
+        return False
+
+    def _texts_similar(self, text1: str, text2: str, threshold: float) -> bool:
+        """Check if two texts are similar using sequence matching."""
+        if not text1 or not text2:
+            return False
+        ratio = SequenceMatcher(None, text1.lower(), text2.lower()).ratio()
+        return ratio >= threshold
+
+    def _normalize_url(self, url: str) -> str:
+        """Normalize URL for comparison."""
+        url = url.lower().strip()
+        url = url.rstrip("/")
+        url = re.sub(r"https?://(www\.)?", "", url)
+        url = re.sub(r"[?&](utm_[^&=]+|ref|fbclid|gclid)=[^&]*", "", url)
+        return url
+
+    def content_hash(self, text: str) -> str:
+        """Generate a hash for content fingerprinting."""
+        normalized = re.sub(r"\s+", " ", text.lower().strip())
+        return hashlib.md5(normalized.encode()).hexdigest()
