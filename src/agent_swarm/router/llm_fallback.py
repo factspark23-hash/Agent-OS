@@ -91,9 +91,14 @@ Respond with ONLY a JSON object:
 
             # Extract JSON from response (handle markdown code blocks)
             if "```" in content:
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
+                # Find content between ``` markers
+                parts = content.split("```")
+                if len(parts) >= 2:
+                    content = parts[1]
+                    if content.strip().startswith("json"):
+                        content = content.strip()[4:].strip()
+                    else:
+                        content = content.strip()
 
             result = json.loads(content.strip())
 

@@ -72,6 +72,13 @@ services:
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-}
       - AGENT_TOKEN=${AGENT_TOKEN:-}
       - AGENT_OS_HOST=0.0.0.0
+      - SWARM_ENABLED=${SWARM_ENABLED:-true}
+      - SWARM_MAX_WORKERS=${SWARM_MAX_WORKERS:-5}
+      - SWARM_ROUTER_THRESHOLD=${SWARM_ROUTER_THRESHOLD:-0.7}
+      - SWARM_LLM_ENABLED=${SWARM_LLM_ENABLED:-false}
+      - SWARM_LLM_API_KEY=${SWARM_LLM_API_KEY:-}
+      - SWARM_OUTPUT_FORMAT=${SWARM_OUTPUT_FORMAT:-json}
+      - SWARM_MAX_RESULTS=${SWARM_MAX_RESULTS:-10}
     volumes:
       - agent-os-data:/home/agentos/.agent-os
     deploy:
@@ -91,6 +98,7 @@ services:
       --redis redis://redis:6379/0
       --json-logs
       --create-tables
+      --swarm
 
   # ─── Nginx Reverse Proxy (HTTP only, for local use) ──
   nginx:

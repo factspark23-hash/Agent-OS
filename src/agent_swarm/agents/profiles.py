@@ -106,3 +106,33 @@ def get_profiles_for_query(query: str) -> list[SearchProfile]:
 def get_all_profile_keys() -> list[str]:
     """Get all available profile keys."""
     return list(SEARCH_PROFILES.keys())
+
+
+class AgentProfiles:
+    """Convenience wrapper for accessing search agent profiles."""
+
+    def get_profile(self, key: str) -> Optional[dict]:
+        """Get a profile as a dict by key. Returns None if not found."""
+        profile = SEARCH_PROFILES.get(key)
+        if profile is None:
+            return None
+        return {
+            "key": profile.key,
+            "name": profile.name,
+            "expertise": profile.expertise,
+            "description": profile.description,
+            "preferred_sources": profile.preferred_sources,
+            "search_depth": profile.search_depth,
+            "query_style": profile.query_style,
+            "keywords": profile.keywords,
+            "priority": profile.priority,
+        }
+
+    def list_profiles(self) -> list[str]:
+        """List all available profile keys."""
+        return get_all_profile_keys()
+
+    def get_profiles_for_query(self, query: str) -> list[dict]:
+        """Get matching profiles for a query, returned as dicts."""
+        profiles = get_profiles_for_query(query)
+        return [self.get_profile(p.key) for p in profiles if self.get_profile(p.key) is not None]

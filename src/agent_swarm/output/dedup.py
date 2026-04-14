@@ -47,9 +47,29 @@ class Deduplicator:
         norm2 = self._normalize_url(url2)
         if norm1 == norm2:
             return True
-        if norm1 in norm2 or norm2 in norm1:
+        # Domain boundary check: extract domains and compare
+        domain1 = self._extract_domain(norm1)
+        domain2 = self._extract_domain(norm2)
+        if domain1 and domain2 and domain1 != domain2:
+            return False
+        # Only allow substring match if the shorter URL is a path prefix of the longer
+        if norm1 in norm2:
+            # Ensure norm1 is a proper path prefix, not a partial domain match
+            remainder = norm2[len(norm1):]
+            if remainder and not remainder.startswith("/") and not remainder.startswith("?") and not remainder.startswith("#"):
+                return False
+            return True
+        if norm2 in norm1:
+            remainder = norm1[len(norm2):]
+            if remainder and not remainder.startswith("/") and not remainder.startswith("?") and not remainder.startswith("#"):
+                return False
             return True
         return False
+
+    def _extract_domain(self, normalized_url: str) -> str:
+        """Extract the domain from a normalized URL."""
+        parts = normalized_url.split("/")
+        return parts[0] if parts else ""
 
     def _texts_similar(self, text1: str, text2: str, threshold: float) -> bool:
         """Check if two texts are similar using sequence matching."""

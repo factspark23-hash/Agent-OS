@@ -48,14 +48,14 @@ class SearchAgent:
         name: str,
         profile_name: str,
         expertise: str,
-        preferred_sources: list[str],
+        preferred_sources: list[str] = None,
         search_depth: str = "medium",
         query_style: str = "broad_exploratory",
     ):
         self.name = name
         self.profile_name = profile_name
         self.expertise = expertise
-        self.preferred_sources = preferred_sources
+        self.preferred_sources = preferred_sources or []
         self.search_depth = search_depth
         self.query_style = query_style
         self.status = AgentStatus.IDLE

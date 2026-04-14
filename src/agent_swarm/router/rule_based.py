@@ -94,8 +94,8 @@ CATEGORY_AGENTS = {
         "sports": ["news_hound", "generalist"],
         "default": ["generalist", "deep_researcher"],
     },
-    QueryCategory.NEEDS_KNOWLEDGE: [],
-    QueryCategory.NEEDS_CALCULATION: [],
+    QueryCategory.NEEDS_KNOWLEDGE: ["generalist", "deep_researcher"],
+    QueryCategory.NEEDS_CALCULATION: ["generalist"],
     QueryCategory.NEEDS_CODE: ["tech_scanner"],
 }
 
@@ -118,6 +118,7 @@ class RuleBasedRouter:
         """Classify a query using rule-based pattern matching."""
         best_match = self._match_patterns(query, self.compiled_calculation, QueryCategory.NEEDS_CALCULATION)
         if best_match and best_match.confidence >= self.confidence_threshold:
+            best_match.suggested_agents = self._suggest_agents(query, QueryCategory.NEEDS_CALCULATION)
             return best_match
 
         best_match = self._match_patterns(query, self.compiled_code, QueryCategory.NEEDS_CODE)

@@ -81,7 +81,7 @@ class HTTPSearchBackend(SearchBackend):
         """Search using HTTP requests with TLS fingerprinting."""
         if self._closed:
             return []
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         results = await loop.run_in_executor(None, self._search_sync, query, max_results)
         return results
 
@@ -368,7 +368,7 @@ class HTTPSearchBackend(SearchBackend):
 
     async def extract_content(self, url: str) -> Optional[str]:
         """Extract text content from a URL."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._extract_content_sync, url)
 
     def _extract_content_sync(self, url: str) -> Optional[str]:

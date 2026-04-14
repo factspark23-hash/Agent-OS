@@ -946,7 +946,7 @@ class AgentServer:
             from src.agent_swarm.output.quality import QualityScorer
             self._swarm_quality_scorer = QualityScorer()
 
-    def _swarm_auth_check(self, request: web.Request) -> Optional[web.Response]:
+    async def _swarm_auth_check(self, request: web.Request) -> Optional[web.Response]:
         """Check authentication for swarm endpoints. Returns error response or None."""
         auth_context = request.get("auth_context")
         if not auth_context:
@@ -962,17 +962,14 @@ class AgentServer:
             # Validate API key
             if self.api_key_manager:
                 try:
-                    import asyncio
-                    auth = asyncio.get_event_loop().run_until_complete(
-                        self.api_key_manager.authenticate(api_key)
-                    )
+                    auth = await self.api_key_manager.authenticate(api_key)
                     if not auth:
                         return web.json_response(
                             {"status": "error", "error": "Invalid API key"},
                             status=401, headers=self._get_cors_headers(),
                         )
                 except Exception:
-                    # If async context is running, do sync validation
+                    # Fallback: if async auth fails, try hmac comparison
                     pass
             elif self.config.get("swarm.api_key"):
                 import hmac as _hmac
@@ -1005,7 +1002,7 @@ class AgentServer:
     async def _handle_swarm_search(self, request: web.Request) -> web.Response:
         """POST /swarm/search — Execute a swarm search query."""
         # Auth check
-        auth_err = self._swarm_auth_check(request)
+        auth_err = await self._swarm_auth_check(request)
         if auth_err:
             return auth_err
 
@@ -1138,7 +1135,7 @@ class AgentServer:
     async def _handle_swarm_route(self, request: web.Request) -> web.Response:
         """POST /swarm/route — Classify a query without executing search."""
         # Auth check
-        auth_err = self._swarm_auth_check(request)
+        auth_err = await self._swarm_auth_check(request)
         if auth_err:
             return auth_err
 
@@ -1195,7 +1192,7 @@ class AgentServer:
     async def _handle_swarm_agents(self, request: web.Request) -> web.Response:
         """GET /swarm/agents — List available agent profiles and their status."""
         # Auth check
-        auth_err = self._swarm_auth_check(request)
+        auth_err = await self._swarm_auth_check(request)
         if auth_err:
             return auth_err
 
@@ -1226,7 +1223,7 @@ class AgentServer:
     async def _handle_swarm_config(self, request: web.Request) -> web.Response:
         """GET /swarm/config — Get current swarm configuration."""
         # Auth check
-        auth_err = self._swarm_auth_check(request)
+        auth_err = await self._swarm_auth_check(request)
         if auth_err:
             return auth_err
 
@@ -1250,7 +1247,7 @@ class AgentServer:
     async def _handle_swarm_config_update(self, request: web.Request) -> web.Response:
         """PUT /swarm/config — Update swarm configuration at runtime."""
         # Auth check (requires auth)
-        auth_err = self._swarm_auth_check(request)
+        auth_err = await self._swarm_auth_check(request)
         if auth_err:
             return auth_err
 

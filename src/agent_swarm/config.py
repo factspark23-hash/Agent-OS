@@ -2,8 +2,20 @@
 
 import os
 import json
+import logging
 from typing import Optional
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
+
+
+def _safe_json_loads(value: str, default=None):
+    """Safely parse JSON from environment variables with error handling."""
+    try:
+        return json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        logger.warning(f"Failed to parse JSON from env var value: {value[:50]}...")
+        return default if default is not None else []
 
 
 class RouterConfig(BaseModel):
@@ -65,7 +77,7 @@ class SwarmConfig(BaseModel):
         )
         agent_conf = SwarmAgentConfig(
             max_workers=int(os.getenv("SWARM_MAX_WORKERS", "5")),
-            default_agents=json.loads(os.getenv("SWARM_DEFAULT_AGENTS", '["generalist"]')),
+            default_agents=_safe_json_loads(os.getenv("SWARM_DEFAULT_AGENTS", '["generalist"]'), ["generalist"]),
         )
         search_conf = SearchBackendConfig(
             agent_os_url=os.getenv("SWARM_AGENT_OS_URL"),
@@ -94,4 +106,15 @@ def get_config() -> SwarmConfig:
     
     Returns the singleton SwarmConfig loaded from environment variables.
     """
+    return swarm_config
+
+
+def reload_config() -> SwarmConfig:
+    """Reload configuration from environment variables.
+    
+    Useful for picking up config changes at runtime without restarting.
+    """
+    global swarm_config
+    swarm_config = SwarmConfig.from_env()
+    logger.info("Swarm config reloaded from environment variables")
     return swarm_config

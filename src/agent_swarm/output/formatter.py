@@ -22,7 +22,7 @@ class SearchOutput:
     total_results: int
     confidence: float
     execution_time: float
-    timestamp: str
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     sources: list[str] = field(default_factory=list)
     summary: Optional[str] = None
     metadata: dict = field(default_factory=dict)
