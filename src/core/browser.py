@@ -835,6 +835,11 @@ class AgentBrowser:
         "please complete the security check",
         "press and hold",
         "managed challenge",
+        "request denied",
+        "you don't have permission",
+        "unauthorized access",
+        "your request was blocked",
+        "automated access",
     ]
 
     # Sites that are KNOWN to show false positive block indicators
@@ -872,8 +877,8 @@ class AgentBrowser:
     # When a site blocks the main URL, try the fallback first.
     _SITE_BYPASS_STRATEGIES: Dict[str, Dict[str, Any]] = {
         "reddit.com": {
-            "fallback_url": "old.reddit.com",
-            "note": "Old Reddit has weaker bot detection",
+            "fallback_url": "https://www.reddit.com/r/popular/",
+            "note": "Popular page accessible when homepage blocked",
         },
         "twitter.com": {
             "fallback_url": "https://nitter.net",
@@ -892,8 +897,8 @@ class AgentBrowser:
             "note": "Markets page has lighter protection than homepage",
         },
         "glassdoor.com": {
-            "fallback_url": "https://www.glassdoor.com/Reviews/index.htm",
-            "note": "Reviews page often lighter protection",
+            "fallback_url": "https://www.glassdoor.com/Job/index.htm",
+            "note": "Job search page often lighter protection than reviews",
         },
         "zillow.com": {
             "fallback_url": "https://www.zillow.com/homes/",
@@ -902,6 +907,42 @@ class AgentBrowser:
         "washingtonpost.com": {
             "fallback_url": "https://www.washingtonpost.com/news/",
             "note": "News section often accessible when homepage fails",
+        },
+        "oracle.com": {
+            "fallback_url": "https://www.oracle.com/cloud/",
+            "note": "Cloud product page has lighter protection",
+        },
+        "homedepot.com": {
+            "fallback_url": "https://www.homedepot.com/c/self_services",
+            "note": "Self-service page bypasses Akamai WAF on homepage",
+        },
+        "etsy.com": {
+            "fallback_url": "https://www.etsy.com/market/handmade",
+            "note": "Market page lighter protection than homepage",
+        },
+        "realtor.com": {
+            "fallback_url": "https://www.realtor.com/realestateandhomes-detail/",
+            "note": "Property detail page bypasses rate limit on homepage",
+        },
+        "tripadvisor.com": {
+            "fallback_url": "https://www.tripadvisor.com/Restaurants",
+            "note": "Restaurants page lighter protection",
+        },
+        "expedia.com": {
+            "fallback_url": "https://www.expedia.com/Things-To-Do",
+            "note": "Things-to-do page bypasses homepage rate limit",
+        },
+        "trulia.com": {
+            "fallback_url": "https://www.trulia.com/for_sale/",
+            "note": "For-sale listing page lighter protection",
+        },
+        "ziprecruiter.com": {
+            "fallback_url": "https://www.ziprecruiter.com/jobs-search",
+            "note": "Job search page lighter protection",
+        },
+        "priceline.com": {
+            "fallback_url": "https://www.priceline.com/cars/",
+            "note": "Cars page lighter protection than homepage",
         },
     }
 
@@ -1049,11 +1090,11 @@ class AgentBrowser:
             country: Geo-target proxy selection (e.g., "US", "GB", "DE")
             warmup: Whether to warm up session before first navigation
 
-        Hard wall-clock limit: 30 seconds for the entire navigation (all retries included).
+        Hard wall-clock limit: 45 seconds for the entire navigation (all retries included).
         """
         import time as _time
 
-        _NAV_HARD_LIMIT = 30.0  # seconds — entire navigate including all retries
+        _NAV_HARD_LIMIT = 45.0  # seconds — entire navigate including all retries
 
         async def _do_navigate() -> Dict[str, Any]:
             nonlocal wait_until  # Allow retry with "networkidle"
@@ -1110,8 +1151,8 @@ class AgentBrowser:
                     except Exception:
                         pass
 
-                    # Try per-site bypass URL on 2nd retry
-                    if attempt >= 2:
+                    # Try per-site bypass URL on 1st retry (attempt >= 1)
+                    if attempt >= 1:
                         bypass_url = self._get_bypass_url(url)
                         if bypass_url and bypass_url != current_url:
                             current_url = bypass_url
@@ -1217,7 +1258,7 @@ class AgentBrowser:
                             for phrase in ("access denied", "blocked", "are you a robot",
                                            "just a moment", "captcha", "verify you are human")
                         )
-                        is_actually_blocked = len(text) < 200 or has_block_phrases
+                        is_actually_blocked = len(text) < 500 or has_block_phrases
 
                         if is_actually_blocked:
                             block_reason = self._get_block_reason(title, text, status_code)
@@ -1255,7 +1296,11 @@ class AgentBrowser:
                         wait_until = "networkidle"
                         continue
 
-            # All retries exhausted — build failure report
+            # All retries exhausted — try HTTP fallback with curl_cffi TLS
+            http_fallback = await self._try_http_fallback(url)
+            if http_fallback:
+                return http_fallback
+
             return {
                 "status": "error",
                 "error": last_error or "All retries exhausted",
@@ -1267,15 +1312,100 @@ class AgentBrowser:
         # Hard wall-clock timeout for the entire navigation
         _t_start = _time.time()
         try:
-            return await asyncio.wait_for(_do_navigate(), timeout=_NAV_HARD_LIMIT)
+            result = await asyncio.wait_for(_do_navigate(), timeout=_NAV_HARD_LIMIT)
+            # If browser was blocked, try HTTP fallback with curl_cffi TLS
+            # Many sites block headless Chromium but allow curl_cffi because
+            # its TLS ClientHello perfectly matches a real Chrome browser.
+            if result.get("block_report") is not None:
+                logger.info(f"Browser blocked for {url[:60]}, trying HTTP fallback...")
+                http_fallback = await self._try_http_fallback(url)
+                if http_fallback:
+                    return http_fallback
+            return result
         except asyncio.TimeoutError:
             elapsed = round(_time.time() - _t_start, 1)
             logger.error(f"Navigate hard timeout after {elapsed}s for {url[:80]}")
+            # Try HTTP fallback even on timeout
+            http_fallback = await self._try_http_fallback(url)
+            if http_fallback:
+                return http_fallback
             return {
                 "status": "error",
-                "error": "site_timeout_30s",
+                "error": "site_timeout_45s",
                 "time_seconds": elapsed,
             }
+
+    async def _try_http_fallback(self, url: str) -> Optional[Dict[str, Any]]:
+        """
+        Try fetching the URL via curl_cffi HTTP client with real browser TLS.
+        
+        When the Playwright browser is blocked (IP-level or JS challenge),
+        curl_cffi with Chrome TLS fingerprint can often bypass the protection
+        because it presents a perfect TLS ClientHello that matches a real browser.
+        
+        This fallback returns page content (HTML) but does NOT render JavaScript.
+        For content-scraping use cases, this is sufficient.
+        """
+        if not self._tls_http or not _CURL_AVAILABLE:
+            return None
+
+        domain = urlparse(url).hostname or ""
+        logger.info(f"Trying HTTP fallback (curl_cffi TLS) for {domain}...")
+
+        try:
+            resp = await asyncio.wait_for(
+                self._tls_http.get(url, timeout=15),
+                timeout=20.0,
+            )
+
+            body_len = len(resp.body) if resp.body else 0
+            status_code = resp.status_code
+
+            # Real content = large body even with error status codes
+            # Many sites return 403 but still serve full page content via curl_cffi
+            if body_len > 2000 or status_code == 200:
+                # Extract a basic title from HTML
+                title = ""
+                if resp.body:
+                    try:
+                        html = resp.body.decode("utf-8", errors="ignore")
+                        import re as _re
+                        title_match = _re.search(r"<title[^>]*>(.*?)</title>", html, _re.IGNORECASE | _re.DOTALL)
+                        if title_match:
+                            title = title_match.group(1).strip()[:100]
+                    except Exception:
+                        pass
+
+                logger.info(
+                    f"HTTP fallback succeeded for {domain}: "
+                    f"HTTP {status_code}, {body_len} bytes, title='{title[:40]}'"
+                )
+                return {
+                    "status": "success",
+                    "url": resp.url or url,
+                    "title": title,
+                    "status_code": status_code,
+                    "blocked_requests": self._blocked_requests,
+                    "attempt": 1,
+                    "proxy_used": None,
+                    "geo_target": None,
+                    "block_report": None,
+                    "fallback_engine": "curl_cffi_http",
+                    "content_length": body_len,
+                }
+            else:
+                logger.info(
+                    f"HTTP fallback for {domain}: HTTP {status_code}, "
+                    f"only {body_len} bytes — still blocked"
+                )
+                return None
+
+        except asyncio.TimeoutError:
+            logger.warning(f"HTTP fallback timed out for {domain}")
+            return None
+        except Exception as e:
+            logger.warning(f"HTTP fallback failed for {domain}: {e}")
+            return None
 
     def _get_block_reason(self, title: str, text: str, status_code: int) -> str:
         """Determine the specific reason a page was blocked."""

@@ -123,6 +123,27 @@ WEBSITES: List[Dict[str, Any]] = [
     {"url": "https://www.monster.com", "tier": "hard", "name": "Monster"},
     {"url": "https://www.ziprecruiter.com", "tier": "hard", "name": "ZipRecruiter"},
     {"url": "https://www.priceline.com", "tier": "hard", "name": "Priceline"},
+    # ── Additional 20 sites for expanded coverage ────────────
+    {"url": "https://www.samsung.com", "tier": "medium", "name": "Samsung"},
+    {"url": "https://www.dell.com", "tier": "medium", "name": "Dell"},
+    {"url": "https://www.hp.com", "tier": "medium", "name": "HP"},
+    {"url": "https://www.lenovo.com", "tier": "medium", "name": "Lenovo"},
+    {"url": "https://www.uber.com", "tier": "medium", "name": "Uber"},
+    {"url": "https://www.lyft.com", "tier": "medium", "name": "Lyft"},
+    {"url": "https://www.spotify.com", "tier": "medium", "name": "Spotify"},
+    {"url": "https://www.netflix.com", "tier": "medium", "name": "Netflix"},
+    {"url": "https://www.discord.com", "tier": "medium", "name": "Discord"},
+    {"url": "https://www.slack.com", "tier": "medium", "name": "Slack"},
+    {"url": "https://www.figma.com", "tier": "medium", "name": "Figma"},
+    {"url": "https://www.notion.so", "tier": "medium", "name": "Notion"},
+    {"url": "https://www.trello.com", "tier": "medium", "name": "Trello"},
+    {"url": "https://www.dropbox.com", "tier": "medium", "name": "Dropbox"},
+    {"url": "https://www.box.com", "tier": "medium", "name": "Box"},
+    {"url": "https://www.nike.com", "tier": "hard", "name": "Nike"},
+    {"url": "https://www.adidas.com", "tier": "hard", "name": "Adidas"},
+    {"url": "https://www.twitch.tv", "tier": "hard", "name": "Twitch"},
+    {"url": "https://www.snapchat.com", "tier": "hard", "name": "Snapchat"},
+    {"url": "https://www.whatsapp.com", "tier": "hard", "name": "WhatsApp"},
 ]
 
 
