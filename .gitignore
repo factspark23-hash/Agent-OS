@@ -15,3 +15,8 @@ lib/
 __pycache__/
 *.pyc
 stress_test_v2_results.json
+
+# Web UI
+web/node_modules/
+web/dist/
+web/.vite/
