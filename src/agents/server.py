@@ -57,6 +57,7 @@ class AgentServer:
         self._proxy_manager = None
         self._smart_nav = None
         self._web_query_router = None
+        self._login_handoff = None  # Login Handoff Manager (lazy init)
 
         # Agent Swarm (lazy init, thread-safe)
         self._swarm_router = None
@@ -282,6 +283,16 @@ class AgentServer:
         self._http_app.router.add_get("/swarm/agents", self._handle_swarm_agents)
         self._http_app.router.add_get("/swarm/config", self._handle_swarm_config)
         self._http_app.router.add_put("/swarm/config", self._handle_swarm_config_update)
+
+        # Login Handoff endpoints
+        self._http_app.router.add_post("/handoff/start", self._handle_handoff_start)
+        self._http_app.router.add_get("/handoff/{handoff_id}", self._handle_handoff_status)
+        self._http_app.router.add_post("/handoff/{handoff_id}/complete", self._handle_handoff_complete)
+        self._http_app.router.add_post("/handoff/{handoff_id}/cancel", self._handle_handoff_cancel)
+        self._http_app.router.add_get("/handoff", self._handle_handoff_list)
+        self._http_app.router.add_get("/handoff/history", self._handle_handoff_history)
+        self._http_app.router.add_get("/handoff/stats", self._handle_handoff_stats)
+        self._http_app.router.add_post("/handoff/detect", self._handle_handoff_detect)
 
     @web.middleware
     async def _cors_middleware(self, request: web.Request, handler):
@@ -1618,6 +1629,15 @@ class AgentServer:
             "needs-web": self._cmd_needs_web,
             "query-strategy": self._cmd_query_strategy,
             "router-stats": self._cmd_router_stats,
+            # Login Handoff
+            "detect-login-page": self._cmd_detect_login_page,
+            "login-handoff-start": self._cmd_login_handoff_start,
+            "login-handoff-status": self._cmd_login_handoff_status,
+            "login-handoff-complete": self._cmd_login_handoff_complete,
+            "login-handoff-cancel": self._cmd_login_handoff_cancel,
+            "login-handoff-list": self._cmd_login_handoff_list,
+            "login-handoff-history": self._cmd_login_handoff_history,
+            "login-handoff-stats": self._cmd_login_handoff_stats,
         }
 
         handler = handlers.get(command)
@@ -1692,6 +1712,39 @@ class AgentServer:
             self._web_query_router = WebQueryRouter()
         return self._web_query_router
 
+    def _get_login_handoff(self):
+        """Lazy-init LoginHandoffManager."""
+        if self._login_handoff is None:
+            from src.tools.login_handoff import LoginHandoffManager
+            self._login_handoff = LoginHandoffManager(self.browser, config=self.config)
+            # Wire up WebSocket notification callback
+            self._login_handoff.set_ws_notify(self._notify_handoff_ws)
+            # Start background monitoring
+            try:
+                asyncio.get_running_loop().create_task(self._login_handoff.start())
+            except RuntimeError:
+                logger.warning("Could not auto-start LoginHandoffManager (no event loop)")
+        return self._login_handoff
+
+    async def _notify_handoff_ws(self, event_type: str, data: Dict):
+        """Broadcast handoff events to all connected WebSocket clients."""
+        if not self._ws_clients:
+            return
+        message = json.dumps({
+            "type": "login_handoff",
+            "event": event_type,
+            "data": data,
+            "timestamp": time.time(),
+        })
+        dead = []
+        for client_id, ws in self._ws_clients.items():
+            try:
+                await ws.send(message)
+            except Exception:
+                dead.append(client_id)
+        for cid in dead:
+            self._ws_clients.pop(cid, None)
+
     # ─── Web Query Router Commands ────────────────────────────────
 
     async def _cmd_classify_query(self, data: Dict, session) -> Dict:
@@ -1758,11 +1811,34 @@ class AgentServer:
         if not url:
             return {"status": "error", "error": "Missing 'url'"}
         smart = self._get_smart_nav()
-        return await smart.navigate(
+        result = await smart.navigate(
             url,
             prefer_browser=data.get("prefer_browser", False),
             max_retries=data.get("max_retries", 3),
         )
+        # Auto-detect login pages after navigation
+        if result.get("status") == "success":
+            try:
+                handoff = self._get_login_handoff()
+                user_id = ""
+                session_id = session.session_id if session else ""
+                auto_result = await handoff.check_and_auto_handoff(
+                    url=url,
+                    page_id="main",
+                    user_id=user_id,
+                    session_id=session_id,
+                )
+                if auto_result and auto_result.get("status") == "success":
+                    result["login_handoff"] = {
+                        "handoff_id": auto_result["handoff_id"],
+                        "domain": auto_result["domain"],
+                        "page_type": auto_result["page_type"],
+                        "message": auto_result["message"],
+                        "state": auto_result["state"],
+                    }
+            except Exception as e:
+                logger.debug(f"Auto login detection failed: {e}")
+        return result
 
     async def _cmd_smart_navigate(self, data: Dict, session) -> Dict:
         """Smart navigate with automatic HTTP/browser fallback and retry."""
@@ -2692,6 +2768,222 @@ class AgentServer:
     async def _cmd_proxy_load(self, data: Dict, session) -> Dict:
         return self._get_proxy_manager().load(filename=data.get("filename", "proxies.json"))
 
+    # ─── Login Handoff Commands ───────────────────────────────
+
+    async def _cmd_detect_login_page(self, data: Dict, session) -> Dict:
+        """Detect if the current page is a login/signup page.
+
+        Uses both URL patterns and DOM analysis for maximum accuracy.
+        Returns is_login_page, page_type, confidence, url, domain.
+        """
+        page_id = data.get("page_id", "main")
+        handoff = self._get_login_handoff()
+        result = await handoff.detect_login_page(page_id=page_id)
+        return {"status": "success", **result}
+
+    async def _cmd_login_handoff_start(self, data: Dict, session) -> Dict:
+        """Start a login handoff — pause AI, give control to user.
+
+        When the AI agent encounters a login page, this command pauses
+        automation and waits for the human user to complete login.
+        The user's credentials never pass through the AI — they type
+        directly into the real website in the browser.
+
+        Params:
+            url: (optional) Login page URL (auto-detected if empty)
+            page_id: Browser tab ID (default: "main")
+            timeout_seconds: How long to wait for user (default: 300)
+        """
+        handoff = self._get_login_handoff()
+        return await handoff.start_handoff(
+            url=data.get("url", ""),
+            page_id=data.get("page_id", "main"),
+            user_id=data.get("user_id", ""),
+            session_id=session.session_id if session else "",
+            timeout_seconds=data.get("timeout_seconds", 300),
+            auto_detected=False,
+        )
+
+    async def _cmd_login_handoff_status(self, data: Dict, session) -> Dict:
+        """Get the status of a login handoff session.
+
+        Params:
+            handoff_id: The handoff session ID
+        """
+        handoff_id = data.get("handoff_id", "")
+        if not handoff_id:
+            return {"status": "error", "error": "Missing 'handoff_id'"}
+        handoff = self._get_login_handoff()
+        return await handoff.get_handoff_status(handoff_id)
+
+    async def _cmd_login_handoff_complete(self, data: Dict, session) -> Dict:
+        """Mark a login handoff as completed by the user.
+
+        Called when the user has finished logging in. This saves
+        the session cookies and returns control to the AI agent.
+
+        Params:
+            handoff_id: The handoff session ID
+        """
+        handoff_id = data.get("handoff_id", "")
+        if not handoff_id:
+            return {"status": "error", "error": "Missing 'handoff_id'"}
+        handoff = self._get_login_handoff()
+        return await handoff.complete_handoff(
+            handoff_id=handoff_id,
+            user_id=data.get("user_id", ""),
+        )
+
+    async def _cmd_login_handoff_cancel(self, data: Dict, session) -> Dict:
+        """Cancel an active login handoff session.
+
+        Params:
+            handoff_id: The handoff session ID
+            reason: Optional reason for cancellation
+        """
+        handoff_id = data.get("handoff_id", "")
+        if not handoff_id:
+            return {"status": "error", "error": "Missing 'handoff_id'"}
+        handoff = self._get_login_handoff()
+        return await handoff.cancel_handoff(
+            handoff_id=handoff_id,
+            reason=data.get("reason", ""),
+        )
+
+    async def _cmd_login_handoff_list(self, data: Dict, session) -> Dict:
+        """List all handoff sessions, optionally filtered by state.
+
+        Params:
+            state: (optional) Filter by state (e.g. "waiting_for_user")
+            user_id: (optional) Filter by user ID
+        """
+        handoff = self._get_login_handoff()
+        return await handoff.list_handoffs(
+            state_filter=data.get("state"),
+            user_id=data.get("user_id"),
+        )
+
+    async def _cmd_login_handoff_history(self, data: Dict, session) -> Dict:
+        """Get completed handoff history.
+
+        Params:
+            limit: Maximum entries to return (default: 50)
+        """
+        handoff = self._get_login_handoff()
+        return await handoff.get_handoff_history(limit=data.get("limit", 50))
+
+    async def _cmd_login_handoff_stats(self, data: Dict, session) -> Dict:
+        """Get handoff statistics (success rate, per-domain stats)."""
+        handoff = self._get_login_handoff()
+        return {"status": "success", **handoff.get_stats()}
+
+    # ─── Login Handoff REST API Handlers ──────────────────────
+
+    async def _handle_handoff_start(self, request: web.Request) -> web.Response:
+        """POST /handoff/start — Start a login handoff session.
+
+        Body: {"page_id": "main", "timeout_seconds": 300, "url": ""}
+        """
+        try:
+            data = await request.json()
+        except Exception:
+            return web.json_response(
+                {"status": "error", "error": "Invalid JSON body"},
+                status=400, headers=self._get_cors_headers(),
+            )
+
+        auth_context = request.get("auth_context")
+        user_id = auth_context.get("user_id", "") if auth_context else ""
+        handoff = self._get_login_handoff()
+        result = await handoff.start_handoff(
+            url=data.get("url", ""),
+            page_id=data.get("page_id", "main"),
+            user_id=user_id,
+            session_id="",
+            timeout_seconds=data.get("timeout_seconds", 300),
+            auto_detected=False,
+        )
+        status_code = 200 if result.get("status") == "success" else 400
+        return web.json_response(result, status=status_code, headers=self._get_cors_headers())
+
+    async def _handle_handoff_status(self, request: web.Request) -> web.Response:
+        """GET /handoff/{handoff_id} — Get handoff session status."""
+        handoff_id = request.match_info.get("handoff_id", "")
+        if not handoff_id:
+            return web.json_response(
+                {"status": "error", "error": "Missing handoff_id"},
+                status=400, headers=self._get_cors_headers(),
+            )
+        handoff = self._get_login_handoff()
+        result = await handoff.get_handoff_status(handoff_id)
+        return web.json_response(result, headers=self._get_cors_headers())
+
+    async def _handle_handoff_complete(self, request: web.Request) -> web.Response:
+        """POST /handoff/{handoff_id}/complete — Mark handoff as completed."""
+        handoff_id = request.match_info.get("handoff_id", "")
+        if not handoff_id:
+            return web.json_response(
+                {"status": "error", "error": "Missing handoff_id"},
+                status=400, headers=self._get_cors_headers(),
+            )
+        auth_context = request.get("auth_context")
+        user_id = auth_context.get("user_id", "") if auth_context else ""
+        handoff = self._get_login_handoff()
+        result = await handoff.complete_handoff(handoff_id, user_id=user_id)
+        return web.json_response(result, headers=self._get_cors_headers())
+
+    async def _handle_handoff_cancel(self, request: web.Request) -> web.Response:
+        """POST /handoff/{handoff_id}/cancel — Cancel a handoff session."""
+        handoff_id = request.match_info.get("handoff_id", "")
+        if not handoff_id:
+            return web.json_response(
+                {"status": "error", "error": "Missing handoff_id"},
+                status=400, headers=self._get_cors_headers(),
+            )
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        handoff = self._get_login_handoff()
+        result = await handoff.cancel_handoff(handoff_id, reason=data.get("reason", ""))
+        return web.json_response(result, headers=self._get_cors_headers())
+
+    async def _handle_handoff_list(self, request: web.Request) -> web.Response:
+        """GET /handoff — List all handoff sessions."""
+        state_filter = request.query.get("state")
+        user_id = request.query.get("user_id")
+        handoff = self._get_login_handoff()
+        result = await handoff.list_handoffs(state_filter=state_filter, user_id=user_id)
+        return web.json_response(result, headers=self._get_cors_headers())
+
+    async def _handle_handoff_history(self, request: web.Request) -> web.Response:
+        """GET /handoff/history — Get completed handoff history."""
+        limit = int(request.query.get("limit", "50"))
+        handoff = self._get_login_handoff()
+        result = await handoff.get_handoff_history(limit=limit)
+        return web.json_response(result, headers=self._get_cors_headers())
+
+    async def _handle_handoff_stats(self, request: web.Request) -> web.Response:
+        """GET /handoff/stats — Get handoff statistics."""
+        handoff = self._get_login_handoff()
+        return web.json_response(
+            {"status": "success", **handoff.get_stats()},
+            headers=self._get_cors_headers(),
+        )
+
+    async def _handle_handoff_detect(self, request: web.Request) -> web.Response:
+        """POST /handoff/detect — Detect if current page is a login page."""
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        handoff = self._get_login_handoff()
+        result = await handoff.detect_login_page(page_id=data.get("page_id", "main"))
+        return web.json_response(
+            {"status": "success", **result},
+            headers=self._get_cors_headers(),
+        )
+
     # ─── Command Definitions (for /commands endpoint) ──────
 
     def _get_command_definitions(self) -> dict:
@@ -2711,4 +3003,12 @@ class AgentServer:
             "smart-click": {"params": {"text": "string"}, "description": "Click element by visible text"},
             "workflow": {"params": {"steps": "list"}, "description": "Execute multi-step workflow"},
             "tabs": {"params": {"action": "list|new|close|switch"}, "description": "Manage browser tabs"},
+            "detect-login-page": {"params": {"page_id": "string"}, "description": "Detect if current page is a login/signup page"},
+            "login-handoff-start": {"params": {"url": "string", "page_id": "string", "timeout_seconds": "int"}, "description": "Start login handoff — pause AI, give browser control to user for login"},
+            "login-handoff-status": {"params": {"handoff_id": "string"}, "description": "Get status of a login handoff session"},
+            "login-handoff-complete": {"params": {"handoff_id": "string"}, "description": "Mark handoff as completed — user finished login, AI resumes control"},
+            "login-handoff-cancel": {"params": {"handoff_id": "string", "reason": "string"}, "description": "Cancel an active login handoff session"},
+            "login-handoff-list": {"params": {"state": "string", "user_id": "string"}, "description": "List all handoff sessions"},
+            "login-handoff-history": {"params": {"limit": "int"}, "description": "Get completed handoff history"},
+            "login-handoff-stats": {"params": {}, "description": "Get handoff statistics (success rate, per-domain stats)"},
         }
