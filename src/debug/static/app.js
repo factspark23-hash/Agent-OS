@@ -18,6 +18,8 @@
         commandHistory: [],
         consoleLogs: [],
         screenshotData: null,
+        activeHandoffs: [],
+        handoffTimerInterval: null,
     };
 
     // ─── DOM References ──────────────────────────────────────
@@ -108,6 +110,10 @@
 
             case "error":
                 console.error("Debug WS error:", msg.error);
+                break;
+
+            case "login_handoff":
+                handleHandoffWSMessage(msg);
                 break;
         }
     }
@@ -200,6 +206,9 @@
                 break;
             case "dom":
                 fetchDOM();
+                break;
+            case "handoff":
+                fetchHandoffList();
                 break;
         }
     }
@@ -802,6 +811,379 @@
         });
     }
 
+    // ─── Login Handoff ─────────────────────────────────────────
+
+    function handleHandoffWSMessage(msg) {
+        const eventData = msg.data || msg;
+        const eventType = eventData.event_type || msg.event;
+
+        if (eventType === "login_handoff_started") {
+            // A new handoff was started — show the banner and update the panel
+            showHandoffBanner(eventData);
+            fetchHandoffList();
+            showBrowserHandoffOverlay(eventData);
+        } else if (eventType === "login_handoff_completed") {
+            // Handoff completed — hide the banner
+            hideHandoffBanner();
+            hideBrowserHandoffOverlay();
+            fetchHandoffList();
+            fetchHandoffHistory();
+        } else if (eventType === "login_handoff_cancelled") {
+            hideHandoffBanner();
+            hideBrowserHandoffOverlay();
+            fetchHandoffList();
+        } else if (eventType === "login_handoff_timed_out") {
+            hideHandoffBanner();
+            hideBrowserHandoffOverlay();
+            fetchHandoffList();
+        } else {
+            // Generic update — refresh list
+            fetchHandoffList();
+        }
+    }
+
+    function showHandoffBanner(data) {
+        const banner = $("#handoff-banner");
+        const title = $("#handoff-banner-title");
+        const msgEl = $("#handoff-banner-msg");
+
+        const pageType = data.page_type || "login";
+        const domain = data.domain || "unknown";
+        title.textContent = pageType === "signup" ? "Signup Required" : "Login Required";
+        msgEl.textContent = data.message || `${pageType.charAt(0).toUpperCase() + pageType.slice(1)} page on ${domain}. AI is paused — your turn to log in.`;
+
+        banner.style.display = "block";
+
+        // Show the quickbar complete button
+        const quickComplete = $("#quick-complete-handoff");
+        if (quickComplete) quickComplete.style.display = "";
+
+        // Start countdown timer
+        startHandoffTimer(data.timeout_seconds || 300);
+    }
+
+    function hideHandoffBanner() {
+        const banner = $("#handoff-banner");
+        banner.style.display = "none";
+
+        const quickComplete = $("#quick-complete-handoff");
+        if (quickComplete) quickComplete.style.display = "none";
+
+        stopHandoffTimer();
+    }
+
+    function showBrowserHandoffOverlay(data) {
+        const frame = $(".browser-frame");
+        if (!frame) return;
+
+        // Remove existing overlay
+        const existing = frame.querySelector(".browser-handoff-overlay");
+        if (existing) existing.remove();
+
+        const domain = data.domain || "unknown";
+        const pageType = data.page_type || "login";
+
+        const overlay = document.createElement("div");
+        overlay.className = "browser-handoff-overlay";
+        overlay.id = "browser-handoff-overlay";
+        overlay.innerHTML = `
+            <div class="browser-handoff-overlay-icon">🔐</div>
+            <div class="browser-handoff-overlay-text">${pageType === "signup" ? "Signup" : "Login"} Required on ${escHtml(domain)}</div>
+            <div class="browser-handoff-overlay-sub">The AI has paused and is waiting for you to log in. Your credentials are secure and never seen by the AI.</div>
+            <button class="browser-handoff-overlay-btn" id="overlay-complete-btn">✓ I'm Done Logging In</button>
+        `;
+        frame.appendChild(overlay);
+
+        // Wire up the complete button
+        overlay.querySelector("#overlay-complete-btn")?.addEventListener("click", () => {
+            completeActiveHandoff();
+        });
+    }
+
+    function hideBrowserHandoffOverlay() {
+        const overlay = document.getElementById("browser-handoff-overlay");
+        if (overlay) overlay.remove();
+    }
+
+    function startHandoffTimer(seconds) {
+        stopHandoffTimer();
+        let remaining = seconds;
+        const timerEl = $("#handoff-banner-timer");
+
+        function updateTimer() {
+            const m = Math.floor(remaining / 60);
+            const s = remaining % 60;
+            timerEl.textContent = `${m}:${String(s).padStart(2, "0")}`;
+            if (remaining <= 60) {
+                timerEl.style.color = "var(--red)";
+            } else {
+                timerEl.style.color = "var(--yellow)";
+            }
+        }
+
+        updateTimer();
+        state.handoffTimerInterval = setInterval(() => {
+            remaining--;
+            if (remaining <= 0) {
+                stopHandoffTimer();
+                timerEl.textContent = "0:00";
+                timerEl.style.color = "var(--red)";
+                return;
+            }
+            updateTimer();
+        }, 1000);
+    }
+
+    function stopHandoffTimer() {
+        if (state.handoffTimerInterval) {
+            clearInterval(state.handoffTimerInterval);
+            state.handoffTimerInterval = null;
+        }
+    }
+
+    async function fetchHandoffList() {
+        const httpPort = window.location.port || "8002";
+        // Try the direct handoff endpoint on the main HTTP server (port 8001)
+        // Fallback to debug server proxy
+        const data = await apiGet("/api/handoff/list");
+        if (data.status === "error" && data.error && data.error.includes("Not Found")) {
+            // Try via command
+            return;
+        }
+
+        const handoffs = data.handoffs || [];
+        state.activeHandoffs = handoffs.filter(h =>
+            h.state === "waiting_for_user" || h.state === "detected"
+        );
+
+        renderHandoffCards(handoffs);
+
+        // Show/hide banner based on active handoffs
+        if (state.activeHandoffs.length > 0) {
+            const active = state.activeHandoffs[0];
+            showHandoffBanner({
+                domain: active.domain,
+                page_type: active.page_type,
+                message: active.message,
+                timeout_seconds: active.remaining_seconds || active.timeout_seconds || 300,
+            });
+        } else {
+            hideHandoffBanner();
+        }
+    }
+
+    async function fetchHandoffHistory() {
+        const data = await apiGet("/api/handoff/history");
+        const list = $("#handoff-history-list");
+
+        if (data.status === "error" || !data.history || data.history.length === 0) {
+            list.innerHTML = '<div class="empty-state">No handoff history yet</div>';
+            return;
+        }
+
+        list.innerHTML = data.history.reverse().map(h => {
+            const stateClass = h.state === "completed" ? "var(--green)" :
+                              h.state === "cancelled" || h.state === "timed_out" ? "var(--red)" : "var(--text-secondary)";
+            const duration = h.elapsed_seconds ? `${h.elapsed_seconds.toFixed(0)}s` : "-";
+            const cookieCount = h.auth_cookie_names ? h.auth_cookie_names.length : 0;
+
+            return `
+                <div class="handoff-history-item">
+                    <span class="handoff-history-domain">${escHtml(h.domain)}</span>
+                    <span class="handoff-history-type">${escHtml(h.page_type)}</span>
+                    <span class="handoff-history-duration">${duration}</span>
+                    <span class="handoff-history-cookies">${cookieCount} cookies</span>
+                    <span style="color:${stateClass};font-weight:600;font-size:10px;text-transform:uppercase">${escHtml(h.state)}</span>
+                    <span class="handoff-history-time">${formatTimestamp(h.completed_at || h.created_at)}</span>
+                </div>
+            `;
+        }).join("");
+    }
+
+    function renderHandoffCards(handoffs) {
+        const container = $("#handoff-active-cards");
+
+        if (!handoffs || handoffs.length === 0) {
+            container.innerHTML = '<div class="empty-state">No active handoffs</div>';
+            return;
+        }
+
+        container.innerHTML = handoffs.map(h => {
+            const stateClass = h.state;
+            const isActive = h.state === "waiting_for_user" || h.state === "detected";
+            const remaining = h.remaining_seconds ? Math.ceil(h.remaining_seconds) : h.timeout_seconds || 0;
+            const remMin = Math.floor(remaining / 60);
+            const remSec = remaining % 60;
+
+            return `
+                <div class="handoff-card ${stateClass}">
+                    <div class="handoff-card-header">
+                        <span class="handoff-card-domain">${escHtml(h.domain)}</span>
+                        <span class="handoff-card-state ${stateClass}">${escHtml(h.state.replace(/_/g, " "))}</span>
+                    </div>
+                    <div class="handoff-card-url" title="${escHtml(h.url)}">${escHtml(h.url)}</div>
+                    ${h.message ? `<div class="handoff-card-message">${escHtml(h.message)}</div>` : ""}
+                    <div class="handoff-card-details">
+                        <div class="handoff-card-detail">
+                            <div class="handoff-card-detail-label">Type</div>
+                            <div class="handoff-card-detail-value">${escHtml(h.page_type)}</div>
+                        </div>
+                        <div class="handoff-card-detail">
+                            <div class="handoff-card-detail-label">Confidence</div>
+                            <div class="handoff-card-detail-value">${(h.confidence * 100).toFixed(0)}%</div>
+                        </div>
+                        <div class="handoff-card-detail">
+                            <div class="handoff-card-detail-label">Remaining</div>
+                            <div class="handoff-card-detail-value" style="color:${remaining <= 60 ? "var(--red)" : "var(--yellow)"}">${remMin}:${String(remSec).padStart(2, "0")}</div>
+                        </div>
+                        <div class="handoff-card-detail">
+                            <div class="handoff-card-detail-label">Elapsed</div>
+                            <div class="handoff-card-detail-value">${h.elapsed_seconds ? h.elapsed_seconds.toFixed(0) + "s" : "0s"}</div>
+                        </div>
+                    </div>
+                    ${isActive ? `
+                    <div class="handoff-card-actions">
+                        <button class="btn btn-sm btn-handoff-complete" onclick="completeHandoff('${escHtml(h.handoff_id)}')">✓ I'm Done Logging In</button>
+                        <button class="btn btn-sm btn-danger" onclick="cancelHandoff('${escHtml(h.handoff_id)}')">✗ Cancel</button>
+                    </div>
+                    ` : ""}
+                    ${h.auth_cookie_names && h.auth_cookie_names.length > 0 ? `
+                    <div style="margin-top:8px;font-size:11px;color:var(--green)">
+                        Auth cookies: ${h.auth_cookie_names.map(n => escHtml(n)).join(", ")}
+                    </div>
+                    ` : ""}
+                </div>
+            `;
+        }).join("");
+    }
+
+    async function detectLoginPage() {
+        const data = await apiPost("/api/handoff/detect", { page_id: "main" });
+        const resultSection = $("#handoff-detection-result");
+        const card = $("#handoff-detection-card");
+
+        if (data.status === "error") {
+            resultSection.style.display = "none";
+            alert("Detection failed: " + (data.error || "Unknown error"));
+            return;
+        }
+
+        resultSection.style.display = "block";
+        const isLogin = data.is_login_page;
+        const pageType = data.page_type || "none";
+        const confidence = data.confidence || 0;
+
+        card.innerHTML = `
+            <div class="detection-field">
+                <span class="detection-label">Is Login Page</span>
+                <span class="detection-value" style="color:${isLogin ? "var(--yellow)" : "var(--green)"}">${isLogin ? "YES" : "NO"}</span>
+            </div>
+            <div class="detection-field">
+                <span class="detection-label">Page Type</span>
+                <span class="detection-value">${escHtml(pageType)}</span>
+            </div>
+            <div class="detection-field">
+                <span class="detection-label">Confidence</span>
+                <span class="detection-value" style="color:${confidence > 0.7 ? "var(--yellow)" : "var(--text-primary)"}">${(confidence * 100).toFixed(0)}%</span>
+            </div>
+            <div class="detection-field">
+                <span class="detection-label">Domain</span>
+                <span class="detection-value">${escHtml(data.domain || "-")}</span>
+            </div>
+            <div class="detection-field">
+                <span class="detection-label">URL</span>
+                <span class="detection-value" title="${escHtml(data.url || "")}">${escHtml(truncate(data.url || "-", 80))}</span>
+            </div>
+        `;
+    }
+
+    async function startHandoff() {
+        const data = await apiPost("/api/handoff/start", {
+            page_id: "main",
+            timeout_seconds: 300,
+        });
+
+        if (data.status === "success") {
+            showHandoffBanner({
+                domain: data.domain,
+                page_type: data.page_type,
+                message: data.message,
+                timeout_seconds: data.timeout_seconds,
+            });
+            showBrowserHandoffOverlay(data);
+            fetchHandoffList();
+        } else {
+            alert("Failed to start handoff: " + (data.error || "Unknown error"));
+        }
+    }
+
+    async function completeActiveHandoff() {
+        if (state.activeHandoffs.length === 0) {
+            alert("No active handoff to complete");
+            return;
+        }
+        const handoffId = state.activeHandoffs[0].handoff_id;
+        await completeHandoff(handoffId);
+    }
+
+    window.completeHandoff = async function (handoffId) {
+        const data = await apiPost(`/api/handoff/${handoffId}/complete`, {});
+
+        if (data.status === "success") {
+            hideHandoffBanner();
+            hideBrowserHandoffOverlay();
+            fetchHandoffList();
+            fetchHandoffHistory();
+        } else {
+            alert("Failed to complete handoff: " + (data.error || "Unknown error"));
+        }
+    };
+
+    window.cancelHandoff = async function (handoffId) {
+        if (!confirm("Cancel this login handoff? The AI will resume without logging in.")) return;
+
+        const data = await apiPost(`/api/handoff/${handoffId}/cancel`, {
+            reason: "Cancelled by user from Debug UI",
+        });
+
+        if (data.status === "success") {
+            hideHandoffBanner();
+            hideBrowserHandoffOverlay();
+            fetchHandoffList();
+        } else {
+            alert("Failed to cancel handoff: " + (data.error || "Unknown error"));
+        }
+    };
+
+    function initHandoffPanel() {
+        // Detect Login button
+        $("#btn-handoff-detect")?.addEventListener("click", detectLoginPage);
+
+        // Start Handoff button
+        $("#btn-handoff-start")?.addEventListener("click", startHandoff);
+
+        // Refresh button
+        $("#btn-handoff-refresh")?.addEventListener("click", () => {
+            fetchHandoffList();
+            fetchHandoffHistory();
+        });
+
+        // Banner complete button
+        $("#btn-handoff-complete-banner")?.addEventListener("click", completeActiveHandoff);
+
+        // Banner cancel button
+        $("#btn-handoff-cancel-banner")?.addEventListener("click", () => {
+            if (state.activeHandoffs.length > 0) {
+                cancelHandoff(state.activeHandoffs[0].handoff_id);
+            }
+        });
+
+        // Quick bar buttons
+        $("#quick-detect-login")?.addEventListener("click", detectLoginPage);
+        $("#quick-start-handoff")?.addEventListener("click", startHandoff);
+        $("#quick-complete-handoff")?.addEventListener("click", completeActiveHandoff);
+    }
+
     // ─── Utilities ───────────────────────────────────────────
 
     function escHtml(str) {
@@ -843,6 +1225,7 @@
         initTerminal();
         initQuickCommands();
         initCookieImportExport();
+        initHandoffPanel();
         initEventListeners();
         connectWS();
 

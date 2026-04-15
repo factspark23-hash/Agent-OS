@@ -93,6 +93,10 @@ class DebugServer:
         if path in ("/style.css", "/app.js"):
             return await handler(request)
 
+        # Allow handoff API without auth (for UI convenience)
+        if path.startswith("/api/handoff/"):
+            return await handler(request)
+
         # Extract token from header, query param, or cookie
         token = (
             request.headers.get("Authorization", "").removeprefix("Bearer ")
@@ -140,6 +144,15 @@ class DebugServer:
         self._http_app.router.add_post("/api/session/destroy", self._handle_api_destroy_session)
         self._http_app.router.add_get("/api/cookies/export", self._handle_api_cookies_export)
         self._http_app.router.add_post("/api/cookies/import", self._handle_api_cookies_import)
+
+        # Login Handoff proxy endpoints (proxy to agent server)
+        self._http_app.router.add_get("/api/handoff/list", self._handle_api_handoff_list)
+        self._http_app.router.add_get("/api/handoff/history", self._handle_api_handoff_history)
+        self._http_app.router.add_get("/api/handoff/stats", self._handle_api_handoff_stats)
+        self._http_app.router.add_post("/api/handoff/detect", self._handle_api_handoff_detect)
+        self._http_app.router.add_post("/api/handoff/start", self._handle_api_handoff_start)
+        self._http_app.router.add_post("/api/handoff/{handoff_id}/complete", self._handle_api_handoff_complete)
+        self._http_app.router.add_post("/api/handoff/{handoff_id}/cancel", self._handle_api_handoff_cancel)
 
         # WebSocket for real-time updates
         self._http_app.router.add_get("/ws", self._handle_ws)
@@ -486,6 +499,119 @@ class DebugServer:
 
         elif action == "ping":
             await ws.send_json({"type": "pong", "timestamp": time.time()})
+
+    # ─── Login Handoff Proxy Handlers ────────────────────────
+
+    def _get_handoff_manager(self):
+        """Get the LoginHandoffManager from the agent server."""
+        try:
+            return self.agent_server._get_login_handoff()
+        except Exception:
+            return None
+
+    async def _handle_api_handoff_list(self, request: web.Request) -> web.Response:
+        """GET /api/handoff/list — List all handoff sessions."""
+        handoff = self._get_handoff_manager()
+        if not handoff:
+            return web.json_response({"status": "error", "error": "Handoff not available"}, status=503)
+        state_filter = request.query.get("state")
+        user_id = request.query.get("user_id")
+        result = await handoff.list_handoffs(state_filter=state_filter, user_id=user_id)
+        return web.json_response(result)
+
+    async def _handle_api_handoff_history(self, request: web.Request) -> web.Response:
+        """GET /api/handoff/history — Get completed handoff history."""
+        handoff = self._get_handoff_manager()
+        if not handoff:
+            return web.json_response({"status": "error", "error": "Handoff not available"}, status=503)
+        limit = int(request.query.get("limit", "50"))
+        result = await handoff.get_handoff_history(limit=limit)
+        return web.json_response(result)
+
+    async def _handle_api_handoff_stats(self, request: web.Request) -> web.Response:
+        """GET /api/handoff/stats — Get handoff statistics."""
+        handoff = self._get_handoff_manager()
+        if not handoff:
+            return web.json_response({"status": "error", "error": "Handoff not available"}, status=503)
+        result = {"status": "success", **handoff.get_stats()}
+        return web.json_response(result)
+
+    async def _handle_api_handoff_detect(self, request: web.Request) -> web.Response:
+        """POST /api/handoff/detect — Detect if current page is a login page."""
+        handoff = self._get_handoff_manager()
+        if not handoff:
+            return web.json_response({"status": "error", "error": "Handoff not available"}, status=503)
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        result = await handoff.detect_login_page(page_id=data.get("page_id", "main"))
+        return web.json_response(result)
+
+    async def _handle_api_handoff_start(self, request: web.Request) -> web.Response:
+        """POST /api/handoff/start — Start a login handoff session."""
+        handoff = self._get_handoff_manager()
+        if not handoff:
+            return web.json_response({"status": "error", "error": "Handoff not available"}, status=503)
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        result = await handoff.start_handoff(
+            url=data.get("url", ""),
+            page_id=data.get("page_id", "main"),
+            user_id=data.get("user_id", ""),
+            session_id=data.get("session_id", ""),
+            timeout_seconds=data.get("timeout_seconds", 300),
+            auto_detected=data.get("auto_detected", False),
+        )
+        return web.json_response(result)
+
+    async def _handle_api_handoff_complete(self, request: web.Request) -> web.Response:
+        """POST /api/handoff/{handoff_id}/complete — Mark handoff as completed."""
+        handoff = self._get_handoff_manager()
+        if not handoff:
+            return web.json_response({"status": "error", "error": "Handoff not available"}, status=503)
+        handoff_id = request.match_info.get("handoff_id", "")
+        if not handoff_id:
+            return web.json_response({"status": "error", "error": "Missing handoff_id"}, status=400)
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        result = await handoff.complete_handoff(handoff_id, user_id=data.get("user_id", ""))
+
+        # Broadcast completion to all WS clients
+        await self._broadcast({
+            "type": "login_handoff",
+            "event": "login_handoff_completed",
+            "data": result,
+        })
+
+        return web.json_response(result)
+
+    async def _handle_api_handoff_cancel(self, request: web.Request) -> web.Response:
+        """POST /api/handoff/{handoff_id}/cancel — Cancel a handoff session."""
+        handoff = self._get_handoff_manager()
+        if not handoff:
+            return web.json_response({"status": "error", "error": "Handoff not available"}, status=503)
+        handoff_id = request.match_info.get("handoff_id", "")
+        if not handoff_id:
+            return web.json_response({"status": "error", "error": "Missing handoff_id"}, status=400)
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        result = await handoff.cancel_handoff(handoff_id, reason=data.get("reason", ""))
+
+        # Broadcast cancellation to all WS clients
+        await self._broadcast({
+            "type": "login_handoff",
+            "event": "login_handoff_cancelled",
+            "data": result,
+        })
+
+        return web.json_response(result)
 
     # ─── Real-time Broadcast Loop ──────────────────────────
 

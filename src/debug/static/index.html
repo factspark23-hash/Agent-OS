@@ -81,6 +81,10 @@
                 <span class="nav-icon">📊</span>
                 <span class="nav-label">Pages</span>
             </button>
+            <button class="nav-btn" data-panel="handoff" title="Login Handoff">
+                <span class="nav-icon">🔐</span>
+                <span class="nav-label">Handoff</span>
+            </button>
             <button class="nav-btn" data-panel="terminal" title="Command Terminal">
                 <span class="nav-icon">⌨</span>
                 <span class="nav-label">Terminal</span>
@@ -263,6 +267,94 @@
                 </div>
             </section>
 
+            <!-- Login Handoff Panel -->
+            <section class="panel" id="panel-handoff">
+                <div class="panel-header">
+                    <h2>🔐 Login Handoff</h2>
+                    <div class="panel-actions">
+                        <button class="btn btn-sm" id="btn-handoff-detect">🔍 Detect Login</button>
+                        <button class="btn btn-sm" id="btn-handoff-start">▶ Start Handoff</button>
+                        <button class="btn btn-sm" id="btn-handoff-refresh">↻ Refresh</button>
+                    </div>
+                </div>
+
+                <!-- Active Handoff Banner -->
+                <div class="handoff-banner" id="handoff-banner" style="display:none">
+                    <div class="handoff-banner-inner">
+                        <div class="handoff-banner-icon">🔐</div>
+                        <div class="handoff-banner-info">
+                            <div class="handoff-banner-title" id="handoff-banner-title">Login Required</div>
+                            <div class="handoff-banner-msg" id="handoff-banner-msg">Login page detected. AI is paused.</div>
+                        </div>
+                        <div class="handoff-banner-timer" id="handoff-banner-timer">5:00</div>
+                        <div class="handoff-banner-actions">
+                            <button class="btn btn-sm btn-handoff-complete" id="btn-handoff-complete-banner">✓ I'm Done Logging In</button>
+                            <button class="btn btn-sm btn-danger" id="btn-handoff-cancel-banner">✗ Cancel</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Handoff Content -->
+                <div class="handoff-content">
+                    <!-- Detection Result -->
+                    <div class="handoff-section" id="handoff-detection-result" style="display:none">
+                        <h3 class="handoff-section-title">Detection Result</h3>
+                        <div class="handoff-detection-card" id="handoff-detection-card"></div>
+                    </div>
+
+                    <!-- Active Handoffs -->
+                    <div class="handoff-section">
+                        <h3 class="handoff-section-title">Active Handoffs</h3>
+                        <div class="handoff-cards" id="handoff-active-cards">
+                            <div class="empty-state">No active handoffs</div>
+                        </div>
+                    </div>
+
+                    <!-- Handoff History -->
+                    <div class="handoff-section">
+                        <h3 class="handoff-section-title">History</h3>
+                        <div class="handoff-history-list" id="handoff-history-list">
+                            <div class="empty-state">No handoff history yet</div>
+                        </div>
+                    </div>
+
+                    <!-- How It Works -->
+                    <div class="handoff-section">
+                        <h3 class="handoff-section-title">How Login Handoff Works</h3>
+                        <div class="handoff-workflow-steps">
+                            <div class="handoff-step">
+                                <div class="handoff-step-num">1</div>
+                                <div class="handoff-step-body">
+                                    <div class="handoff-step-title">AI Detects Login Page</div>
+                                    <div class="handoff-step-desc">When the AI agent navigates to a login/signup page (Instagram, Twitter, Gmail, etc.), it automatically detects the login form and pauses automation.</div>
+                                </div>
+                            </div>
+                            <div class="handoff-step">
+                                <div class="handoff-step-num">2</div>
+                                <div class="handoff-step-body">
+                                    <div class="handoff-step-title">Control Handed to You</div>
+                                    <div class="handoff-step-desc">The AI pauses and you get control of the browser. A banner appears here and in the browser view showing that login is needed. Your credentials are NEVER seen by the AI.</div>
+                                </div>
+                            </div>
+                            <div class="handoff-step">
+                                <div class="handoff-step-num">3</div>
+                                <div class="handoff-step-body">
+                                    <div class="handoff-step-title">You Log In Manually</div>
+                                    <div class="handoff-step-desc">If the browser is running in non-headless mode, type your credentials directly in the browser window. If headless, use the Debug Terminal to interact. Your password goes ONLY to the real website.</div>
+                                </div>
+                            </div>
+                            <div class="handoff-step">
+                                <div class="handoff-step-num">4</div>
+                                <div class="handoff-step-body">
+                                    <div class="handoff-step-title">Click "I'm Done"</div>
+                                    <div class="handoff-step-desc">Once you've finished logging in, click the "I'm Done Logging In" button. The AI verifies new auth cookies, saves your session, and resumes automation with your logged-in state.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
             <!-- Terminal Panel -->
             <section class="panel" id="panel-terminal">
                 <div class="panel-header">
@@ -302,6 +394,9 @@
             <button class="quick-btn" data-cmd="console-logs" data-params='{}'>🖥 Console</button>
             <button class="quick-btn" data-cmd="back" data-params='{}'>⬅ Back</button>
             <button class="quick-btn" data-cmd="reload" data-params='{}'>↻ Reload</button>
+            <button class="quick-btn quick-btn-handoff" id="quick-detect-login">🔍 Detect Login</button>
+            <button class="quick-btn quick-btn-handoff" id="quick-start-handoff">🔐 Handoff</button>
+            <button class="quick-btn quick-btn-handoff-complete" id="quick-complete-handoff" style="display:none">✓ Done Login</button>
         </div>
     </div>
 
