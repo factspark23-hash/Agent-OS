@@ -295,7 +295,7 @@ class TLSSessionPool:
 
         try:
             # Run in thread executor to not block async loop
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             resp = await loop.run_in_executor(
                 None,
                 lambda: session.request(req.method, req.url, **kwargs),

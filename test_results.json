@@ -1,0 +1,180 @@
+{
+  "timestamp": "2026-04-14T19:41:05.143754+00:00",
+  "elapsed": 249.4,
+  "overall_rate": 79.3,
+  "total_tests": 1050,
+  "total_pass": 833,
+  "features": [
+    {
+      "feature": "navigation",
+      "total": 150,
+      "pass": 133,
+      "fail": 17,
+      "rate": 88.7,
+      "avg_ms": 955.2
+    },
+    {
+      "feature": "content_extraction",
+      "total": 150,
+      "pass": 102,
+      "fail": 48,
+      "rate": 68.0,
+      "avg_ms": 0
+    },
+    {
+      "feature": "stealth",
+      "total": 150,
+      "pass": 133,
+      "fail": 17,
+      "rate": 88.7,
+      "avg_ms": 0
+    },
+    {
+      "feature": "screenshot",
+      "total": 150,
+      "pass": 133,
+      "fail": 17,
+      "rate": 88.7,
+      "avg_ms": 0
+    },
+    {
+      "feature": "form_interaction",
+      "total": 150,
+      "pass": 102,
+      "fail": 48,
+      "rate": 68.0,
+      "avg_ms": 0
+    },
+    {
+      "feature": "link_navigation",
+      "total": 150,
+      "pass": 101,
+      "fail": 49,
+      "rate": 67.3,
+      "avg_ms": 0
+    },
+    {
+      "feature": "scroll_lazy_load",
+      "total": 150,
+      "pass": 129,
+      "fail": 21,
+      "rate": 86.0,
+      "avg_ms": 0
+    }
+  ],
+  "swarm": {
+    "router_ok": 8,
+    "agents": 25,
+    "reform_ok": 25,
+    "dedup": true,
+    "boundary": true,
+    "reload": true,
+    "fmt": true,
+    "calc": true,
+    "know": true,
+    "score": 7,
+    "total": 9
+  },
+  "failures": [
+    {
+      "url": "https://www.bing.com",
+      "feat": "content_extraction",
+      "err": ""
+    },
+    {
+      "url": "https://www.ecosia.org",
+      "feat": "form_interaction",
+      "err": ""
+    },
+    {
+      "url": "https://www.ecosia.org",
+      "feat": "link_navigation",
+      "err": ""
+    },
+    {
+      "url": "https://www.dogpile.com",
+      "feat": "content_extraction",
+      "err": ""
+    },
+    {
+      "url": "https://www.dogpile.com",
+      "feat": "form_interaction",
+      "err": ""
+    },
+    {
+      "url": "https://www.dogpile.com",
+      "feat": "link_navigation",
+      "err": ""
+    },
+    {
+      "url": "https://www.pinterest.com",
+      "feat": "content_extraction",
+      "err": ""
+    },
+    {
+      "url": "https://www.quora.com",
+      "feat": "content_extraction",
+      "err": ""
+    },
+    {
+      "url": "https://www.quora.com",
+      "feat": "form_interaction",
+      "err": ""
+    },
+    {
+      "url": "https://www.quora.com",
+      "feat": "link_navigation",
+      "err": ""
+    },
+    {
+      "url": "https://mastodon.social",
+      "feat": "content_extraction",
+      "err": ""
+    },
+    {
+      "url": "https://mastodon.social",
+      "feat": "form_interaction",
+      "err": ""
+    },
+    {
+      "url": "https://mastodon.social",
+      "feat": "link_navigation",
+      "err": ""
+    },
+    {
+      "url": "https://mastodon.social",
+      "feat": "scroll_lazy_load",
+      "err": ""
+    },
+    {
+      "url": "https://www.amazon.com",
+      "feat": "navigation",
+      "err": "s=202"
+    },
+    {
+      "url": "https://www.etsy.com",
+      "feat": "content_extraction",
+      "err": ""
+    },
+    {
+      "url": "https://www.etsy.com",
+      "feat": "form_interaction",
+      "err": ""
+    },
+    {
+      "url": "https://www.etsy.com",
+      "feat": "link_navigation",
+      "err": ""
+    },
+    {
+      "url": "https://www.bestbuy.com",
+      "feat": "navigation",
+      "err": "s=-"
+    },
+    {
+      "url": "https://www.flipkart.com",
+      "feat": "content_extraction",
+      "err": ""
+    }
+  ]
+}

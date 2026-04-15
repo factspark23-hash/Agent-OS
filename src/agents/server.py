@@ -348,7 +348,7 @@ class AgentServer:
             try:
                 await websocket.close(code=4001)
             except Exception:
-                pass
+                logger.debug("Failed to close WebSocket after auth failure")
             return
 
         try:
@@ -884,16 +884,17 @@ class AgentServer:
                     llm_timeout=swarm_config.router.llm_timeout,
                 )
 
-                from src.agent_swarm.agents.pool import AgentPool
-                self._swarm_pool = AgentPool(
-                    max_workers=swarm_config.agents.max_workers,
-                    search_timeout=swarm_config.agents.search_timeout,
-                )
-
                 from src.agent_swarm.search.http_backend import HTTPSearchBackend
                 self._swarm_backend = HTTPSearchBackend(
                     impersonate=swarm_config.search.chrome_impersonate,
                     user_agent=swarm_config.search.user_agent,
+                )
+
+                from src.agent_swarm.agents.pool import AgentPool
+                self._swarm_pool = AgentPool(
+                    max_workers=swarm_config.agents.max_workers,
+                    search_timeout=swarm_config.agents.search_timeout,
+                    search_backend=self._swarm_backend,
                 )
 
                 from src.agent_swarm.output.formatter import OutputFormatter
@@ -928,14 +929,15 @@ class AgentServer:
                 llm_model=swarm_config.router.llm_model,
             )
 
+            from src.agent_swarm.search.http_backend import HTTPSearchBackend
+            self._swarm_backend = HTTPSearchBackend()
+
             from src.agent_swarm.agents.pool import AgentPool
             self._swarm_pool = AgentPool(
                 max_workers=swarm_config.agents.max_workers,
                 search_timeout=swarm_config.agents.search_timeout,
+                search_backend=self._swarm_backend,
             )
-
-            from src.agent_swarm.search.http_backend import HTTPSearchBackend
-            self._swarm_backend = HTTPSearchBackend()
 
             from src.agent_swarm.output.formatter import OutputFormatter
             self._swarm_formatter = OutputFormatter()
@@ -968,9 +970,22 @@ class AgentServer:
                             {"status": "error", "error": "Invalid API key"},
                             status=401, headers=self._get_cors_headers(),
                         )
-                except Exception:
-                    # Fallback: if async auth fails, try hmac comparison
-                    pass
+                except Exception as auth_exc:
+                    # Fallback: if async auth fails, try hmac comparison with configured key
+                    logger.warning(f"API key manager auth failed, trying hmac fallback: {auth_exc}")
+                    configured_key = self.config.get("swarm.api_key")
+                    if configured_key:
+                        import hmac as _hmac
+                        if not _hmac.compare_digest(api_key, configured_key):
+                            return web.json_response(
+                                {"status": "error", "error": "Invalid API key"},
+                                status=401, headers=self._get_cors_headers(),
+                            )
+                    else:
+                        return web.json_response(
+                            {"status": "error", "error": "Authentication service error"},
+                            status=503, headers=self._get_cors_headers(),
+                        )
             elif self.config.get("swarm.api_key"):
                 import hmac as _hmac
                 if not _hmac.compare_digest(api_key, self.config.get("swarm.api_key")):
@@ -1038,9 +1053,24 @@ class AgentServer:
 
         max_results = min(int(data.get("max_results", 10)), 50)
         agent_profiles = data.get("agent_profiles", ["generalist"])
-        if not isinstance(agent_profiles, list) or len(agent_profiles) > 10:
+        if not isinstance(agent_profiles, list) or len(agent_profiles) > 50:
             return web.json_response(
-                {"status": "error", "error": "agent_profiles must be a list with max 10 entries"},
+                {"status": "error", "error": "agent_profiles must be a list with max 50 entries"},
+                status=400, headers=self._get_cors_headers(),
+            )
+
+        # Swarm size controls how many agents to spawn (supports up to 50 for swarm mode)
+        swarm_size = data.get("swarm_size", 5)
+        try:
+            swarm_size = int(swarm_size)
+        except (TypeError, ValueError):
+            return web.json_response(
+                {"status": "error", "error": "swarm_size must be an integer"},
+                status=400, headers=self._get_cors_headers(),
+            )
+        if swarm_size < 1 or swarm_size > 50:
+            return web.json_response(
+                {"status": "error", "error": "swarm_size must be between 1 and 50"},
                 status=400, headers=self._get_cors_headers(),
             )
 
@@ -1084,13 +1114,67 @@ class AgentServer:
             else:
                 profiles_to_use = agent_profiles
 
-            # Execute parallel search
-            agent_results = await self._swarm_pool.search_parallel(
-                query=query,
-                agent_profiles=profiles_to_use,
-                search_backend=self._swarm_backend,
-                max_results=max_results,
-            )
+            # Dynamic agent spawning for swarm mode: when swarm_size > 5,
+            # create temporary clone agents based on the most relevant profiles
+            temp_agent_keys = []
+            if swarm_size > len(profiles_to_use) and self._swarm_pool is not None:
+                # Calculate how many extra agents are needed
+                extra_needed = swarm_size - len(profiles_to_use)
+                # Distribute clones across the base profiles, starting with the most relevant
+                clones_per_profile = extra_needed // len(profiles_to_use) if profiles_to_use else 0
+                remainder = extra_needed % len(profiles_to_use) if profiles_to_use else 0
+
+                temp_agents_list = []
+                for i, profile_key in enumerate(profiles_to_use):
+                    count = clones_per_profile + (1 if i < remainder else 0)
+                    if count > 0:
+                        clones = self._swarm_pool._spawn_temp_agents(profile_key, count)
+                        temp_agents_list.extend(clones)
+                        # Track temp keys for cleanup
+                        for j, clone in enumerate(clones):
+                            temp_key = f"{profile_key}-{self._swarm_pool._clone_counters.get(profile_key, 0) - count + j + 1}"
+                            temp_agent_keys.append(temp_key)
+
+                logger.info(
+                    f"Swarm mode: spawned {len(temp_agents_list)} temp agents "
+                    f"to reach swarm_size={swarm_size}"
+                )
+
+            try:
+                # Execute parallel search (uses semaphore-limited concurrency)
+                agent_results = await self._swarm_pool.search_parallel(
+                    query=query,
+                    agent_profiles=profiles_to_use,
+                    search_backend=self._swarm_backend,
+                    max_results=max_results,
+                )
+
+                # If temp agents were spawned, also run them and merge results
+                if temp_agents_list:
+                    from src.agent_swarm.agents.base import AgentResult, AgentStatus
+                    temp_tasks = []
+                    for temp_agent in temp_agents_list:
+                        temp_tasks.append(
+                            self._swarm_pool._search_with_timeout(
+                                temp_agent, query, self._swarm_backend
+                            )
+                        )
+                    try:
+                        temp_results = await asyncio.wait_for(
+                            asyncio.gather(*temp_tasks, return_exceptions=True),
+                            timeout=self._swarm_pool.search_timeout,
+                        )
+                        for r in temp_results:
+                            if isinstance(r, AgentResult):
+                                agent_results.append(r)
+                            elif isinstance(r, Exception):
+                                logger.error(f"Temp agent search error: {r}")
+                    except asyncio.TimeoutError:
+                        logger.warning("Temp agents timed out")
+            finally:
+                # Clean up temporary agents after search completes
+                if temp_agent_keys and self._swarm_pool is not None:
+                    self._swarm_pool._cleanup_temp_agents(temp_agent_keys)
 
             # Aggregate results
             aggregated = self._swarm_aggregator.aggregate(agent_results)

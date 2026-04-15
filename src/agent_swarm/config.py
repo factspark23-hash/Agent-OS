@@ -31,10 +31,11 @@ class RouterConfig(BaseModel):
 
 class SwarmAgentConfig(BaseModel):
     """Search agent configuration."""
-    max_workers: int = Field(default=5, description="Max parallel agents")
+    max_workers: int = Field(default=50, description="Max parallel agents")
     default_agents: list[str] = Field(default=["generalist"], description="Default agent profiles")
     search_timeout: float = Field(default=30.0, description="Search timeout per agent in seconds")
     max_retries: int = Field(default=2, description="Max retries for failed searches")
+    max_total_agents: int = Field(default=50, description="Maximum total agents that can be spawned")
 
 
 class SearchBackendConfig(BaseModel):
@@ -76,7 +77,7 @@ class SwarmConfig(BaseModel):
             llm_model=os.getenv("SWARM_LLM_MODEL", "gpt-4o-mini"),
         )
         agent_conf = SwarmAgentConfig(
-            max_workers=int(os.getenv("SWARM_MAX_WORKERS", "5")),
+            max_workers=int(os.getenv("SWARM_MAX_WORKERS", "50")),
             default_agents=_safe_json_loads(os.getenv("SWARM_DEFAULT_AGENTS", '["generalist"]'), ["generalist"]),
         )
         search_conf = SearchBackendConfig(

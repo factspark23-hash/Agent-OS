@@ -69,8 +69,8 @@ class AgentOSBackend(SearchBackend):
             if self._client is not None:
                 try:
                     self._client.close()
-                except Exception:
-                    pass
+                except Exception as close_err:
+                    logger.debug(f"Error closing AgentOSBackend client: {close_err}")
                 self._client = None
         logger.debug("AgentOSBackend closed")
 
@@ -78,7 +78,7 @@ class AgentOSBackend(SearchBackend):
         try:
             self.close()
         except Exception:
-            pass
+            logger.debug("AgentOSBackend cleanup in __del__ failed")
 
     async def search(self, query: str, max_results: int = 10) -> list[dict]:
         """Search using Agent-OS browser automation."""

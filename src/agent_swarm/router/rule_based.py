@@ -58,6 +58,27 @@ WEB_PATTERNS = [
     (r"(?i)\b(news|update|release|announce|launch)\b", 0.75),
     (r"(?i)\b(price|cost|rate|fee)\b", 0.73),
     (r"(?i)\b(download|install|tutorial)\b", 0.72),
+    # Social media patterns
+    (r"(?i)\b(instagram|twitter|facebook|tiktok|linkedin|threads)\b", 0.92),
+    (r"(?i)\b(x\.com|youtube\.com)\b", 0.90),
+    (r"(?i)\b(social\s+media)\b", 0.88),
+    (r"(?i)\b(open|check|browse|visit)\b.{0,15}\b(instagram|twitter|facebook|tiktok|linkedin|youtube)\b", 0.95),
+    (r"(?i)\b(trending|viral|influencer|followers|hashtag|dm|post)\b", 0.85),
+    (r"(?i)\b(tweet|retweet|reel|story|feed|timeline|profile)\b.{0,15}\b(today|latest|new|update|check)\b", 0.90),
+    # Finance/crypto patterns
+    (r"(?i)\b(bitcoin|ethereum|crypto|btc|eth)\b", 0.90),
+    (r"(?i)\b(stock|market|trading|portfolio)\b", 0.85),
+    # AI/ML patterns
+    (r"(?i)\b(ai|artificial\s+intelligence|machine\s+learning|deep\s+learning|llm|gpt|chatbot)\b", 0.85),
+    (r"(?i)\b(neural\s+network|transformer|diffusion|openai|claude|gemini)\b", 0.88),
+    # Jobs/career patterns
+    (r"(?i)\b(job|career|hiring|salary|position|employment|recruitment)\b", 0.82),
+    # Entertainment patterns
+    (r"(?i)\b(movie|film|tv\s+show|series|netflix|spotify|streaming)\b", 0.80),
+    # Travel patterns
+    (r"(?i)\b(travel|hotel|flight|vacation|booking|tourist|trip)\b", 0.80),
+    # Health patterns
+    (r"(?i)\b(health|medical|disease|symptom|treatment|doctor|medicine)\b", 0.82),
 ]
 
 KNOWLEDGE_PATTERNS = [
@@ -91,7 +112,14 @@ CATEGORY_AGENTS = {
         "price": ["price_checker", "generalist"],
         "tech": ["tech_scanner", "deep_researcher"],
         "weather": ["generalist"],
-        "sports": ["news_hound", "generalist"],
+        "sports": ["sports_analyst", "news_hound"],
+        "social": ["social_media_tracker", "generalist"],
+        "finance": ["finance_analyst", "news_hound"],
+        "health": ["health_researcher", "deep_researcher"],
+        "jobs": ["job_scout", "generalist"],
+        "entertainment": ["entertainment_guide", "generalist"],
+        "travel": ["travel_scout", "generalist"],
+        "ai": ["ai_watcher", "tech_scanner"],
         "default": ["generalist", "deep_researcher"],
     },
     QueryCategory.NEEDS_KNOWLEDGE: ["generalist", "deep_researcher"],
@@ -119,6 +147,7 @@ class RuleBasedRouter:
         best_match = self._match_patterns(query, self.compiled_calculation, QueryCategory.NEEDS_CALCULATION)
         if best_match and best_match.confidence >= self.confidence_threshold:
             best_match.suggested_agents = self._suggest_agents(query, QueryCategory.NEEDS_CALCULATION)
+            best_match.search_queries = self._generate_search_queries(query, QueryCategory.NEEDS_CALCULATION)
             return best_match
 
         best_match = self._match_patterns(query, self.compiled_code, QueryCategory.NEEDS_CODE)
@@ -135,6 +164,8 @@ class RuleBasedRouter:
 
         best_match = self._match_patterns(query, self.compiled_knowledge, QueryCategory.NEEDS_KNOWLEDGE)
         if best_match and best_match.confidence >= self.confidence_threshold:
+            best_match.suggested_agents = self._suggest_agents(query, QueryCategory.NEEDS_KNOWLEDGE)
+            best_match.search_queries = self._generate_search_queries(query, QueryCategory.NEEDS_KNOWLEDGE)
             return best_match
 
         return QueryClassification(
@@ -173,22 +204,52 @@ class RuleBasedRouter:
         query_lower = query.lower()
 
         if category == QueryCategory.NEEDS_WEB:
-            if any(kw in query_lower for kw in ["news", "update", "breaking", "headline"]):
-                return agents_map.get("news", agents_map["default"])
+            # Social media platforms take priority over news/price when platform name is present
+            social_platforms = ["instagram", "twitter", "facebook", "tiktok", "linkedin", "threads", "x.com", "youtube"]
+            if any(platform in query_lower for platform in social_platforms):
+                return agents_map.get("social", agents_map["default"])
+            elif any(kw in query_lower for kw in ["social media", "tweet", "viral", "trending", "influencer", "followers", "profile", "post", "dm", "hashtag"]):
+                return agents_map.get("social", agents_map["default"])
+            elif any(kw in query_lower for kw in ["stock", "market", "crypto", "bitcoin", "investment", "portfolio", "trading", "nasdaq", "dow jones", "share price", "dividend", "ipo"]):
+                return agents_map.get("finance", agents_map["default"])
             elif any(kw in query_lower for kw in ["price", "cost", "buy", "cheap", "discount", "deal"]):
                 return agents_map.get("price", agents_map["default"])
+            elif any(kw in query_lower for kw in ["news", "update", "breaking", "headline"]):
+                return agents_map.get("news", agents_map["default"])
+            elif any(kw in query_lower for kw in ["ai", "artificial intelligence", "machine learning", "deep learning", "neural network", "llm", "gpt", "transformer", "chatbot", "diffusion"]):
+                return agents_map.get("ai", agents_map["default"])
             elif any(kw in query_lower for kw in ["tech", "software", "programming", "api", "github", "code", "python", "javascript", "install", "tutorial", "documentation"]):
                 return agents_map.get("tech", agents_map["default"])
+            elif any(kw in query_lower for kw in ["health", "medical", "disease", "symptom", "treatment", "doctor", "medicine", "diagnosis", "vaccine", "clinical", "patient"]):
+                return agents_map.get("health", agents_map["default"])
+            elif any(kw in query_lower for kw in ["job", "career", "hiring", "salary", "position", "employment", "recruitment", "resume", "interview", "freelance"]):
+                return agents_map.get("jobs", agents_map["default"])
+            elif any(kw in query_lower for kw in ["score", "game", "match", "sports", "nba", "nfl", "football", "cricket", "tennis", "fifa", "olympics"]):
+                return agents_map.get("sports", agents_map["default"])
+            elif any(kw in query_lower for kw in ["movie", "film", "tv show", "series", "music", "song", "album", "gaming", "actor", "celebrity", "streaming", "netflix", "spotify"]):
+                return agents_map.get("entertainment", agents_map["default"])
+            elif any(kw in query_lower for kw in ["travel", "hotel", "flight", "vacation", "booking", "tourist", "attraction", "trip"]):
+                return agents_map.get("travel", agents_map["default"])
             elif any(kw in query_lower for kw in ["weather", "temperature", "rain", "forecast"]):
                 return agents_map.get("weather", agents_map["default"])
-            elif any(kw in query_lower for kw in ["score", "game", "match", "sports", "nba", "football"]):
-                return agents_map.get("sports", agents_map["default"])
             return agents_map["default"]
 
         return agents_map if isinstance(agents_map, list) else ["generalist"]
 
     def _generate_search_queries(self, query: str, category: QueryCategory) -> list[str]:
         """Generate optimized search queries for each agent."""
+        if category == QueryCategory.NEEDS_CALCULATION:
+            # For calculations, search for the formula or method
+            return [query, f"how to calculate {query}"]
+        
+        if category == QueryCategory.NEEDS_CODE:
+            # For code queries, add programming-specific search terms
+            return [query, f"{query} code example tutorial"]
+
+        if category == QueryCategory.NEEDS_KNOWLEDGE:
+            # For knowledge queries, add definition/explanation search
+            return [query, f"{query} explained"]
+
         if category != QueryCategory.NEEDS_WEB:
             return [query]
 

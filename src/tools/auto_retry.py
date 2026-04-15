@@ -498,7 +498,7 @@ class RequestDeduplicator:
             return await existing.future
 
         # Execute new request
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         future = loop.create_future()
         self._in_flight[key] = InFlightRequest(
             key=key,

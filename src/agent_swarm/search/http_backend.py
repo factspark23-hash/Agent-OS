@@ -1,24 +1,45 @@
 """HTTP-based search backend using curl_cffi for TLS fingerprinting."""
 
 import re
+import json
 import base64
 import logging
 import asyncio
 import atexit
 import threading
+import time
 from typing import Optional
 from urllib.parse import quote_plus, urlparse, parse_qs, unquote
 
-from src.agent_swarm.search.base import SearchBackend
+from src.agent_swarm.search.base import SearchBackend, combine_results
 
 logger = logging.getLogger(__name__)
+
+# Patterns that indicate a search-engine internal/redirect URL (not a real result)
+_BAD_URL_PATTERNS = re.compile(
+    r"^(https?://(www\.)?(bing\.com/ck/a|bing\.com/search|google\.com/search"
+    r"|google\.com/url\?|duckduckgo\.com/\?|duckduckgo\.com/l/\?)"
+    r"|/search\?|/url\?)",
+    re.IGNORECASE,
+)
+
+# Semaphore to limit concurrent outgoing HTTP requests from search backends
+_MAX_CONCURRENT_REQUESTS = 8
+_request_semaphore = threading.Semaphore(_MAX_CONCURRENT_REQUESTS)
 
 
 class HTTPSearchBackend(SearchBackend):
     """Fast HTTP-based search using curl_cffi with Chrome 146 TLS fingerprinting.
-    
-    Supports: Bing, DuckDuckGo, Google (in reliability order).
+
+    Supports: Bing, DuckDuckGo, Google, SearXNG (in reliability order).
+    All engines are tried and results are combined with deduplication.
     """
+
+    # SearXNG public instances to try, in order
+    SEARXNG_INSTANCES = [
+        "https://searx.be",
+        "https://search.sapti.me",
+    ]
 
     def __init__(
         self,
@@ -33,8 +54,13 @@ class HTTPSearchBackend(SearchBackend):
         self.max_retries = max_retries
         self._session = None
         self._session_lock = threading.Lock()
+        self._session_recreate_count = 0
         self._closed = False
         atexit.register(self.close)
+
+    # ------------------------------------------------------------------
+    # Session management with auto-recreation on corruption
+    # ------------------------------------------------------------------
 
     def _get_session(self):
         """Get or create curl_cffi session (thread-safe)."""
@@ -51,6 +77,47 @@ class HTTPSearchBackend(SearchBackend):
                     return None
             return self._session
 
+    def _recreate_session(self, reason: str = "unknown"):
+        """Destroy and recreate the curl_cffi session (e.g. after SSL errors)."""
+        with self._session_lock:
+            self._session_recreate_count += 1
+            if self._session is not None:
+                try:
+                    self._session.close()
+                except Exception as close_err:
+                    logger.debug(f"Error closing session during recreation: {close_err}")
+            self._session = None
+            try:
+                from curl_cffi.requests import Session
+                self._session = Session(impersonate=self.impersonate)
+                logger.info(
+                    f"Recreated curl_cffi session (reason={reason}, count={self._session_recreate_count})"
+                )
+            except ImportError:
+                logger.error("curl_cffi not installed during session recreation")
+            return self._session
+
+    def _is_session_corrupted_error(self, exc: Exception) -> bool:
+        """Return True if the exception indicates a corrupted/broken session."""
+        exc_msg = str(exc).lower()
+        corruption_indicators = [
+            "ssl",
+            "tls",
+            "connection reset",
+            "broken pipe",
+            "connection refused",
+            "eof occurred",
+            "protocol error",
+            "handshake",
+            "cert",
+            "cursor",  # curl_cffi internal
+        ]
+        return any(indicator in exc_msg for indicator in corruption_indicators)
+
+    # ------------------------------------------------------------------
+    # Public interface
+    # ------------------------------------------------------------------
+
     def is_available(self) -> bool:
         """Check if curl_cffi is available."""
         try:
@@ -66,8 +133,8 @@ class HTTPSearchBackend(SearchBackend):
             if self._session is not None:
                 try:
                     self._session.close()
-                except Exception:
-                    pass
+                except Exception as close_err:
+                    logger.debug(f"Error closing HTTPSearchBackend session: {close_err}")
                 self._session = None
         logger.debug("HTTPSearchBackend closed")
 
@@ -75,7 +142,7 @@ class HTTPSearchBackend(SearchBackend):
         try:
             self.close()
         except Exception:
-            pass
+            logger.debug("HTTPSearchBackend cleanup in __del__ failed")
 
     async def search(self, query: str, max_results: int = 10) -> list[dict]:
         """Search using HTTP requests with TLS fingerprinting."""
@@ -85,27 +152,199 @@ class HTTPSearchBackend(SearchBackend):
         results = await loop.run_in_executor(None, self._search_sync, query, max_results)
         return results
 
+    # ------------------------------------------------------------------
+    # Core search logic – tries ALL engines and combines results
+    # ------------------------------------------------------------------
+
     def _search_sync(self, query: str, max_results: int = 10) -> list[dict]:
-        """Synchronous search: Bing → DuckDuckGo → Google."""
+        """Synchronous search: Bing → DuckDuckGo → Google → SearXNG.
+
+        All engines are attempted; results are combined with deduplication
+        so that even if the first engine fails, later engines fill in.
+        """
         session = self._get_session()
         if session is None:
             return self._search_with_httpx(query, max_results)
 
-        results = self._search_bing(session, query, max_results)
-        if results:
-            return results[:max_results]
+        all_results: list[list[dict]] = []
 
-        logger.info("Bing returned no results, trying DuckDuckGo...")
-        results = self._search_duckduckgo(session, query, max_results)
-        if results:
-            return results[:max_results]
+        # Try each engine in order, collecting whatever succeeds
+        engine_methods = [
+            ("Bing", self._search_bing),
+            ("DuckDuckGo", self._search_duckduckgo),
+            ("Google", self._search_google),
+            ("SearXNG", self._search_searxng),
+        ]
 
-        logger.info("DuckDuckGo returned no results, trying Google...")
-        results = self._search_google(session, query, max_results)
-        return results[:max_results]
+        for engine_name, engine_method in engine_methods:
+            try:
+                results = engine_method(session, query, max_results)
+                # Filter out obviously bad results
+                valid_results = [r for r in results if self._validate_result(r)]
+                if valid_results:
+                    logger.debug(f"{engine_name} returned {len(valid_results)} valid results")
+                    all_results.append(valid_results)
+                else:
+                    logger.debug(f"{engine_name} returned no valid results")
+            except Exception as e:
+                logger.warning(f"{engine_name} search raised exception: {e}")
+                # If the session appears corrupted, recreate it before trying next engine
+                if self._is_session_corrupted_error(e):
+                    new_session = self._recreate_session(reason=str(e))
+                    if new_session is not None:
+                        session = new_session
+
+        # Combine and dedup results from all engines
+        if all_results:
+            return combine_results(*all_results, max_results=max_results)
+
+        # Last resort: httpx fallback
+        logger.warning("All engines failed, trying httpx fallback...")
+        return self._search_with_httpx(query, max_results)
+
+    # ------------------------------------------------------------------
+    # Retry with exponential backoff (generic wrapper)
+    # ------------------------------------------------------------------
+
+    def _retry_request(
+        self,
+        session,
+        method: str,
+        url: str,
+        headers: dict,
+        timeout: float,
+        allow_redirects: bool = True,
+        retry_on_status: Optional[set[int]] = None,
+    ):
+        """Execute an HTTP request with retry + exponential backoff.
+
+        Args:
+            session: curl_cffi session
+            method: "GET" or "POST"
+            url: Request URL
+            headers: Request headers
+            timeout: Request timeout
+            allow_redirects: Whether to follow redirects
+            retry_on_status: Set of status codes that trigger a retry
+                            (default: {429, 502, 503, 504, 202})
+
+        Returns:
+            Response object or None if all retries fail.
+        """
+        if retry_on_status is None:
+            retry_on_status = {429, 502, 503, 504, 202}
+
+        last_exc = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                _request_semaphore.acquire()
+                try:
+                    if method.upper() == "GET":
+                        response = session.get(
+                            url, headers=headers, timeout=timeout,
+                            allow_redirects=allow_redirects,
+                        )
+                    else:
+                        response = session.post(
+                            url, headers=headers, timeout=timeout,
+                            allow_redirects=allow_redirects,
+                        )
+                finally:
+                    _request_semaphore.release()
+
+                if response.status_code == 200:
+                    return response
+
+                if response.status_code in retry_on_status and attempt < self.max_retries:
+                    wait = 0.5 * (2 ** attempt)  # 0.5s, 1s, 2s …
+                    logger.debug(
+                        f"Retry {attempt+1}/{self.max_retries} for {url} "
+                        f"(status={response.status_code}), waiting {wait:.1f}s"
+                    )
+                    time.sleep(wait)
+                    continue
+
+                # Non-retryable status
+                if response.status_code not in retry_on_status:
+                    logger.warning(f"Non-retryable status {response.status_code} for {url}")
+                    return response
+
+            except Exception as exc:
+                last_exc = exc
+                if self._is_session_corrupted_error(exc) and attempt < self.max_retries:
+                    wait = 0.5 * (2 ** attempt)
+                    logger.debug(
+                        f"Session error on attempt {attempt+1}/{self.max_retries} "
+                        f"for {url}: {exc}, recreating session and waiting {wait:.1f}s"
+                    )
+                    new_session = self._recreate_session(reason=str(exc))
+                    if new_session is not None:
+                        session = new_session
+                    time.sleep(wait)
+                    continue
+                elif attempt < self.max_retries:
+                    wait = 0.5 * (2 ** attempt)
+                    logger.debug(
+                        f"Request error on attempt {attempt+1}/{self.max_retries} "
+                        f"for {url}: {exc}, waiting {wait:.1f}s"
+                    )
+                    time.sleep(wait)
+                    continue
+                else:
+                    logger.warning(f"All retries exhausted for {url}: {exc}")
+                    raise exc
+
+        return None
+
+    # ------------------------------------------------------------------
+    # Result validation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _validate_result(result: dict) -> bool:
+        """Check if a search result is valid and not garbage.
+
+        A valid result must have:
+        - Non-empty title
+        - A valid HTTP/HTTPS URL
+        - URL must not be a search-engine internal/redirect URL
+        - Snippet is allowed to be empty but not required
+        """
+        title = result.get("title", "").strip()
+        url = result.get("url", "").strip()
+
+        # Must have a non-empty title
+        if not title:
+            return False
+
+        # Must have a URL
+        if not url:
+            return False
+
+        # URL must be http or https
+        if not url.startswith(("http://", "https://")):
+            return False
+
+        # Parse the URL to ensure it's well-formed
+        try:
+            parsed = urlparse(url)
+            if not parsed.netloc:
+                return False
+        except Exception:
+            return False
+
+        # Reject search-engine internal URLs
+        if _BAD_URL_PATTERNS.match(url):
+            return False
+
+        return True
+
+    # ------------------------------------------------------------------
+    # Engine: Google
+    # ------------------------------------------------------------------
 
     def _search_google(self, session, query: str, max_results: int) -> list[dict]:
-        """Search Google via HTML scraping."""
+        """Search Google via HTML scraping with retry."""
         try:
             url = f"https://www.google.com/search?q={quote_plus(query)}&num={max_results + 5}&hl=en&gl=us"
             headers = {
@@ -115,9 +354,9 @@ class HTTPSearchBackend(SearchBackend):
                 "Referer": "https://www.google.com/",
                 "Cookie": "CONSENT=PENDING+987; SOCS=CAESHAgBEhJnd3NfMjAyMzEwMTAtMF9SQzEaAmVuIAEaBgiA-LaoBg",
             }
-            response = session.get(url, headers=headers, timeout=self.timeout, allow_redirects=True)
-            if response.status_code != 200:
-                logger.warning(f"Google returned status {response.status_code}")
+            response = self._retry_request(session, "GET", url, headers, self.timeout)
+            if response is None or response.status_code != 200:
+                logger.warning(f"Google returned status {response.status_code if response else 'None'}")
                 return []
 
             results = self._parse_google_results(response.text, max_results)
@@ -212,8 +451,12 @@ class HTTPSearchBackend(SearchBackend):
             logger.debug(f"Alt Google parser failed: {e}")
         return results
 
+    # ------------------------------------------------------------------
+    # Engine: Bing
+    # ------------------------------------------------------------------
+
     def _search_bing(self, session, query: str, max_results: int) -> list[dict]:
-        """Search Bing via HTML scraping."""
+        """Search Bing via HTML scraping with retry."""
         try:
             url = f"https://www.bing.com/search?q={quote_plus(query)}&count={max_results + 5}&setlang=en&cc=us"
             headers = {
@@ -221,9 +464,9 @@ class HTTPSearchBackend(SearchBackend):
                 "Accept-Language": "en-US,en;q=0.9",
                 "User-Agent": self.user_agent,
             }
-            response = session.get(url, headers=headers, timeout=self.timeout, allow_redirects=True)
-            if response.status_code != 200:
-                logger.warning(f"Bing returned status {response.status_code}")
+            response = self._retry_request(session, "GET", url, headers, self.timeout)
+            if response is None or response.status_code != 200:
+                logger.warning(f"Bing returned status {response.status_code if response else 'None'}")
                 return []
             return self._parse_bing_results(response.text, max_results)
         except Exception as e:
@@ -277,8 +520,12 @@ class HTTPSearchBackend(SearchBackend):
             logger.warning(f"Failed to parse Bing results: {e}")
         return results
 
+    # ------------------------------------------------------------------
+    # Engine: DuckDuckGo
+    # ------------------------------------------------------------------
+
     def _search_duckduckgo(self, session, query: str, max_results: int) -> list[dict]:
-        """Search DuckDuckGo via HTML scraping."""
+        """Search DuckDuckGo via HTML scraping with retry."""
         try:
             url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}&kl=us-en"
             headers = {
@@ -287,22 +534,12 @@ class HTTPSearchBackend(SearchBackend):
                 "User-Agent": self.user_agent,
                 "Referer": "https://duckduckgo.com/",
             }
-            import time
-            max_retries = 3
-            for attempt in range(max_retries):
-                response = session.get(url, headers=headers, timeout=self.timeout, allow_redirects=True)
-                if response.status_code == 200:
-                    break
-                elif response.status_code == 202:
-                    if attempt < max_retries - 1:
-                        wait_time = 1.0 * (2 ** attempt)
-                        time.sleep(wait_time)
-                    else:
-                        return []
-                else:
-                    return []
-
-            if response.status_code != 200:
+            # Use the generic retry mechanism (202 is DDG's rate-limit indicator)
+            response = self._retry_request(
+                session, "GET", url, headers, self.timeout,
+                retry_on_status={202, 429, 502, 503, 504},
+            )
+            if response is None or response.status_code != 200:
                 return []
             return self._parse_ddg_results(response.text, max_results)
         except Exception as e:
@@ -352,6 +589,87 @@ class HTTPSearchBackend(SearchBackend):
             logger.warning(f"Failed to parse DuckDuckGo results: {e}")
         return results
 
+    # ------------------------------------------------------------------
+    # Engine: SearXNG (meta-search)
+    # ------------------------------------------------------------------
+
+    def _search_searxng(self, session, query: str, max_results: int) -> list[dict]:
+        """Search via SearXNG public instances (JSON API) with fallback.
+
+        Tries each configured instance in order; returns results from the
+        first one that succeeds.
+        """
+        for instance_base in self.SEARXNG_INSTANCES:
+            try:
+                url = f"{instance_base}/search?q={quote_plus(query)}&format=json"
+                headers = {
+                    "Accept": "application/json",
+                    "User-Agent": self.user_agent,
+                }
+                response = self._retry_request(
+                    session, "GET", url, headers, timeout=10.0,
+                )
+                if response is None or response.status_code != 200:
+                    logger.debug(
+                        f"SearXNG instance {instance_base} returned "
+                        f"status {response.status_code if response else 'None'}"
+                    )
+                    continue
+
+                results = self._parse_searxng_results(response.text, max_results)
+                if results:
+                    return results
+            except Exception as e:
+                logger.debug(f"SearXNG instance {instance_base} failed: {e}")
+                continue
+
+        logger.info("All SearXNG instances failed")
+        return []
+
+    def _parse_searxng_results(self, response_text: str, max_results: int) -> list[dict]:
+        """Parse SearXNG JSON response.
+
+        Expected JSON structure:
+        {
+            "results": [
+                {
+                    "title": "...",
+                    "url": "...",
+                    "content": "..."   # snippet
+                },
+                ...
+            ]
+        }
+        """
+        results = []
+        try:
+            data = json.loads(response_text)
+            raw_results = data.get("results", [])
+            for item in raw_results:
+                if len(results) >= max_results:
+                    break
+                title = (item.get("title") or "").strip()
+                url = (item.get("url") or "").strip()
+                snippet = (item.get("content") or "").strip()
+
+                if title and url and url.startswith(("http://", "https://")):
+                    results.append({
+                        "title": title,
+                        "url": url,
+                        "snippet": snippet,
+                        "content": "",
+                        "relevance_score": 0.55 - (len(results) * 0.05),
+                        "source_type": "web",
+                        "provider": "searxng",
+                    })
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            logger.warning(f"Failed to parse SearXNG results: {e}")
+        return results
+
+    # ------------------------------------------------------------------
+    # httpx fallback (no curl_cffi)
+    # ------------------------------------------------------------------
+
     def _search_with_httpx(self, query: str, max_results: int) -> list[dict]:
         """Fallback search using httpx (no TLS fingerprinting)."""
         try:
@@ -361,10 +679,15 @@ class HTTPSearchBackend(SearchBackend):
             with httpx.Client(timeout=self.timeout, follow_redirects=True) as client:
                 response = client.get(url, headers=headers)
                 if response.status_code == 200:
-                    return self._parse_ddg_results(response.text, max_results)
+                    results = self._parse_ddg_results(response.text, max_results)
+                    return [r for r in results if self._validate_result(r)]
         except Exception as e:
             logger.error(f"httpx fallback search failed: {e}")
         return []
+
+    # ------------------------------------------------------------------
+    # Content extraction
+    # ------------------------------------------------------------------
 
     async def extract_content(self, url: str) -> Optional[str]:
         """Extract text content from a URL."""

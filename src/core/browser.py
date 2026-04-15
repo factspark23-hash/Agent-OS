@@ -623,25 +623,25 @@ class AgentBrowser:
             # Save cookies before closing
             try:
                 await self._save_cookies("default")
-            except Exception:
-                pass
+            except Exception as cookie_err:
+                logger.warning(f"Failed to save cookies during recovery: {cookie_err}")
 
             # Close old browser
             try:
                 if self.context:
                     await self.context.close()
-            except Exception:
-                pass
+            except Exception as ctx_err:
+                logger.debug(f"Context close error during recovery: {ctx_err}")
             try:
                 if self.browser:
                     await self.browser.close()
-            except Exception:
-                pass
+            except Exception as br_err:
+                logger.debug(f"Browser close error during recovery: {br_err}")
             try:
                 if self.playwright:
                     await self.playwright.stop()
-            except Exception:
-                pass
+            except Exception as pw_err:
+                logger.debug(f"Playwright stop error during recovery: {pw_err}")
 
             # Clear state
             self.browser = None
@@ -881,16 +881,53 @@ class AgentBrowser:
             "note": "Popular page accessible when homepage blocked",
         },
         "twitter.com": {
-            "fallback_url": "https://nitter.net",
-            "note": "Nitter is a lightweight Twitter frontend without tracking",
+            "fallback_url": "https://x.com/explore",
+            "note": "Explore page is publicly accessible without login",
+            "extra_wait_ms": 3000,
+            "stealth_profile": "chrome146",
         },
         "x.com": {
-            "fallback_url": "https://nitter.net",
-            "note": "Nitter fallback for X/Twitter",
+            "fallback_url": "https://x.com/explore",
+            "note": "Explore page is publicly accessible without login",
+            "extra_wait_ms": 3000,
+            "stealth_profile": "chrome146",
         },
         "instagram.com": {
-            "fallback_url": "https://www.instagram.com/?hl=en",
-            "note": "Explicit English locale helps bypass some geo-challenges",
+            "fallback_url": "https://www.instagram.com/explore/",
+            "note": "Explore page accessible without login, uses English locale",
+            "extra_wait_ms": 4000,
+            "stealth_profile": "chrome146",
+            "disable_images": False,
+        },
+        "facebook.com": {
+            "fallback_url": "https://www.facebook.com/watch/",
+            "note": "Watch page is publicly accessible without login",
+            "extra_wait_ms": 4000,
+            "stealth_profile": "chrome146",
+        },
+        "linkedin.com": {
+            "fallback_url": "https://www.linkedin.com/jobs/",
+            "note": "Jobs page is publicly accessible without login",
+            "extra_wait_ms": 3000,
+            "stealth_profile": "chrome146",
+        },
+        "tiktok.com": {
+            "fallback_url": "https://www.tiktok.com/explore",
+            "note": "Explore page accessible without login",
+            "extra_wait_ms": 3000,
+            "stealth_profile": "chrome146",
+        },
+        "threads.net": {
+            "fallback_url": "https://www.threads.net/",
+            "note": "Threads homepage accessible without login",
+            "extra_wait_ms": 3000,
+            "stealth_profile": "chrome146",
+        },
+        "youtube.com": {
+            "fallback_url": "https://www.youtube.com/",
+            "note": "YouTube homepage accessible without login",
+            "extra_wait_ms": 2000,
+            "stealth_profile": "chrome146",
         },
         "bloomberg.com": {
             "fallback_url": "https://www.bloomberg.com/markets",
@@ -1031,7 +1068,7 @@ class AgentBrowser:
             # Fallback to legacy cloudscraper
             if self._evasion.cloudflare.available:
                 logger.info("Falling back to legacy cloudscraper...")
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 cf_data = await loop.run_in_executor(
                     None, self._evasion.cloudflare.get_clearance_cookies, url
                 )
@@ -2869,23 +2906,23 @@ class AgentBrowser:
                 pass
         try:
             await self._flush_cookies("default")
-        except Exception:
-            pass
+        except Exception as flush_err:
+            logger.warning(f"Final cookie flush failed during shutdown: {flush_err}")
         try:
             if self.context:
                 await self.context.close()
-        except Exception:
-            pass
+        except Exception as ctx_err:
+            logger.debug(f"Context close error during shutdown: {ctx_err}")
         try:
             if self.browser:
                 await self.browser.close()
-        except Exception:
-            pass
+        except Exception as br_err:
+            logger.debug(f"Browser close error during shutdown: {br_err}")
         try:
             if self.playwright:
                 await self.playwright.stop()
-        except Exception:
-            pass
+        except Exception as pw_err:
+            logger.debug(f"Playwright stop error during shutdown: {pw_err}")
         # Stop TLS proxy (must happen after browser close to release the port)
         try:
             if self._tls_proxy:
@@ -2905,11 +2942,14 @@ class AgentBrowser:
         try:
             if self._proxy_manager:
                 await self._proxy_manager.stop()
-        except Exception:
-            pass
+        except Exception as pm_err:
+            logger.debug(f"Proxy manager stop error: {pm_err}")
         # Stop Firefox fallback engine
         if self._firefox_engine:
-            await self._firefox_engine.stop()
+            try:
+                await self._firefox_engine.stop()
+            except Exception as ff_err:
+                logger.debug(f"Firefox engine stop error: {ff_err}")
         logger.info("Browser stopped (all engines)")
 
     async def tls_get(self, url: str, **kwargs) -> Dict[str, Any]:
