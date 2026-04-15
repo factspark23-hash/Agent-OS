@@ -11,3 +11,7 @@ node_modules/
 __pycache__/
 .pytest_cache/
 venv/
+lib/
+__pycache__/
+*.pyc
+stress_test_v2_results.json
