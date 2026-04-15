@@ -17,7 +17,16 @@ class Deduplicator:
         self.similarity_threshold = similarity_threshold
 
     def deduplicate(self, results: list[AgentResult]) -> list[AgentResult]:
-        """Remove duplicate and near-duplicate results."""
+        """Remove duplicate and near-duplicate results.
+
+        Dedup rules (in priority order):
+        1. Same/similar URL → duplicate (regardless of title)
+        2. Very similar title AND same domain → duplicate
+        3. Very similar content (>0.9) AND same domain → duplicate
+
+        Titles from DIFFERENT domains are never considered duplicates,
+        because different sources covering the same topic is not duplication.
+        """
         if len(results) <= 1:
             return results
 
@@ -26,16 +35,24 @@ class Deduplicator:
         for result in results[1:]:
             is_duplicate = False
             for existing in unique:
+                # Rule 1: URL similarity always trumps
                 if self._urls_similar(result.url, existing.url):
                     is_duplicate = True
                     break
-                if self._texts_similar(result.title, existing.title, self.similarity_threshold):
-                    is_duplicate = True
-                    break
-                if result.content and existing.content:
-                    if self._texts_similar(result.content[:500], existing.content[:500], 0.9):
+
+                # Rule 2 & 3: Title/content similarity only counts on same domain
+                result_domain = self._extract_domain(self._normalize_url(result.url))
+                existing_domain = self._extract_domain(self._normalize_url(existing.url))
+                same_domain = bool(result_domain and existing_domain and result_domain == existing_domain)
+
+                if same_domain:
+                    if self._texts_similar(result.title, existing.title, self.similarity_threshold):
                         is_duplicate = True
                         break
+                    if result.content and existing.content:
+                        if self._texts_similar(result.content[:500], existing.content[:500], 0.9):
+                            is_duplicate = True
+                            break
             if not is_duplicate:
                 unique.append(result)
 

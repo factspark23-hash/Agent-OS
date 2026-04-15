@@ -28,14 +28,19 @@ class QueryClassification:
 
 # Web search patterns - high confidence triggers
 WEB_PATTERNS = [
-    (r"(?i)\b(latest|recent|current|today|now)\b.{0,20}\b(news|update|price|weather|stock|score|result|release|version)\b", 0.95),
-    (r"(?i)\b(news|update|price|weather|stock|score|result|release|version)\b.{0,20}\b(latest|recent|current|today|now)\b", 0.93),
+    (r"(?i)\b(latest|recent|current|today|now)\b.{0,20}\b(news|update|price|weather|stock|score|result|releases?|version)\b", 0.95),
+    (r"(?i)\b(nba|nfl|mlb|nhl|fifa)\b.{0,15}\b(scores?|standings|results?|game|match|playoffs?|highlights?)\b", 0.95),
+    (r"(?i)\b(scores?|standings|results?)\b.{0,15}\b(nba|nfl|mlb|nhl|fifa)\b", 0.94),
+    (r"(?i)\b(news|update|price|weather|stock|score|result|releases?|version)\b.{0,20}\b(latest|recent|current|today|now)\b", 0.93),
     (r"(?i)\b(this\s+(week|month|year))\b.*\b(news|update|release|event)\b", 0.90),
     (r"(?i)\b(2024|2025|2026)\b.*\b(release|launch|announce|update)\b", 0.88),
     (r"(?i)\b(live|real.?time|realtime)\b", 0.92),
     (r"(?i)\b(stock\s+price|exchange\s+rate|market\s+(cap|price))\b", 0.93),
     (r"(?i)\b(weather|temperature|forecast)\b.*\b(today|now|current|tomorrow)\b", 0.94),
     (r"(?i)\b(score|standings|results?)\b.*\b(game|match|sports|nba|nfl|premier)\b", 0.90),
+    (r"(?i)\b(premier|nba|nfl|league|series)\b.{0,15}\b(standings|score|results?|table|rankings?)\b", 0.91),
+    (r"(?i)\b(game|match|sports?)\b.{0,15}\b(score|standings|results?|highlight|live)\b", 0.90),
+    (r"(?i)\b(cricket|tennis|football|basketball|baseball|hockey|soccer)\b.{0,15}\b(score|match|game|result|live)\b", 0.91),
     (r"(?i)\b(find|search|look\s+up|google|lookup)\b", 0.85),
     (r"(?i)\b(where\s+(to|can|is))\b.*\b(buy|find|download|watch|read)\b", 0.85),
     (r"(?i)\b(how\s+much|what\s+(is\s+the\s+)?price|cost\s+of)\b", 0.88),
@@ -48,6 +53,9 @@ WEB_PATTERNS = [
     (r"(?i)\b(date|time|when)\b.{0,20}\b(release|launch|version|update)\b", 0.86),
     (r"(?i)\b(near\s+me|nearby|closest)\b", 0.91),
     (r"(?i)\b(hours|open|closed|schedule)\b.*\b(today|now|sunday|monday)\b", 0.89),
+    (r"(?i)\b(current\s+events)\b", 0.91),
+    (r"(?i)\b(what\s+happened)\b.{0,10}\b(today|this\s+week|recently|lately)\b", 0.92),
+    (r"(?i)\b(recent)\b.{0,20}\b(releases?|news|update|development|event)\b", 0.90),
     (r"(?i)\b(breaking|developing|urgent|just\s+in)\b", 0.96),
     (r"(?i)\b(outage|down|incident|alert)\b", 0.90),
     (r"(?i)\b(how\s+to\s+(install|setup|configure|deploy|use))\b", 0.82),
@@ -57,6 +65,7 @@ WEB_PATTERNS = [
     (r"(?i)\b(python|javascript|java|typescript|rust|golang|ruby|php)\b.{0,20}\b(install|setup|tutorial|guide|learn)\b", 0.81),
     (r"(?i)\b(news|update|release|announce|launch)\b", 0.75),
     (r"(?i)\b(price|cost|rate|fee)\b", 0.73),
+    (r"(?i)\b(discount|deal|offer|sale|coupon)\b", 0.82),
     (r"(?i)\b(download|install|tutorial)\b", 0.72),
     # Social media patterns
     (r"(?i)\b(instagram|twitter|facebook|tiktok|linkedin|threads)\b", 0.92),
@@ -68,24 +77,27 @@ WEB_PATTERNS = [
     # Finance/crypto patterns
     (r"(?i)\b(bitcoin|ethereum|crypto|btc|eth)\b", 0.90),
     (r"(?i)\b(stock|market|trading|portfolio)\b", 0.85),
+    (r"(?i)\b(nasdaq|dow\s+jones|s&p\s*500|nifty|sensex)\b", 0.88),
     # AI/ML patterns
     (r"(?i)\b(ai|artificial\s+intelligence|machine\s+learning|deep\s+learning|llm|gpt|chatbot)\b", 0.85),
     (r"(?i)\b(neural\s+network|transformer|diffusion|openai|claude|gemini)\b", 0.88),
     # Jobs/career patterns
     (r"(?i)\b(job|career|hiring|salary|position|employment|recruitment)\b", 0.82),
+    (r"(?i)\b(freelance|resume|interview|cover\s+letter|remote\s+work)\b", 0.81),
     # Entertainment patterns
     (r"(?i)\b(movie|film|tv\s+show|series|netflix|spotify|streaming)\b", 0.80),
     # Travel patterns
     (r"(?i)\b(travel|hotel|flight|vacation|booking|tourist|trip)\b", 0.80),
     # Health patterns
     (r"(?i)\b(health|medical|disease|symptom|treatment|doctor|medicine)\b", 0.82),
+    (r"(?i)\b(vaccine|vaccination|clinical|trial|patient|diagnosis|hospital|pharma)\b", 0.83),
 ]
 
 KNOWLEDGE_PATTERNS = [
-    (r"(?i)\b(what\s+is|define|definition\s+of|meaning\s+of|explain)\b", 0.80),
+    (r"(?i)\b(what\s+is|define|definition\s+of|meaning\s+of|explain)\b", 0.92),
     (r"(?i)\b(how\s+(does|do|to))\b(?!.+\b(now|today|current)\b)", 0.75),
     (r"(?i)\b(why\s+(is|does|do|are|did))\b", 0.70),
-    (r"(?i)\b(history\s+of|origin\s+of|who\s+invented|when\s+was.*invented)\b", 0.78),
+    (r"(?i)\b(history\s+of|origin\s+of|who\s+invented|when\s+was.*invented)\b", 0.90),
     (r"(?i)\b(translate|synonym|antonym)\b", 0.85),
     (r"(?i)\b(formula\s+for|equation\s+for)\b", 0.82),
 ]
@@ -99,11 +111,15 @@ CALCULATION_PATTERNS = [
 ]
 
 CODE_PATTERNS = [
-    (r"(?i)\b(write|create|generate|build)\b.*\b(code|program|script|function|class|module)\b", 0.88),
-    (r"(?i)\b(python|javascript|java|cpp|rust|typescript|golang|ruby)\b.*\b(code|example|snippet|program)\b", 0.85),
-    (r"(?i)\b(debug|fix|refactor|optimize)\b.*\b(code|bug|error|issue)\b", 0.83),
+    (r"(?i)\b(write|create|generate|build)\b.*\b(code|program|script|function|class|module|api|rest|endpoint|service)\b", 0.88),
+    (r"(?i)(?:python|javascript|java|cpp|rust|typescript|golang|ruby|c\+\+|c#|sql|node\.?js).{0,30}(?:code|example|snippet|program|query|api)", 0.85),
+    (r"(?i)\b(debug|fix|refactor|optimize)\b.*\b(code|bug|error|issue|query|performance|sql|database)\b", 0.83),
     (r"(?i)\b(how\s+to\s+(implement|code|write|create))\b", 0.82),
-    (r"(?i)\b(implement|code|write|create)\b.*\b(in\s+(python|javascript|java|cpp|rust|typescript|golang|ruby|c\+\+|c#))\b", 0.87),
+    (r"(?i)\b(implement|code|write|create)\b.*\bin\s+(python|javascript|java|cpp|rust|typescript|golang|ruby|c\+\+|c#|node\.?js|sql)", 0.87),
+    (r"(?i)\b(implement|code|write|create|build)\b.{0,30}(?:python|javascript|java|cpp|rust|typescript|golang|ruby|c\+\+|c#|sql|rest|api|node\.?js)", 0.85),
+    (r"(?i)\b(rest\s+api|graphql|endpoint|microservice|backend)\b.{0,20}\b(create|build|implement|develop|node|python|java)\b", 0.86),
+    (r"(?i)\b(create|build|develop)\b.{0,20}\b(rest\s+api|graphql|endpoint|microservice|backend|webhook)\b", 0.86),
+    (r"(?i)\b(optimize|tune|improve)\b.{0,20}\b(sql|query|database|performance|latency|throughput)\b", 0.84),
 ]
 
 CATEGORY_AGENTS = {
@@ -143,7 +159,13 @@ class RuleBasedRouter:
         self.compiled_code = [(re.compile(p), c) for p, c in CODE_PATTERNS]
 
     def classify(self, query: str) -> QueryClassification:
-        """Classify a query using rule-based pattern matching."""
+        """Classify a query using rule-based pattern matching.
+        
+        Priority order: calculation > code > knowledge > web.
+        Knowledge is checked BEFORE web so that high-confidence knowledge
+        patterns (define, history, explain) win over lower-confidence
+        web patterns triggered by incidental keywords (AI, machine learning).
+        """
         best_match = self._match_patterns(query, self.compiled_calculation, QueryCategory.NEEDS_CALCULATION)
         if best_match and best_match.confidence >= self.confidence_threshold:
             best_match.suggested_agents = self._suggest_agents(query, QueryCategory.NEEDS_CALCULATION)
@@ -156,16 +178,16 @@ class RuleBasedRouter:
             best_match.search_queries = self._generate_search_queries(query, QueryCategory.NEEDS_CODE)
             return best_match
 
-        best_match = self._match_patterns(query, self.compiled_web, QueryCategory.NEEDS_WEB)
-        if best_match and best_match.confidence >= self.confidence_threshold:
-            best_match.suggested_agents = self._suggest_agents(query, QueryCategory.NEEDS_WEB)
-            best_match.search_queries = self._generate_search_queries(query, QueryCategory.NEEDS_WEB)
-            return best_match
-
         best_match = self._match_patterns(query, self.compiled_knowledge, QueryCategory.NEEDS_KNOWLEDGE)
         if best_match and best_match.confidence >= self.confidence_threshold:
             best_match.suggested_agents = self._suggest_agents(query, QueryCategory.NEEDS_KNOWLEDGE)
             best_match.search_queries = self._generate_search_queries(query, QueryCategory.NEEDS_KNOWLEDGE)
+            return best_match
+
+        best_match = self._match_patterns(query, self.compiled_web, QueryCategory.NEEDS_WEB)
+        if best_match and best_match.confidence >= self.confidence_threshold:
+            best_match.suggested_agents = self._suggest_agents(query, QueryCategory.NEEDS_WEB)
+            best_match.search_queries = self._generate_search_queries(query, QueryCategory.NEEDS_WEB)
             return best_match
 
         return QueryClassification(
@@ -212,6 +234,8 @@ class RuleBasedRouter:
                 return agents_map.get("social", agents_map["default"])
             elif any(kw in query_lower for kw in ["stock", "market", "crypto", "bitcoin", "investment", "portfolio", "trading", "nasdaq", "dow jones", "share price", "dividend", "ipo"]):
                 return agents_map.get("finance", agents_map["default"])
+            elif any(kw in query_lower for kw in ["travel", "hotel", "flight", "vacation", "booking", "tourist", "attraction", "trip"]):
+                return agents_map.get("travel", agents_map["default"])
             elif any(kw in query_lower for kw in ["price", "cost", "buy", "cheap", "discount", "deal"]):
                 return agents_map.get("price", agents_map["default"])
             elif any(kw in query_lower for kw in ["news", "update", "breaking", "headline"]):
@@ -228,8 +252,6 @@ class RuleBasedRouter:
                 return agents_map.get("sports", agents_map["default"])
             elif any(kw in query_lower for kw in ["movie", "film", "tv show", "series", "music", "song", "album", "gaming", "actor", "celebrity", "streaming", "netflix", "spotify"]):
                 return agents_map.get("entertainment", agents_map["default"])
-            elif any(kw in query_lower for kw in ["travel", "hotel", "flight", "vacation", "booking", "tourist", "attraction", "trip"]):
-                return agents_map.get("travel", agents_map["default"])
             elif any(kw in query_lower for kw in ["weather", "temperature", "rain", "forecast"]):
                 return agents_map.get("weather", agents_map["default"])
             return agents_map["default"]

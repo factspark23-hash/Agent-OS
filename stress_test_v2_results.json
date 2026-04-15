@@ -1,0 +1,12 @@
+{
+  "version": "2.0.0",
+  "timestamp": 1776224136.3403375,
+  "summary": {
+    "total": 417,
+    "passed": 417,
+    "failed": 0,
+    "success_rate_pct": 100.0,
+    "elapsed_seconds": 0.5
+  },
+  "failures": []
+}
