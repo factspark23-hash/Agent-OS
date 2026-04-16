@@ -472,8 +472,9 @@ Object.defineProperty(window, 'devicePixelRatio', {{
 // Override getExtension to return the REAL extension objects.
 // We only need to spoof getParameter — the real extension has a
 // proper constructor and prototype that detection scripts check.
-// Returning a fake {{ UNMASKED_VENDOR_WEBGL: 37445, ... }} plain object
-// is detectable because it lacks the native prototype chain.
+// Returning a fake plain object (without the native prototype chain)
+// is detectable. Instead, we pass through to the real extension
+// and only override getParameter for vendor/renderer values.
 const origGetExtension = WebGLRenderingContext.prototype.getExtension;
 WebGLRenderingContext.prototype.getExtension = makeNative(function(name) {{
     // Return the REAL extension — getParameter spoofing handles the rest

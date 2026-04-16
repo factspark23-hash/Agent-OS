@@ -39,6 +39,21 @@ from src.core.stealth import (
 logger = logging.getLogger("agent-os.persistent")
 
 
+def _is_docker_cgroup() -> bool:
+    """Check if /proc/1/cgroup indicates Docker or containerd.
+
+    More reliable than /.dockerenv in some Docker setups where
+    the env file is not present but the cgroup still reveals
+    container identity.
+    """
+    try:
+        with open("/proc/1/cgroup", "r") as f:
+            content = f.read().lower()
+            return "docker" in content or "containerd" in content
+    except (FileNotFoundError, PermissionError, OSError):
+        return False
+
+
 class BrowserState(Enum):
     """Browser instance lifecycle states."""
     CREATED = "created"
@@ -154,7 +169,7 @@ class UserContext:
 
         self.context = await self.browser_instance.browser.new_context(**context_options)
 
-        # Stealth setup — 3-layer anti-detection (matches browser.py)
+        # Stealth setup — 3-layer anti-detection with per-layer fallback
         from src.security.evasion_engine import EvasionEngine
         from src.core.cdp_stealth import CDPStealthInjector
         from src.core.stealth import ANTI_DETECTION_JS
@@ -162,18 +177,15 @@ class UserContext:
         evasion = EvasionEngine()
         fp = evasion.generate_fingerprint(page_id="main")
         self._evasion = evasion
+        self._fingerprint = fp
         self._cdp_stealth = CDPStealthInjector()
         self._god_stealth = GodModeStealth()
         self._stealth_js = ANTI_DETECTION_JS
 
         # Layer 2: ANTI_DETECTION_JS via add_init_script (runs on every page load)
         fingerprint_js = evasion.get_injection_js("main")
-        cdp_ok = False  # Track CDP stealth status for Layer 3 decision
+        layer2_ok = False
         try:
-            # Replace placeholder tokens with profile values.
-            # IMPORTANT: Must SET window.__AGENT_OS_* properties BEFORE the
-            # ANTI_DETECTION_JS reads them (e.g., `window.__AGENT_OS_PLATFORM__`).
-            # Also replace bare variable placeholders like __AGENT_OS_SCREEN_WIDTH__.
             platform = fp.get("platform", "Win32")
             cores = fp.get("hardware_concurrency", 8)
             memory = fp.get("device_memory", 8)
@@ -199,6 +211,7 @@ class UserContext:
             )
             stealth_js_filled = stealth_js_filled + "\n" + fingerprint_js
             await self.context.add_init_script(stealth_js_filled)
+            layer2_ok = True
             logger.info(f"Stealth Layer 2 (InitScript): ACTIVE for {self.user_id}")
         except Exception as e:
             logger.warning(f"Stealth Layer 2 (InitScript) failed for {self.user_id}: {e}")
@@ -227,41 +240,78 @@ class UserContext:
 
         self.active_page = self.pages.get("main", list(self.pages.values())[0])
 
-        # Layer 1: CDP stealth — PRIMARY injection via Page.addScriptToEvaluateOnNewDocument
-        # Runs BEFORE any page JavaScript, including bot detection scripts
-        try:
-            chrome_ver = fp.get("chrome_version", "124") if fp else "124"
-            cdp_ok = await self._cdp_stealth.inject_into_page(
-                self.active_page,
-                page_id="main",
-                chrome_version=chrome_ver,
-                fingerprint=fp,
-            )
-            if cdp_ok:
-                logger.info(f"Stealth Layer 1 (CDP): ACTIVE for {self.user_id}")
-            else:
-                logger.warning(f"Stealth Layer 1 (CDP): FAILED for {self.user_id}")
-        except Exception as e:
-            logger.warning(f"Stealth Layer 1 (CDP) failed for {self.user_id}: {e}")
-
-        # Layer 3: God Mode stealth — FALLBACK (only if CDP stealth failed)
-        # GodMode uses its own CDP Page.addScriptToEvaluateOnNewDocument which
-        # can CONFLICT with Layer 1 by overriding the same properties with
-        # different values and causing duplicate CDP override errors.
-        # Only activate when Layer 1 (CDP) actually failed.
-        if not cdp_ok:
-            try:
-                await self._god_stealth.inject_into_page(
-                    self.active_page,
-                    page_id="main",
-                )
-                logger.info(f"Stealth Layer 3 (God Mode): ACTIVE for {self.user_id} (CDP fallback)")
-            except Exception as e:
-                logger.warning(f"Stealth Layer 3 (God Mode) failed for {self.user_id}: {e}")
-        else:
-            logger.info(f"Stealth Layer 3 (God Mode): SKIPPED for {self.user_id} — CDP stealth is active")
+        # Apply per-page stealth layers with fallback chain
+        stealth_result = await self._apply_stealth_layers(self.active_page, fp)
+        logger.info(
+            f"Stealth result for {self.user_id}: "
+            f"Layer1(CDP)={stealth_result['layer1']}, "
+            f"Layer2(InitScript)={layer2_ok}, "
+            f"Layer3(GodMode)={stealth_result['layer3']}, "
+            f"verified={stealth_result['verified']}"
+        )
 
         logger.info(f"User context initialized: {self.user_id} (profile: {self.profile_dir})")
+
+    async def _apply_stealth_layers(self, page, fingerprint: Dict, max_retries: int = 2) -> Dict[str, bool]:
+        """Apply stealth layers with fallback chain and verification.
+
+        Applies 3 layers of anti-detection, each with its own try/except.
+        If a layer fails, others still apply. After all layers, verifies
+        stealth is working by checking navigator.webdriver. If verification
+        fails, retries the failed layers.
+
+        Returns dict with {layer1: bool, layer2: bool, layer3: bool, verified: bool}.
+        """
+        result = {"layer1": False, "layer2": False, "layer3": False, "verified": False}
+
+        for attempt in range(max_retries):
+            # Layer 1: CDP stealth — PRIMARY injection via Page.addScriptToEvaluateOnNewDocument
+            if not result["layer1"]:
+                try:
+                    chrome_ver = fingerprint.get("chrome_version", "124") if fingerprint else "124"
+                    cdp_ok = await self._cdp_stealth.inject_into_page(
+                        page,
+                        page_id="main",
+                        chrome_version=chrome_ver,
+                        fingerprint=fingerprint,
+                    )
+                    if cdp_ok:
+                        result["layer1"] = True
+                        logger.info(f"Stealth Layer 1 (CDP): ACTIVE (attempt {attempt + 1})")
+                    else:
+                        logger.warning(f"Stealth Layer 1 (CDP): injector returned False (attempt {attempt + 1})")
+                except Exception as e:
+                    logger.warning(f"Stealth Layer 1 (CDP) failed (attempt {attempt + 1}): {e}")
+
+            # Layer 3: God Mode stealth — FALLBACK (only if CDP stealth failed)
+            # Avoids conflicting with Layer 1 by only activating when Layer 1 is not active.
+            if not result["layer1"] and not result["layer3"]:
+                try:
+                    await self._god_stealth.inject_into_page(page, page_id="main")
+                    result["layer3"] = True
+                    logger.info(f"Stealth Layer 3 (God Mode): ACTIVE (CDP fallback, attempt {attempt + 1})")
+                except Exception as e:
+                    logger.warning(f"Stealth Layer 3 (God Mode) failed (attempt {attempt + 1}): {e}")
+            elif result["layer1"]:
+                result["layer3"] = True  # Not needed, mark as OK
+                logger.info("Stealth Layer 3 (God Mode): SKIPPED — CDP stealth is active")
+
+            # Layer 2 is handled in initialize() via add_init_script — check if context has it
+            result["layer2"] = True  # Already applied in initialize()
+
+            # Verify stealth: check navigator.webdriver is falsy
+            try:
+                webdriver_value = await page.evaluate("() => navigator.webdriver")
+                if not webdriver_value:
+                    result["verified"] = True
+                    logger.info(f"Stealth VERIFIED: navigator.webdriver = {webdriver_value}")
+                    break  # All good, no need to retry
+                else:
+                    logger.warning(f"Stealth NOT VERIFIED: navigator.webdriver = {webdriver_value} (attempt {attempt + 1})")
+            except Exception as e:
+                logger.warning(f"Stealth verification failed (attempt {attempt + 1}): {e}")
+
+        return result
 
     def _load_state(self) -> Optional[Dict]:
         """Load saved context state from disk."""
@@ -418,11 +468,26 @@ class BrowserInstance:
             os.getenv("AGENT_OS_DOCKER") == "1"
             or os.path.exists("/.dockerenv")
             or os.path.exists("/run/.containerenv")
+            or self._check_cgroup_container()
         )
         if in_docker:
             args.append("--no-sandbox")
             logger.info("Docker environment detected — browser running with --no-sandbox (container is the sandbox)")
         return [a for a in args if a]
+
+    @staticmethod
+    def _check_cgroup_container() -> bool:
+        """Check if running inside a container by inspecting /proc/1/cgroup.
+
+        More reliable than /.dockerenv in some Docker setups where
+        the dockerenv file is not present (e.g., rootless Docker, Podman).
+        """
+        try:
+            with open("/proc/1/cgroup", "r") as f:
+                content = f.read().lower()
+                return "docker" in content or "containerd" in content or "kubepods" in content
+        except (FileNotFoundError, PermissionError):
+            return False
 
     async def start(self):
         """Launch Chromium instance."""

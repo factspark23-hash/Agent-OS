@@ -185,6 +185,20 @@ class CaptchaBypass:
                 return True
         return False
 
+    def detect(self, url: str) -> Optional[str]:
+        """Detect bot detection type for a URL. Alias for combined check + type.
+
+        Args:
+            url: The full URL to check.
+
+        Returns:
+            The detection type string (e.g. "recaptcha", "hcaptcha") if detected,
+            None if the URL is not a bot detection endpoint.
+        """
+        if self.is_bot_detection(url):
+            return self.get_detection_type(url)
+        return None
+
     def get_detection_type(self, url: str) -> str:
         """Identify which type of bot detection this is.
 

@@ -70,7 +70,7 @@ class FormFiller:
 
         # Detect all form fields
         try:
-            fields = await self.browser.evaluate_js("""() => {
+            result = await self.browser.evaluate_js("""() => {
                 const fields = [];
                 document.querySelectorAll('input, textarea, select').forEach(el => {
                     if (el.type === 'hidden' || el.type === 'submit') return;
@@ -81,6 +81,9 @@ class FormFiller:
                         id: el.id || '',
                         placeholder: el.placeholder || '',
                         label: el.labels?.[0]?.textContent?.trim() || '',
+                        aria_label: el.getAttribute('aria-label') || '',
+                        title: el.title || '',
+                        data_testid: el.getAttribute('data-testid') || '',
                         required: el.required,
                         options: el.tagName === 'SELECT'
                             ? Array.from(el.options).map(o => ({value: o.value, text: o.text}))
@@ -89,13 +92,12 @@ class FormFiller:
                 });
                 return fields;
             }""")
-
-            # evaluate_js now returns raw values (list of field dicts, or None)
-            if not fields:
-                fields = []
-            elif not isinstance(fields, list):
-                # Unexpected type — try to handle gracefully
-                logger.warning(f"evaluate_js returned unexpected type: {type(fields)}")
+            # evaluate_js now returns {"status": ..., "result": ...} — unwrap
+            if isinstance(result, dict) and result.get("status") == "success":
+                fields = result.get("result", [])
+            elif isinstance(result, list):
+                fields = result  # backward compat
+            else:
                 fields = []
                 
         except Exception as e:
@@ -170,37 +172,85 @@ class FormFiller:
         if submitted:
             return {"status": "success", "submitted_via": submitted_via}
 
+        # Final fallback: submit form via JavaScript
+        try:
+            js_result = await self.browser.evaluate_js("""
+                const form = document.querySelector('form');
+                if (form) { form.submit(); return true; }
+                return false;
+            """)
+            if isinstance(js_result, dict) and js_result.get("result"):
+                return {"status": "success", "submitted_via": "js_form_submit"}
+        except Exception:
+            pass
+
         return {"status": "error", "error": "Could not find submit button"}
+
+    # Common misspellings mapped to correct field type names
+    MISSPELLING_MAP = {
+        "emial": "email",
+        "e-mail": "email",
+        "fisrtname": "first_name",
+        "firtsname": "first_name",
+        "frist_name": "first_name",
+        "fisrt_name": "first_name",
+        "lastnme": "last_name",
+        "lasname": "last_name",
+        "passowrd": "password",
+        "passwrod": "password",
+        "phonenumber": "phone",
+        "phon": "phone",
+        "adddress": "address",
+        "adress": "address",
+        "zipocde": "zip",
+        "zipcoce": "zip",
+        "contry": "country",
+        "conutry": "country",
+    }
 
     def _match_field(self, field: Dict, profile: Dict) -> Optional[str]:
         """Match a form field to profile data.
 
-        Handles cross-field mappings (e.g., username field can match email profile data).
-        Many sites like Instagram use input[name='email'] for the username field.
+        Multi-strategy matching:
+        1. Check name, id, placeholder, label attributes
+        2. Also check aria-label, title, data-testid attributes
+        3. Fuzzy matching for common misspellings (e.g., "emial" → "email")
+        4. Cross-field mappings (e.g., username field can match email profile data)
         """
         name = (field.get("name") or "").lower()
         id_ = (field.get("id") or "").lower()
         placeholder = (field.get("placeholder") or "").lower()
         label = (field.get("label") or "").lower()
-        combined = f"{name} {id_} {placeholder} {label}"
+        aria_label = (field.get("aria_label") or "").lower()
+        title = (field.get("title") or "").lower()
+        data_testid = (field.get("data_testid") or "").lower()
+        combined = f"{name} {id_} {placeholder} {label} {aria_label} {title} {data_testid}"
 
-        for field_type, patterns in self.FIELD_PATTERNS.items():
-            if any(p in combined for p in patterns):
-                value = profile.get(field_type)
-                if value:
-                    return value
-                # Try cross-field mapping (e.g., username field → email profile data)
-                cross_fields = self.CROSS_FIELD_MAP.get(field_type, [])
-                for cross_field in cross_fields:
-                    cross_value = profile.get(cross_field)
-                    if cross_value:
-                        logger.debug(f"Cross-field match: {field_type} → {cross_field} for field '{name}'")
-                        return cross_value
+        # Apply misspelling corrections to combined text
+        corrected = combined
+        for misspelling, correction in self.MISSPELLING_MAP.items():
+            if misspelling in corrected:
+                corrected = corrected.replace(misspelling, correction)
+
+        # Try matching with both original and corrected text
+        for text in (combined, corrected):
+            for field_type, patterns in self.FIELD_PATTERNS.items():
+                if any(p in text for p in patterns):
+                    value = profile.get(field_type)
+                    if value:
+                        return value
+                    # Try cross-field mapping (e.g., username field → email profile data)
+                    cross_fields = self.CROSS_FIELD_MAP.get(field_type, [])
+                    for cross_field in cross_fields:
+                        cross_value = profile.get(cross_field)
+                        if cross_value:
+                            logger.debug(f"Cross-field match: {field_type} → {cross_field} for field '{name}'")
+                            return cross_value
 
         return None
 
     def _build_selector(self, field: Dict) -> str:
-        """Build a CSS selector for a form field."""
+        """Build a CSS selector for a form field with multi-strategy fallbacks."""
         tag = field.get("tag", "input")
         if field.get("id"):
             return f'#{field["id"]}'
@@ -208,6 +258,16 @@ class FormFiller:
             return f'{tag}[name="{field["name"]}"]'
         if field.get("placeholder"):
             return f'{tag}[placeholder="{field["placeholder"]}"]'
+        # Try aria-label selector
+        if field.get("aria_label"):
+            return f'{tag}[aria-label="{field["aria_label"]}"]'
+        # Try data-testid selector
+        if field.get("data_testid"):
+            return f'{tag}[data-testid="{field["data_testid"]}"]'
+        # Try CSS :has-text pseudo-selector as fallback (for label text)
+        label = field.get("label", "").strip()
+        if label:
+            return f'{tag}:has-text("{label}")'
         return tag
 
 

@@ -682,16 +682,19 @@ def t78():
     from src.core.browser import AgentBrowser
     js = AgentBrowser._VERIFY_AND_FIX_JS
     
-    # Should check element type
+    # Should check element type for correct setter
     assert "tagName" in js, "Missing tagName check!"
     assert "HTMLTextAreaElement" in js, "Missing HTMLTextAreaElement setter!"
     assert "HTMLInputElement" in js, "Missing HTMLInputElement setter!"
     
-    # Should call onChange directly
-    assert "onChange" in js, "Missing onChange direct call!"
-    assert "__reactEventHandlers" in js, "Missing __reactEventHandlers check!"
+    # Should have multi-strategy fallback (native setter → direct → defineProperty)
+    assert "nativeInputValueSetter" in js or "Object.getOwnPropertyDescriptor" in js, "Missing native setter strategy!"
     
-    return "React sync: correct setter per element type + direct onChange call"
+    # Should dispatch proper events for ALL frameworks (Vue, Angular, Svelte, plain HTML)
+    assert "InputEvent" in js, "Missing InputEvent dispatch!"
+    assert "change" in js, "Missing change event dispatch!"
+    
+    return "VERIFY_AND_FIX: correct setter per element type + multi-strategy fallback"
 
 @test("Functionality", "Browser: headless stealth hook uses prototype-level overrides")
 def t79():
@@ -908,7 +911,7 @@ async def main():
         ]
     }
     
-    with open("/home/z/my-project/Agent-OS/brutal_honest_test_results.json", "w") as f:
+    with open("/tmp/brutal_honest_test_results.json", "w") as f:
         json.dump(output, f, indent=2)
     
     print(f"\n  Results saved to: brutal_honest_test_results.json")

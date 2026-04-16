@@ -639,8 +639,11 @@ class AutoRetry:
         """
 
         async def do_fetch():
-            result = await self.browser.evaluate_js(script)
-            # evaluate_js now returns raw values — result is the fetch response dict
+            _resp = await self.browser.evaluate_js(script)
+            # evaluate_js now returns {"status": ..., "result": ...} dict
+            # Unwrap the dual-return contract to get the actual fetch response
+            result = _resp.get("result") if isinstance(_resp, dict) and _resp.get("status") == "success" else _resp
+            # result is the fetch response dict
             # {status: HTTP_STATUS, headers: {...}, data: ...}
             if isinstance(result, dict):
                 http_status = result.get("status", 200)

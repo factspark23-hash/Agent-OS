@@ -118,12 +118,14 @@ class AuthHandler:
         email_sel = None
         password_sel = None
         for sel in email_selectors:
-            el = await browser.evaluate_js(f"""(() => {{ return !!document.querySelector('{sel}'); }})()""")
+            _el_resp = await browser.evaluate_js(f"""(() => {{ return !!document.querySelector('{sel}'); }})()""")
+            el = _el_resp.get("result") if isinstance(_el_resp, dict) and _el_resp.get("status") == "success" else _el_resp
             if el:
                 email_sel = sel
                 break
         for sel in password_selectors:
-            el = await browser.evaluate_js(f"""(() => {{ return !!document.querySelector('{sel}'); }})()""")
+            _el_resp = await browser.evaluate_js(f"""(() => {{ return !!document.querySelector('{sel}'); }})()""")
+            el = _el_resp.get("result") if isinstance(_el_resp, dict) and _el_resp.get("status") == "success" else _el_resp
             if el:
                 password_sel = sel
                 break

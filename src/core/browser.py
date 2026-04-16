@@ -2049,44 +2049,104 @@ class AgentBrowser:
     # ─── Form Fill — Framework-Compatible ───────────────────────
 
     _SET_VALUE_JS = """(el, value) => {
-        // Set value directly and dispatch standard DOM events.
-        // Works with plain HTML forms, Vue, Angular, and any framework
-        // that listens to standard input/change events.
-        el.value = value;
-        // Dispatch input event (triggers Vue v-model, Angular ngModel, etc.)
-        el.dispatchEvent(new InputEvent('input', {
-            bubbles: true,
-            cancelable: true,
-            inputType: 'insertText',
-            data: value
-        }));
-        // Dispatch change event (standard HTML form behavior)
+        // ═══ Multi-strategy value setter ═══
+        // Tries nativeInputValueSetter first (most reliable for controlled
+        // components in Vue/Angular/Svelte), then falls back to direct
+        // assignment. Dispatches a full event chain afterwards so every
+        // mainstream framework picks up the change.
+
+        // Pick the correct setter based on element type
+        const tagName = el.tagName.toLowerCase();
+        let nativeInputValueSetter;
+        if (tagName === 'textarea') {
+            nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                window.HTMLTextAreaElement.prototype, 'value'
+            )?.set;
+        } else if (tagName === 'select') {
+            nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                window.HTMLSelectElement.prototype, 'value'
+            )?.set;
+        } else {
+            nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                window.HTMLInputElement.prototype, 'value'
+            )?.set;
+        }
+
+        if (nativeInputValueSetter) {
+            try { nativeInputValueSetter.call(el, value); } catch(_) { el.value = value; }
+        } else {
+            el.value = value;
+        }
+
+        // Full event chain: input -> change -> blur -> focus
+        el.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: value }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
+        el.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
         el.focus();
         return el.value;
     }"""
 
     _VERIFY_AND_FIX_JS = """(el, expectedValue) => {
-        // Verify value was set correctly and fix if needed.
-        // Sets value directly and dispatches standard DOM events.
+        // ═══ Multi-strategy verify-and-fix ═══
+        // Tries increasingly aggressive approaches until the element's
+        // value matches the expected value. Returns {ok, actual, expected, method}
+        // so callers can tell which strategy succeeded.
+
+        // Early return if already correct
+        if (el.value === expectedValue) {
+            return { ok: true, actual: el.value, expected: expectedValue, method: 'already_correct' };
+        }
+
+        // Strategy 1: nativeInputValueSetter — uses the CORRECT setter for element type
+        // HTMLInputElement and HTMLTextAreaElement have different prototype chains,
+        // so we must pick the right one based on tagName.
+        const tagName = el.tagName.toLowerCase();
+        let nativeInputValueSetter;
+        if (tagName === 'textarea') {
+            nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                window.HTMLTextAreaElement.prototype, 'value'
+            )?.set;
+        } else if (tagName === 'select') {
+            nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                window.HTMLSelectElement.prototype, 'value'
+            )?.set;
+        } else {
+            nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                window.HTMLInputElement.prototype, 'value'
+            )?.set;
+        }
+        if (nativeInputValueSetter) {
+            try {
+                nativeInputValueSetter.call(el, expectedValue);
+                el.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: expectedValue }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                el.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
+                el.focus();
+                if (el.value === expectedValue) {
+                    return { ok: true, actual: el.value, expected: expectedValue, method: 'native_setter' };
+                }
+            } catch(_) {}
+        }
+
+        // Strategy 2: direct value + full event chain
         el.value = expectedValue;
-        // Dispatch standard input + change events
-        el.dispatchEvent(new InputEvent('input', {
-            bubbles: true,
-            cancelable: true,
-            inputType: 'insertText',
-            data: expectedValue
-        }));
+        el.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: expectedValue }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
-        // Focus element
+        el.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
         el.focus();
-        // Verify final value
-        const finalValue = el.value;
-        return {
-            ok: finalValue === expectedValue,
-            actual: finalValue,
-            expected: expectedValue
-        };
+        if (el.value === expectedValue) {
+            return { ok: true, actual: el.value, expected: expectedValue, method: 'direct_value' };
+        }
+
+        // Strategy 3: Object.defineProperty nuclear override + events
+        try {
+            Object.defineProperty(el, 'value', { value: expectedValue, writable: true, configurable: true });
+            el.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: expectedValue }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            el.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
+            el.focus();
+        } catch(_) {}
+        return { ok: el.value === expectedValue, actual: el.value, expected: expectedValue, method: 'define_property' };
     }"""
 
     async def fill_form(self, fields: Dict[str, str], page_id: str = "main") -> Dict[str, Any]:
@@ -2492,7 +2552,7 @@ class AgentBrowser:
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def evaluate_js(self, script: str, page_id: str = "main") -> Any:
+    async def evaluate_js(self, script: str, page_id: str = "main") -> Dict[str, Any]:
         """Execute JavaScript in a sandboxed page context.
 
         Uses Patchright's isolated world execution to prevent user-supplied
@@ -2502,11 +2562,15 @@ class AgentBrowser:
         - Cannot modify global variables in the main world
         - Runs in an isolated V8 context with its own global scope
         - Has a 10-second execution timeout to prevent infinite loops
-        - Catches and raises errors instead of silently failing
 
-        Returns the raw result value (e.g. True, "hello", [1,2,3]).
-        Raises RuntimeError on sandbox errors or timeouts so callers
-        can handle failures explicitly instead of checking dict status.
+        Returns a dict always (dual-return contract):
+        - On success: {"status": "success", "result": <raw_value>}
+        - On sandbox error: {"status": "error", "error": <error_message>}
+        - On exception: {"status": "error", "error": <exception_message>}
+
+        For callers that prefer exception-based control flow, use the
+        ``evaluate_js_raw`` property which wraps this method and raises
+        RuntimeError on failure.
         """
         page = self._pages.get(page_id, self.page)
 
@@ -2538,31 +2602,49 @@ class AgentBrowser:
                 # Sandbox returned a structured result
                 if not result.get("success"):
                     error_msg = result.get("error", "Unknown sandbox error")
-                    raise RuntimeError(f"JS sandbox error: {error_msg}")
-                # Return the RAW value — callers expect the actual data,
-                # not a wrapper dict. This matches the original evaluate_js
-                # behavior before the refactor.
-                return result.get("value")
-            # Unexpected result type (string, number, etc.) — return as-is
-            return result
-        except RuntimeError:
-            # Re-raise sandbox errors so callers can handle them
-            raise
+                    return {"status": "error", "error": error_msg}
+                # Return the value wrapped in the dual-return contract
+                return {"status": "success", "result": result.get("value")}
+            # Unexpected result type (string, number, etc.) — wrap as success
+            return {"status": "success", "result": result}
         except Exception as e:
-            raise RuntimeError(f"JS execution failed: {str(e)}") from e
+            return {"status": "error", "error": str(e)}
 
-    async def evaluate_js_unsafe(self, script: str, page_id: str = "main") -> Any:
+    @property
+    def evaluate_js_raw(self):
+        """Return a callable that wraps evaluate_js but raises on errors.
+
+        Usage:
+            result = await browser.evaluate_js_raw("1+1")
+            # Raises RuntimeError if status == "error"
+        """
+        browser_self = self
+
+        async def _raw(script: str, page_id: str = "main"):
+            resp = await browser_self.evaluate_js(script, page_id)
+            if resp.get("status") == "error":
+                raise RuntimeError(f"JS evaluation failed: {resp.get('error', 'Unknown error')}")
+            return resp.get("result")
+
+        return _raw
+
+    async def evaluate_js_unsafe(self, script: str, page_id: str = "main") -> Dict[str, Any]:
         """Execute JavaScript directly in the page's main world (UNSANDBOXED).
 
         WARNING: This bypasses sandbox protections. Use only for trusted internal
         scripts (stealth injection, DOM snapshots, etc.), never for user-supplied code.
+
+        Returns a dict always:
+        - On success: {"status": "success", "result": <value>}
+        - On failure: {"status": "error", "error": <message>}
         """
         page = self._pages.get(page_id, self.page)
         try:
-            return await page.evaluate(script)
+            value = await page.evaluate(script)
+            return {"status": "success", "result": value}
         except Exception as e:
             logger.error(f"Unsafe JS evaluation failed: {e}")
-            return None
+            return {"status": "error", "error": str(e)}
 
     async def get_dom_snapshot(self, page_id: str = "main") -> str:
         """Get a structured DOM snapshot for agent analysis."""

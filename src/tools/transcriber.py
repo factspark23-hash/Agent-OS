@@ -154,22 +154,25 @@ class Transcriber:
     async def transcribe_from_page(self, browser) -> Dict:
         """Transcribe video on current page (e.g., YouTube)."""
         # Check if there's a video on the page
-        has_video = await browser.evaluate_js("""() => {
+        _has_video_resp = await browser.evaluate_js("""() => {
             return !!document.querySelector('video');
         }""")
+        has_video = _has_video_resp.get("result") if isinstance(_has_video_resp, dict) and _has_video_resp.get("status") == "success" else _has_video_resp
 
         if not has_video:
             return {"status": "error", "error": "No video found on current page"}
 
         # Get video source
-        video_src = await browser.evaluate_js("""() => {
+        _video_src_resp = await browser.evaluate_js("""() => {
             const video = document.querySelector('video');
             return video ? video.src || video.currentSrc : null;
         }""")
+        video_src = _video_src_resp.get("result") if isinstance(_video_src_resp, dict) and _video_src_resp.get("status") == "success" else _video_src_resp
 
         if video_src:
             return await self.transcribe_from_url(video_src)
 
         # For YouTube, extract URL and use yt-dlp
-        url = await browser.evaluate_js("() => window.location.href")
+        _url_resp = await browser.evaluate_js("() => window.location.href")
+        url = _url_resp.get("result") if isinstance(_url_resp, dict) and _url_resp.get("status") == "success" else _url_resp
         return await self.transcribe_from_url(url)

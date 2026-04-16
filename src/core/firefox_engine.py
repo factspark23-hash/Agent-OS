@@ -589,10 +589,14 @@ class FirefoxEngine:
         await page.keyboard.press(key)
         return {"status": "success", "key": key, "engine": "firefox"}
 
-    async def evaluate_js(self, script: str, page_id: str = "main") -> Any:
-        """Execute JavaScript."""
+    async def evaluate_js(self, script: str, page_id: str = "main") -> Dict[str, Any]:
+        """Execute JavaScript — returns {"status": ..., "result"/"error": ...}."""
         page = self._pages.get(page_id, self.page)
-        return await page.evaluate(script)
+        try:
+            value = await page.evaluate(script)
+            return {"status": "success", "result": value}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
 
     async def scroll(self, direction: str = "down", amount: int = 500, page_id: str = "main") -> Dict[str, Any]:
         """Scroll page."""

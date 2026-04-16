@@ -2243,11 +2243,9 @@ class AgentServer:
         )
         try:
             result = await self.browser.evaluate_js(script)
-            # evaluate_js() now returns raw values (True, "hello", [...], etc.)
-            # Wrap in a proper API response for external consumers
-            return {"status": "success", "result": result}
-        except RuntimeError as e:
-            return {"status": "error", "error": str(e)}
+            # evaluate_js() now returns {"status": ..., "result"/"error": ...}
+            # Pass through the dict directly
+            return result
         except Exception as e:
             return {"status": "error", "error": f"Execution failed: {str(e)}"}
 

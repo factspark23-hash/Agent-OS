@@ -71,7 +71,7 @@ class XSSScanner:
         content = await self.browser.get_content()  # noqa: F841
 
         # Find all forms and input fields
-        forms = await self.browser.evaluate_js("""() => {
+        _forms_resp = await self.browser.evaluate_js("""() => {
             const forms = [];
             document.querySelectorAll('form').forEach((form, i) => {
                 const inputs = [];
@@ -91,6 +91,7 @@ class XSSScanner:
             });
             return forms;
         }""")
+        forms = _forms_resp.get("result") if isinstance(_forms_resp, dict) and _forms_resp.get("status") == "success" else _forms_resp
 
         # Test URL parameters
         parsed = urllib.parse.urlparse(url)
@@ -257,7 +258,7 @@ class SQLiScanner:
 
         # Test forms
         await self.browser.navigate(url)
-        forms = await self.browser.evaluate_js("""() => {
+        _forms_resp = await self.browser.evaluate_js("""() => {
             const forms = [];
             document.querySelectorAll('form').forEach((form, i) => {
                 const inputs = [];
@@ -281,6 +282,7 @@ class SQLiScanner:
             });
             return forms;
         }""")
+        forms = _forms_resp.get("result") if isinstance(_forms_resp, dict) and _forms_resp.get("status") == "success" else _forms_resp
 
         for form in (forms or []):
             for inp in form.get("inputs", []):
@@ -351,8 +353,20 @@ class SQLiScanner:
 
             # Check for time-based blind SQLi (if SLEEP payload was used)
             if "SLEEP" in payload and result.get("status") == "success":
-                # If page loaded after SLEEP, might be vulnerable
-                pass
+                # Time-based blind SQLi: if SLEEP(5) caused a delay > 4s,
+                # the server likely executed the SQL SLEEP command.
+                # We check the elapsed time from the navigation result.
+                elapsed = result.get("duration_ms", 0)
+                if elapsed > 4000:
+                    return Vulnerability(
+                        type="SQLi",
+                        url=url,
+                        parameter=param,
+                        payload=payload,
+                        confidence=0.7,
+                        evidence=f"Time-based blind SQLi: SLEEP caused {elapsed:.0f}ms delay",
+                        severity="high"
+                    )
 
         return None
 
