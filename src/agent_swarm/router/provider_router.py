@@ -338,7 +338,12 @@ class ProviderRouter:
                 if attempt < self.max_retries - 1:
                     wait_time = 0.5 * (2 ** attempt)  # 0.5s, 1s, 2s
                     logger.debug(f"Provider retry {attempt + 1}/{self.max_retries} after error: {e}")
-                    time.sleep(wait_time)
+                    import asyncio
+                    try:
+                        loop = asyncio.get_running_loop()
+                        loop.create_task(asyncio.sleep(wait_time))
+                    except RuntimeError:
+                        pass  # No event loop, skip delay
 
         self._failures += 1
         logger.warning(f"Provider classification failed after {self.max_retries} retries: {last_error}")
