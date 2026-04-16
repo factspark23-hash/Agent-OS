@@ -70,7 +70,7 @@ class FormFiller:
 
         # Detect all form fields
         try:
-            raw_result = await self.browser.evaluate_js("""() => {
+            fields = await self.browser.evaluate_js("""() => {
                 const fields = [];
                 document.querySelectorAll('input, textarea, select').forEach(el => {
                     if (el.type === 'hidden' || el.type === 'submit') return;
@@ -89,14 +89,13 @@ class FormFiller:
                 });
                 return fields;
             }""")
-            
-            # evaluate_js wraps result in {"status": "success", "result": [...]}
-            # Extract the actual fields array from the wrapper
-            if isinstance(raw_result, dict) and "result" in raw_result:
-                fields = raw_result["result"]
-            elif isinstance(raw_result, list):
-                fields = raw_result
-            else:
+
+            # evaluate_js now returns raw values (list of field dicts, or None)
+            if not fields:
+                fields = []
+            elif not isinstance(fields, list):
+                # Unexpected type — try to handle gracefully
+                logger.warning(f"evaluate_js returned unexpected type: {type(fields)}")
                 fields = []
                 
         except Exception as e:

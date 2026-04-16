@@ -219,8 +219,9 @@ class SmartNavigator:
             content_result: Dict[str, Any] = {"text": "", "title": ""}
             
             # Wait for JS-heavy sites to fully render before reading content
+            # Keep delay short — networkidle already waits for all network requests
             if wait_until == "networkidle":
-                await asyncio.sleep(random.uniform(1.0, 2.5))
+                await asyncio.sleep(random.uniform(0.3, 0.8))
             
             try:
                 content_result = await self._browser.get_content(page_id="main")

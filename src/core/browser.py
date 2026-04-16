@@ -486,9 +486,14 @@ class AgentBrowser:
             ]
 
             # In Docker containers, Chromium cannot use its own namespace sandbox
-            # because the container itself IS the sandbox. Add --no-sandbox only
-            # when running inside Docker to avoid "namespace sandbox" failures.
-            if os.getenv("AGENT_OS_DOCKER") == "1":
+            # because the container itself IS the sandbox. Auto-detect Docker
+            # via /.dockerenv file or AGENT_OS_DOCKER env var.
+            in_docker = (
+                os.getenv("AGENT_OS_DOCKER") == "1"
+                or os.path.exists("/.dockerenv")
+                or os.path.exists("/run/.containerenv")
+            )
+            if in_docker:
                 self._launch_args.append("--no-sandbox")
                 logger.info("Docker environment detected — browser running with --no-sandbox (container is the sandbox)")
 
@@ -2492,7 +2497,11 @@ class AgentBrowser:
         - Cannot modify global variables in the main world
         - Runs in an isolated V8 context with its own global scope
         - Has a 10-second execution timeout to prevent infinite loops
-        - Catches and returns errors instead of crashing the server
+        - Catches and raises errors instead of silently failing
+
+        Returns the raw result value (e.g. True, "hello", [1,2,3]).
+        Raises RuntimeError on sandbox errors or timeouts so callers
+        can handle failures explicitly instead of checking dict status.
         """
         page = self._pages.get(page_id, self.page)
 
@@ -2521,16 +2530,21 @@ class AgentBrowser:
         try:
             result = await page.evaluate(sandboxed_script)
             if isinstance(result, dict):
-                if result.get("error"):
-                    return {"status": "error", "error": f"Sandbox error: {result['error']}"}
-                if result.get("success"):
-                    value = result.get("value")
-                    if value is not None:
-                        return {"status": "success", "result": value}
-                    return {"status": "success"}
-            return {"status": "success", "result": result}
+                # Sandbox returned a structured result
+                if not result.get("success"):
+                    error_msg = result.get("error", "Unknown sandbox error")
+                    raise RuntimeError(f"JS sandbox error: {error_msg}")
+                # Return the RAW value — callers expect the actual data,
+                # not a wrapper dict. This matches the original evaluate_js
+                # behavior before the refactor.
+                return result.get("value")
+            # Unexpected result type (string, number, etc.) — return as-is
+            return result
+        except RuntimeError:
+            # Re-raise sandbox errors so callers can handle them
+            raise
         except Exception as e:
-            return {"status": "error", "error": f"Execution failed: {str(e)}"}
+            raise RuntimeError(f"JS execution failed: {str(e)}") from e
 
     async def evaluate_js_unsafe(self, script: str, page_id: str = "main") -> Any:
         """Execute JavaScript directly in the page's main world (UNSANDBOXED).

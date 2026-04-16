@@ -96,6 +96,13 @@ DEFAULT_CONFIG = {
         "memory_cap_mb": 4000,
         "auto_restart": True,
     },
+    "swarm": {
+        "enabled": True,
+        "max_workers": 50,
+        "router_threshold": 0.7,
+        "output_format": "json",
+        "max_results": 10,
+    },
     "transcription": {
         "model": "tiny",
         "language": "auto"

@@ -975,6 +975,15 @@ class AgentServer:
         """Sanitize error messages to prevent internal detail leakage (backward-compat wrapper)."""
         return self._sanitize_error_message(error)
 
+    def _error_response(self, error: str, request: web.Request = None, status: int = 400) -> web.json_response:
+        """Return an error response. In debug mode (?debug=1), show raw error details."""
+        debug = False
+        if request is not None:
+            debug = request.query.get("debug", "").strip() in ("1", "true", "yes")
+        if debug:
+            return web.json_response({"status": "error", "error": str(error), "debug": True}, status=status)
+        return web.json_response({"status": "error", "error": self._sanitize_error_message(str(error))}, status=status)
+
     # ─── Agent Swarm Endpoints ─────────────────────────────
 
     async def _init_swarm(self):
@@ -2140,12 +2149,15 @@ class AgentServer:
             "evaluate-js executing arbitrary JavaScript. "
             "This has full page access — use with caution."
         )
-        result = await self.browser.evaluate_js(script)
-        # browser.evaluate_js() already returns {"status": ..., "result": ...}
-        # Pass it through directly to avoid double-wrapping
-        if isinstance(result, dict) and "status" in result:
-            return result
-        return {"status": "success", "result": result}
+        try:
+            result = await self.browser.evaluate_js(script)
+            # evaluate_js() now returns raw values (True, "hello", [...], etc.)
+            # Wrap in a proper API response for external consumers
+            return {"status": "success", "result": result}
+        except RuntimeError as e:
+            return {"status": "error", "error": str(e)}
+        except Exception as e:
+            return {"status": "error", "error": f"Execution failed: {str(e)}"}
 
     async def _cmd_back(self, data: Dict, session) -> Dict:
         return await self.browser.go_back()

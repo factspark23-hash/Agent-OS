@@ -197,8 +197,8 @@ def test_llm_router():
     print("="*80)
     start = time.time()
 
-    # Test ProviderRouter import (was previously LLMRouter/LLMFallbackRouter)
-    from src.agent_swarm.router.llm_fallback import ProviderRouter
+    # Test ProviderRouter import (replaces old LLMRouter/LLMFallbackRouter)
+    from src.agent_swarm.router.provider_router import ProviderRouter
     record("ProviderRouter import", True)
 
     # Test instantiation
@@ -218,7 +218,7 @@ def test_llm_router():
     record("Stats property works", "total_calls" in router.stats, f"stats={list(router.stats.keys())}")
 
     # Test sanitize
-    from src.agent_swarm.router.llm_fallback import _sanitize_query
+    from src.agent_swarm.router.provider_router import _sanitize_query
     clean = _sanitize_query("what is python")
     record("Query sanitization (clean)", clean == "what is python")
 
@@ -241,8 +241,8 @@ def test_orchestrator():
 
     from src.agent_swarm.router.orchestrator import QueryRouter, QueryCategory
 
-    # Test with LLM disabled
-    router = QueryRouter(confidence_threshold=0.7, enable_llm_fallback=False)
+    # Test with provider fallback disabled
+    router = QueryRouter(confidence_threshold=0.7, enable_provider_fallback=False)
     record("QueryRouter instantiation", True)
 
     # Test news routing (Tier 1 should handle)
@@ -277,10 +277,10 @@ def test_orchestrator():
     record("Metrics: total_queries > 0", metrics["total_queries"] > 0,
            f"total={metrics['total_queries']}")
 
-    # Test with LLM enabled but no key (graceful degradation)
-    router_llm = QueryRouter(confidence_threshold=0.7, enable_llm_fallback=True, llm_api_key=None)
-    result = router_llm.route("ambiguous query test")
-    record("Orchestrator with no LLM key: graceful fallback", result is not None,
+    # Test with provider enabled but no key (graceful degradation)
+    router_provider = QueryRouter(confidence_threshold=0.7, enable_provider_fallback=True, provider_api_key=None)
+    result = router_provider.route("ambiguous query test")
+    record("Orchestrator with no provider key: graceful fallback", result is not None,
            f"category={result.category.value}")
 
     dur = (time.time() - start) * 1000
@@ -309,8 +309,8 @@ def test_config():
     record("Config Default Enabled", config.enabled == True)
     record("Config Router Threshold", config.router.confidence_threshold == 0.7)
     record("Config Max Workers", config.agents.max_workers == 50)
-    record("Config Router LLM base_url configured", config.router.llm_base_url is not None,
-           f"base_url={config.router.llm_base_url}")
+    record("Config Router provider base_url configured", config.router.provider_base_url is not None,
+           f"base_url={config.router.provider_base_url}")
 
     # Test from_env
     env_config = SwarmConfig.from_env()
@@ -542,7 +542,7 @@ def test_imports():
         "src.agent_swarm.agents.pool",
         "src.agent_swarm.agents.strategies",
         "src.agent_swarm.router.rule_based",
-        "src.agent_swarm.router.llm_fallback",
+        "src.agent_swarm.router.provider_router",
         "src.agent_swarm.router.orchestrator",
         "src.agent_swarm.router.conservative",
         "src.agent_swarm.output.dedup",

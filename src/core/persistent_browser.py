@@ -153,14 +153,31 @@ class UserContext:
         }
 
         self.context = await self.browser_instance.browser.new_context(**context_options)
-        # Set up request interception for bot detection blocking
+
+        # Stealth setup — 3-layer anti-detection (matches browser.py)
         from src.security.evasion_engine import EvasionEngine
         from src.core.cdp_stealth import CDPStealthInjector
+        from src.core.stealth import ANTI_DETECTION_JS
+        from src.core.stealth_god import GodModeStealth
         evasion = EvasionEngine()
         fp = evasion.generate_fingerprint(page_id="main")
-        await self.context.route("**/*", self._handle_request)
         self._evasion = evasion
         self._cdp_stealth = CDPStealthInjector()
+        self._god_stealth = GodModeStealth()
+        self._stealth_js = ANTI_DETECTION_JS
+
+        # Layer 2: ANTI_DETECTION_JS via add_init_script (runs on every page load)
+        fingerprint_js = evasion.get_injection_js("main")
+        try:
+            # Replace placeholder tokens with profile values
+            stealth_js_filled = self._stealth_js + "\n" + fingerprint_js
+            await self.context.add_init_script(stealth_js_filled)
+            logger.info(f"Stealth Layer 2 (InitScript): ACTIVE for {self.user_id}")
+        except Exception as e:
+            logger.warning(f"Stealth Layer 2 (InitScript) failed for {self.user_id}: {e}")
+
+        # Set up request interception for bot detection blocking
+        await self.context.route("**/*", self._handle_request)
 
         # Restore saved state
         state = self._load_state()
@@ -183,7 +200,19 @@ class UserContext:
 
         self.active_page = self.pages.get("main", list(self.pages.values())[0])
 
-        # Apply CDP stealth — SOLE anti-detection injection
+        # Layer 3: God Mode stealth — ULTIMATE anti-detection fallback
+        # Activated when CDP stealth fails or for sites that detect CDP-level patches
+        try:
+            await self._god_stealth.inject_into_page(
+                self.active_page,
+                page_id="main",
+            )
+            logger.info(f"Stealth Layer 3 (God Mode): ACTIVE for {self.user_id}")
+        except Exception as e:
+            logger.warning(f"Stealth Layer 3 (God Mode) failed for {self.user_id}: {e}")
+
+        # Layer 1: CDP stealth — PRIMARY injection via Page.addScriptToEvaluateOnNewDocument
+        # Runs BEFORE any page JavaScript, including bot detection scripts
         try:
             chrome_ver = fp.get("chrome_version", "124") if fp else "124"
             await self._cdp_stealth.inject_into_page(
@@ -192,9 +221,9 @@ class UserContext:
                 chrome_version=chrome_ver,
                 fingerprint=fp,
             )
-            logger.info(f"CDP stealth applied to active page for {self.user_id}")
+            logger.info(f"Stealth Layer 1 (CDP): ACTIVE for {self.user_id}")
         except Exception as e:
-            logger.warning(f"CDP stealth injection failed: {e}")
+            logger.warning(f"Stealth Layer 1 (CDP) failed for {self.user_id}: {e}")
 
         logger.info(f"User context initialized: {self.user_id} (profile: {self.profile_dir})")
 
@@ -347,10 +376,16 @@ class BrowserInstance:
             "--process-per-site",
         ]
         # In Docker containers, Chromium cannot use its own namespace sandbox
-        # because the container itself IS the sandbox. Add --no-sandbox only
-        # when running inside Docker to avoid "namespace sandbox" failures.
-        if os.getenv("AGENT_OS_DOCKER") == "1":
+        # because the container itself IS the sandbox. Auto-detect Docker
+        # via /.dockerenv file or AGENT_OS_DOCKER env var.
+        in_docker = (
+            os.getenv("AGENT_OS_DOCKER") == "1"
+            or os.path.exists("/.dockerenv")
+            or os.path.exists("/run/.containerenv")
+        )
+        if in_docker:
             args.append("--no-sandbox")
+            logger.info("Docker environment detected — browser running with --no-sandbox (container is the sandbox)")
         return [a for a in args if a]
 
     async def start(self):

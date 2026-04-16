@@ -640,8 +640,17 @@ class AutoRetry:
 
         async def do_fetch():
             result = await self.browser.evaluate_js(script)
-            if isinstance(result, dict) and result.get("status", 200) >= 400:
-                raise Exception(f"HTTP {result.get('status')}: {str(result.get('data', ''))[:200]}")
+            # evaluate_js now returns raw values — result is the fetch response dict
+            # {status: HTTP_STATUS, headers: {...}, data: ...}
+            if isinstance(result, dict):
+                http_status = result.get("status", 200)
+                # HTTP status could be int (fetch response) or string (error)
+                if isinstance(http_status, int) and http_status >= 400:
+                    raise Exception(f"HTTP {http_status}: {str(result.get('data', ''))[:200]}")
+                # If status is 0, fetch itself failed (network error)
+                if http_status == 0:
+                    error_msg = result.get("error", "Network error")
+                    raise Exception(f"Fetch failed: {error_msg}")
             return result
 
         return await self.execute(
