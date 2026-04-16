@@ -2009,175 +2009,41 @@ class AgentBrowser:
 
         return None, None
 
-    # ─── React-Compatible Form Fill ──────────────────────────────
+    # ─── Form Fill — Framework-Compatible ───────────────────────
 
-    _REACT_SYNC_JS = """(el, value) => {
-        // ── Strategy 1: Use React's internal setter ──
-        // React 16+ stores internal state via the native value property descriptor.
-        // By calling the ORIGINAL setter, we bypass React's interception and
-        // set the DOM value directly. Then we MUST dispatch React-compatible
-        // events so React's internal state reconciles with the DOM.
-        // CRITICAL: Use correct setter for element type.
-        const tagName = el.tagName.toLowerCase();
-        let nativeInputValueSetter;
-        if (tagName === 'textarea') {
-            nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
-        } else {
-            nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-        }
-
-        if (nativeInputValueSetter) {
-            nativeInputValueSetter.call(el, value);
-        } else {
-            // No setter — just set value directly
-            el.value = value;
-        }
-
-        // ── Strategy 2: Dispatch React-compatible events ──
-        // React listens for 'input' events on controlled components.
-        // The event MUST have { bubbles: true } because React uses
-        // event delegation at the document root.
-        const inputEvent = new InputEvent('input', {
+    _SET_VALUE_JS = """(el, value) => {
+        // Set value directly and dispatch standard DOM events.
+        // Works with plain HTML forms, Vue, Angular, and any framework
+        // that listens to standard input/change events.
+        el.value = value;
+        // Dispatch input event (triggers Vue v-model, Angular ngModel, etc.)
+        el.dispatchEvent(new InputEvent('input', {
             bubbles: true,
             cancelable: true,
             inputType: 'insertText',
             data: value
-        });
-        el.dispatchEvent(inputEvent);
-
-        // Also dispatch 'change' for non-React frameworks
+        }));
+        // Dispatch change event (standard HTML form behavior)
         el.dispatchEvent(new Event('change', { bubbles: true }));
-
-        // ── Strategy 3: Trigger React's internal fiber update ──
-        // Find React's event handler and call onChange directly.
-        const reactEventHandlerKey = Object.keys(el).find(k =>
-            k.startsWith('__reactEventHandlers')
-        );
-        if (reactEventHandlerKey) {
-            const handler = el[reactEventHandlerKey];
-            if (handler && typeof handler.onChange === 'function') {
-                try {
-                    const syntheticEvent = {
-                        type: 'change',
-                        target: el,
-                        currentTarget: el,
-                        bubbles: true,
-                        cancelable: true,
-                        defaultPrevented: false,
-                        isDefaultPrevented: function() { return false; },
-                        isPropagationStopped: function() { return false; },
-                        preventDefault: function() {},
-                        stopPropagation: function() {},
-                        nativeEvent: new Event('change', { bubbles: true }),
-                        persist: function() {},
-                    };
-                    handler.onChange(syntheticEvent);
-                } catch(e) {}
-            }
-        }
-
-        // Focus/blur cycle for React 18+ fiber reconciliation
-        el.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
-        el.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
         el.focus();
-
         return el.value;
     }"""
 
     _VERIFY_AND_FIX_JS = """(el, expectedValue) => {
-        // Always apply the nuclear React override — even if el.value appears correct,
-        // React's internal state (fiber) may be out of sync with the DOM.
-        // This ensures BOTH DOM and React state are consistent.
-
-        // ── Step 1: Use React's internal native setter ──
-        // This bypasses React's value interceptor and sets the DOM directly.
-        // Without this, React controlled components ignore programmatic changes.
-        // CRITICAL: We must use the CORRECT setter for the element type.
-        // HTMLInputElement and HTMLTextAreaElement have DIFFERENT prototype chains.
-        const tagName = el.tagName.toLowerCase();
-        let nativeInputValueSetter;
-        if (tagName === 'textarea') {
-            nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
-        } else {
-            nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-        }
-
-        if (nativeInputValueSetter) {
-            nativeInputValueSetter.call(el, expectedValue);
-        } else {
-            el.value = expectedValue;
-        }
-
-        // ── Step 2: Dispatch React-compatible input event ──
-        // React 16+ listens for 'input' events with bubbles:true at the document root.
-        // This is how React's onChange handler gets triggered.
-        // The InputEvent MUST have inputType and data for React to process it.
-        // CRITICAL: Use 'insertText' inputType which React recognizes as a valid
-        // user input event. Other inputTypes like 'insertReplacementText' are
-        // ignored by some React versions.
+        // Verify value was set correctly and fix if needed.
+        // Sets value directly and dispatches standard DOM events.
+        el.value = expectedValue;
+        // Dispatch standard input + change events
         el.dispatchEvent(new InputEvent('input', {
             bubbles: true,
             cancelable: true,
             inputType: 'insertText',
             data: expectedValue
         }));
-
-        // ── Step 3: Dispatch change event (Vue/Angular/native forms) ──
         el.dispatchEvent(new Event('change', { bubbles: true }));
-
-        // ── Step 4: Trigger React fiber reconciliation ──
-        // React stores internal state on the fiber node. We need to find the
-        // fiber and update its memoized state to match the DOM value.
-        // Approach: Find React's internal event handler and call it directly.
-        const reactEventHandlerKey = Object.keys(el).find(k =>
-            k.startsWith('__reactEventHandlers')
-        );
-        if (reactEventHandlerKey) {
-            const handler = el[reactEventHandlerKey];
-            // React's onChange handler is typically at handler.onChange
-            if (handler && typeof handler.onChange === 'function') {
-                try {
-                    // Create a synthetic-like event object that React expects
-                    const syntheticEvent = {
-                        type: 'change',
-                        target: el,
-                        currentTarget: el,
-                        bubbles: true,
-                        cancelable: true,
-                        defaultPrevented: false,
-                        isDefaultPrevented: function() { return false; },
-                        isPropagationStopped: function() { return false; },
-                        preventDefault: function() {},
-                        stopPropagation: function() {},
-                        nativeEvent: new Event('change', { bubbles: true }),
-                        persist: function() {},
-                    };
-                    handler.onChange(syntheticEvent);
-                } catch(e) {}
-            }
-        }
-
-        // Also try the React fiber approach for React 18+
-        const reactFiberKey = Object.keys(el).find(k =>
-            k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance')
-        );
-        if (reactFiberKey) {
-            // Dispatch additional input event to trigger React's synthetic event system
-            el.dispatchEvent(new InputEvent('input', {
-                bubbles: true,
-                cancelable: true,
-                inputType: 'insertText',
-                data: expectedValue
-            }));
-            // Focus/blur cycle forces React to reconcile
-            el.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
-            el.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
-        }
-
-        // ── Step 5: Focus element for visual feedback ──
+        // Focus element
         el.focus();
-
-        // ── Step 6: Verify final value ──
+        // Verify final value
         const finalValue = el.value;
         return {
             ok: finalValue === expectedValue,
@@ -2187,10 +2053,10 @@ class AgentBrowser:
     }"""
 
     async def fill_form(self, fields: Dict[str, str], page_id: str = "main") -> Dict[str, Any]:
-        """Fill form fields with human-like typing, React/Vue/Angular compatible.
+        """Fill form fields with human-like typing, framework-compatible.
 
         Production-grade form filling that handles:
-        - React controlled components (state sync via nativeInputValueSetter)
+        - Standard HTML forms (input + change events)
         - Vue v-model bindings (input + change events)
         - Angular ngModel (input events)
         - Special characters (@, #, $, etc.) via insert_text or fill()
@@ -2204,8 +2070,7 @@ class AgentBrowser:
         3. Focus + clear existing value
         4. Type value (keyboard.type for normal chars, fill() for special chars)
         5. Verify value was set correctly
-        6. If verification fails, use React nuclear override
-        7. Dispatch framework-compatible events (input, change, focus, blur)
+        6. If verification fails, fix via direct JS value setting
         """
         page = self._pages.get(page_id, self.page)
         mimicry = self._mimicry
@@ -2233,7 +2098,7 @@ class AgentBrowser:
 
                 # ── Step 3: Focus the element ──
                 focused = False
-                # Try JS focus first (most reliable for React/Angular)
+                # Try JS focus first (most reliable approach)
                 try:
                     await page.evaluate("""(sel) => {
                         const el = document.querySelector(sel);
@@ -2285,17 +2150,15 @@ class AgentBrowser:
                 await asyncio.sleep(random.uniform(0.05, 0.15))
 
                 # ── Step 5: Type the value using the most reliable method ──
-                # ORDER OF PRIORITY (production-proven for React/Vue/Angular):
-                # 1. fill() + React sync — handles ALL chars including @#$, works with React
-                # 2. keyboard.insert_text() + React sync — bypasses keyboard layout entirely
+                # ORDER OF PRIORITY (production-proven multi-strategy):
+                # 1. fill() — handles ALL chars including @#$, dispatches standard events
+                # 2. keyboard.insert_text() — bypasses keyboard layout entirely
                 # 3. keyboard.type() char-by-char — last resort, may fail for special chars
                 value_str = str(value)
                 typing_ok = False
 
                 # Strategy 1: Playwright fill() — handles ALL characters reliably
-                # fill() sets the value at the DOM level and dispatches input+change events.
-                # However, React controlled components may not pick it up, so we ALWAYS
-                # apply the React sync override afterwards (in Step 6).
+                # fill() sets the value at the DOM level and dispatches input+change events automatically.
                 try:
                     await element.fill(value_str)
                     typing_ok = True
@@ -2326,7 +2189,7 @@ class AgentBrowser:
                             logger.debug(f"keyboard.type() failed for {selector}: {type_err}")
 
                 if not typing_ok:
-                    # Strategy 4: Nuclear JS-only fill via React sync override
+                    # Strategy 4: JS-only fill via direct value setting
                     # This sets the value purely through JavaScript, bypassing all keyboard issues
                     try:
                         fix_result = await element.evaluate(self._VERIFY_AND_FIX_JS, value_str)
@@ -2344,30 +2207,19 @@ class AgentBrowser:
 
                 await asyncio.sleep(0.1)
 
-                # ── Step 6: ALWAYS sync React state ──
-                # Even when fill() succeeds, React's internal state may be out of sync.
-                # We ALWAYS apply the nativeInputValueSetter + event dispatch to ensure
-                # React's controlled component state matches the DOM value.
+                # ── Step 6: Verify value was set correctly ──
                 try:
-                    fix_result = await element.evaluate(self._VERIFY_AND_FIX_JS, value_str)
-                    if not fix_result.get("ok"):
-                        logger.warning(
-                            f"React sync verification failed for {selector}: "
-                            f"got '{fix_result.get('actual')}', expected '{value_str}'"
-                        )
-                        # One more attempt: clear and re-fill via JS
-                        try:
-                            await element.evaluate("""(el) => {
-                                el.value = '';
-                                el.dispatchEvent(new Event('input', { bubbles: true }));
-                            }""")
-                            fix_result2 = await element.evaluate(self._VERIFY_AND_FIX_JS, value_str)
-                            if fix_result2.get("ok"):
-                                logger.info(f"Second React sync attempt succeeded for {selector}")
-                        except Exception:
-                            pass
+                    actual_value = await element.evaluate("el => el.value")
+                    if actual_value != value_str:
+                        # Value mismatch — try JS fix
+                        fix_result = await element.evaluate(self._VERIFY_AND_FIX_JS, value_str)
+                        if not fix_result.get("ok"):
+                            logger.warning(
+                                f"Value verification failed for {selector}: "
+                                f"got '{fix_result.get('actual')}', expected '{value_str}'"
+                            )
                 except Exception as e:
-                    logger.debug(f"React sync skipped for {selector}: {e}")
+                    logger.debug(f"Value verification skipped for {selector}: {e}")
 
                 filled.append(selector)
                 await asyncio.sleep(random.uniform(0.05, 0.2))
@@ -2507,7 +2359,7 @@ class AgentBrowser:
 
         Handles special characters (@, #, $, etc.) properly by choosing
         the right input method:
-        - fill() on the focused element (most reliable for ALL chars + React)
+        - fill() on the focused element (most reliable for ALL chars + standard events)
         - keyboard.insert_text() for special characters (bypasses keyboard layout)
         - keyboard.type() only for normal characters (dispatches proper key events)
         
@@ -2579,7 +2431,7 @@ class AgentBrowser:
                 return {"status": "error", "error": "All typing strategies failed for special characters"}
             else:
                 # Normal characters: Use keyboard.type() which dispatches proper
-                # KeyboardEvents that React/Vue/Angular listen to
+                # KeyboardEvents that frameworks listen to (Vue, Angular, standard forms)
                 try:
                     await page.keyboard.type(text, delay=mimicry.typing_delay())
                     return {"status": "success", "typed": len(text), "method": "type"}

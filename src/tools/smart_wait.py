@@ -141,11 +141,9 @@ _CHECK_PAGE_READY_JS = """
 
     // Framework-specific checks
     let frameworkReady = true;
-    // React
-    const rootEl = document.querySelector('#root, #app, [data-reactroot]');
-    if (rootEl && rootEl._reactRootContainer) frameworkReady = true;
-    // Vue
-    if (document.querySelector('[data-v-app]') || document.querySelector('#app.__vue__')) frameworkReady = true;
+    // SPA frameworks (generic detection)
+    const rootEl = document.querySelector('#root, #app, [data-reactroot], [data-v-app], [ng-app]');
+    if (rootEl) frameworkReady = true;
     // Angular
     const ngReady = typeof window.getAllAngularRootElements === 'undefined' ||
                     window.getAllAngularRootElements().length > 0;
@@ -429,7 +427,7 @@ class SmartWait:
           - document.readyState === 'complete'
           - All <img> elements finished loading
           - Web fonts loaded (document.fonts.ready)
-          - SPA frameworks settled (React root mounted, Vue app initialized)
+          - SPA frameworks settled (app root mounted, framework initialized)
           - iframes loaded
 
         Args:

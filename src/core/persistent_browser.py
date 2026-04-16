@@ -940,10 +940,10 @@ class PersistentBrowserManager:
         return None, None
 
     async def _cmd_fill_form(self, ctx: UserContext, params: Dict) -> Dict:
-        """Fill form fields with React/Vue/Angular compatible event dispatch.
+        """Fill form fields with framework-compatible event dispatch.
 
         Handles:
-        - React controlled components via nativeInputValueSetter + InputEvent
+        - Framework-compatible input via InputEvent + change events
         - Special characters (@, #, etc.) via fill() + insert_text()
         - Multi-strategy element finding
         - Value verification with automatic retry
@@ -985,7 +985,7 @@ class PersistentBrowserManager:
 
                     await asyncio.sleep(random.uniform(0.05, 0.15))
 
-                    # Clear existing value using keyboard (most reliable for React/Vue)
+                    # Clear existing value using keyboard (most reliable approach)
                     await page.keyboard.press("Home")
                     await page.keyboard.press("Control+a")
                     await page.keyboard.press("Control+a")  # Double-select for reliability
@@ -1018,24 +1018,14 @@ class PersistentBrowserManager:
                     try:
                         actual_value = await el.evaluate("el => el.value")
                         if actual_value != value_str:
-                            # Nuclear React override: nativeInputValueSetter + all events
+                            # Set value directly and dispatch standard events
                             await el.evaluate("""(el, value) => {
-                                const nativeInputValueSetter =
-                                    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set ||
-                                    Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
-                                if (nativeInputValueSetter) {
-                                    nativeInputValueSetter.call(el, value);
-                                } else {
-                                    el.value = value;
-                                }
-                                // Dispatch InputEvent (React-compatible)
+                                el.value = value;
                                 el.dispatchEvent(new InputEvent('input', {
                                     bubbles: true, cancelable: true,
                                     inputType: 'insertText', data: value
                                 }));
                                 el.dispatchEvent(new Event('change', { bubbles: true }));
-                                el.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
-                                el.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
                                 el.focus();
                             }""", value_str)
                     except Exception:
@@ -1082,7 +1072,7 @@ class PersistentBrowserManager:
             await el.click()
             await page.keyboard.press("Control+a")
             await page.keyboard.press("Backspace")
-            # Dispatch input and change events for React/Vue compatibility
+            # Dispatch input and change events for framework compatibility
             try:
                 await el.evaluate("""el => {
                     el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -1140,7 +1130,7 @@ class PersistentBrowserManager:
             except Exception:
                 pass
             await page.select_option(selector, value)
-            # Dispatch change event for React/Vue compatibility
+            # Dispatch change event for framework compatibility
             try:
                 await el.evaluate("""el => {
                     el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -1163,7 +1153,7 @@ class PersistentBrowserManager:
             if not el:
                 return {"status": "error", "error": f"Element not found: {selector}"}
             await el.set_input_files(file_path)
-            # Dispatch change event for React/Vue compatibility
+            # Dispatch change event for framework compatibility
             try:
                 await el.evaluate("""el => {
                     el.dispatchEvent(new Event('change', { bubbles: true }));

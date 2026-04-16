@@ -1,6 +1,7 @@
 """
 Agent-OS Configuration Management — Production Edition
 Handles all settings, with database/Redis/JWT config support.
+JWT is used for API authentication (REST + WebSocket), not frontend.
 """
 import os
 import yaml
