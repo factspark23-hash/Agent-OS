@@ -1991,12 +1991,17 @@ class AgentServer:
         url = data.get("url")
         if not url:
             return {"status": "error", "error": "Missing 'url'"}
-        smart = self._get_smart_nav()
-        result = await smart.navigate(
+
+        # ALWAYS navigate the browser page — the `navigate` command is for
+        # interactive browsing (fill forms, click, etc.), NOT just fetching.
+        # Using smart_navigator alone can return HTTP content without
+        # actually navigating the browser, leaving the page on about:blank.
+        result = await self.browser.navigate(
             url,
-            prefer_browser=data.get("prefer_browser", False),
-            max_retries=data.get("max_retries", 3),
+            wait_until=data.get("wait_until", "domcontentloaded"),
+            retries=data.get("max_retries", 3),
         )
+
         # Auto-detect login pages after navigation
         if result.get("status") == "success":
             try:
@@ -2136,6 +2141,10 @@ class AgentServer:
             "This has full page access — use with caution."
         )
         result = await self.browser.evaluate_js(script)
+        # browser.evaluate_js() already returns {"status": ..., "result": ...}
+        # Pass it through directly to avoid double-wrapping
+        if isinstance(result, dict) and "status" in result:
+            return result
         return {"status": "success", "result": result}
 
     async def _cmd_back(self, data: Dict, session) -> Dict:

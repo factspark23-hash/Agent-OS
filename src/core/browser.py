@@ -1965,6 +1965,33 @@ class AgentBrowser:
                     'input[name="search"]',
                     'input[role="searchbox"]',
                 ])
+            elif 'submit' in lower or 'button' in lower:
+                # button[type="submit"] often fails because HTML <button>Submit</button>
+                # doesn't have an explicit type attribute even though JS reports type="submit"
+                selector_candidates.extend([
+                    'button',
+                    'input[type="submit"]',
+                    'button:has-text("Submit")',
+                    'button:has-text("submit")',
+                    'button:has-text("Send")',
+                    'button:has-text("Continue")',
+                    'button:has-text("Apply")',
+                    'input[type="button"]',
+                    '[role="button"]',
+                ])
+
+        # For selectors that look like button[type="..."] or input[type="..."],
+        # also add fallbacks without the attribute selector (many sites omit explicit type)
+        if selector.startswith('button[') and 'type' in selector:
+            selector_candidates.extend([
+                'button',
+                'input[type="submit"]',
+            ])
+        elif selector.startswith('input[') and 'submit' in selector.lower():
+            selector_candidates.extend([
+                'button',
+                'input[type="button"]',
+            ])
 
         # Remove duplicates while preserving order
         seen = set()
@@ -2469,21 +2496,24 @@ class AgentBrowser:
         """
         page = self._pages.get(page_id, self.page)
 
-        # Wrap the script in a sandboxed execution with timeout and error handling
+        # Wrap the script in a sandboxed execution with timeout and error handling.
+        # Uses (0, eval)() for indirect eval which runs in global scope,
+        # then wraps the result in an object for safe serialization.
         sandboxed_script = f"""
         (() => {{
-            const __sandbox_result = {{ success: false, value: undefined, error: undefined }};
             try {{
-                const __fn = new Function('return ({{{script}}})');
-                const __timeout = new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error('Sandbox execution timeout (10s)')), 10000)
-                );
-                __sandbox_result.value = Promise.race([__fn(), __timeout]);
-                __sandbox_result.success = true;
-                return __sandbox_result;
+                const __value = (0, eval)({json.dumps(script)});
+                const __result = __value instanceof Promise
+                    ? Promise.race([
+                        __value.then(v => ({{ success: true, value: v }})),
+                        new Promise((_, rej) =>
+                            setTimeout(() => rej(new Error('Sandbox execution timeout (10s)')), 10000)
+                        )
+                    ])
+                    : {{ success: true, value: __value }};
+                return __result;
             }} catch(__e) {{
-                __sandbox_result.error = __e.message || String(__e);
-                return __sandbox_result;
+                return {{ success: false, error: __e.message || String(__e) }};
             }}
         }})()
         """
@@ -2494,7 +2524,6 @@ class AgentBrowser:
                 if result.get("error"):
                     return {"status": "error", "error": f"Sandbox error: {result['error']}"}
                 if result.get("success"):
-                    # The value might be a promise — try to resolve it
                     value = result.get("value")
                     if value is not None:
                         return {"status": "success", "result": value}
@@ -3175,7 +3204,7 @@ class AgentBrowser:
             )
 
             if result.get("status") != "success":
-                logger.warning(f"No proxy available for {domain}: {result.get('error')}")
+                logger.debug(f"No proxy available for {domain}: {result.get('error')}")
                 return None
 
             proxy_data = result["proxy"]

@@ -299,9 +299,13 @@ def validate_command_payload(data: dict) -> dict:
     if len(command) > 100:
         raise ValidationError("Command name too long")
 
-    # Whitelist allowed command characters
-    if not re.match(r'^[a-z][a-z0-9\-]*$', command):
+    # Whitelist allowed command characters (letters, digits, hyphens, underscores)
+    if not re.match(r'^[a-z][a-z0-9\-_]*$', command):
         raise ValidationError(f"Invalid command format: {command}")
+
+    # Auto-normalize underscores to hyphens for backward compatibility
+    # Users can send fill_form OR fill-form — both map to fill-form
+    command = command.replace('_', '-')
 
     validated = {"command": command}
 
