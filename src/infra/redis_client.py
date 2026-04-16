@@ -98,7 +98,9 @@ class InMemoryFallback:
         return True
 
     async def close(self):
-        pass
+        """Clean up in-memory fallback resources."""
+        self._data.clear()
+        self._sorted_sets.clear()
 
 
 class RedisClient:

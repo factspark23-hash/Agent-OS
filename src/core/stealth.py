@@ -1035,7 +1035,7 @@ if (document.documentElement) {
 // DONE
 // ═══════════════════════════════════════════════════════════════
 
-console.log('[Agent-OS] Stealth patches loaded v5.0 (24 layers)');
+// Stealth patches loaded — no console.log (detection risk)
 
 })();
 """

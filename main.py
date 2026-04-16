@@ -197,7 +197,7 @@ class AgentOS:
         self._validate_production_config()
 
         self.logger.info("=" * 60)
-        self.logger.info("  Agent-OS — AI Agent Browser v3.0 (Production)")
+        self.logger.info(f"  Agent-OS — AI Agent Browser v{__version__} (Production)")
         self.logger.info("=" * 60)
 
         # Connect Redis

@@ -215,7 +215,7 @@ XMLHttpRequest.prototype.send = function(data) {
     return _ffXhrSend.apply(this, arguments);
 };
 
-console.log('[Agent-OS] Firefox Stealth v1.0 loaded');
+// Stealth loaded — no console.log (detection risk)
 })();
 """
 

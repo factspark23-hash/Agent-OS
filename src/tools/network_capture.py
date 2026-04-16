@@ -317,10 +317,14 @@ class NetworkCapture:
         """Clear captured requests for a page."""
         count = len(self._captures.get(page_id, deque()))
         self._captures[page_id] = deque(maxlen=self._max_entries)
-        # Remove associated request map entries
-        for req in list(self._request_map.values()):
-            # Note: we can't easily associate requests to pages, so we keep them
-            pass
+        # Remove associated request map entries that belong to this page
+        # Since request IDs include page context, we can clean up related entries
+        keys_to_remove = [
+            k for k, v in self._request_map.items()
+            if hasattr(v, 'page_id') and v.page_id == page_id
+        ]
+        for k in keys_to_remove:
+            del self._request_map[k]
         return {"status": "success", "cleared": count}
 
     def get_stats(self, page_id: str = "main") -> Dict[str, Any]:
