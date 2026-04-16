@@ -55,7 +55,7 @@ def generate_cdp_stealth_js(
 
     return f"""
 // ═══════════════════════════════════════════════════════════════
-// AGENT-OS CDP STEALTH v4.0 — Complete Anti-Detection System
+// AGENT-OS CDP STEALTH v4.1 — Complete Anti-Detection System
 // Injected via CDP Page.addScriptToEvaluateOnNewDocument
 // Runs BEFORE any page JavaScript
 // ═══════════════════════════════════════════════════════════════
@@ -65,31 +65,30 @@ def generate_cdp_stealth_js(
 
 // ── UTILITY FUNCTIONS ──
 
-// Make a function look native when toString() is called
+// Central registry for functions that must look native via toString.
+// ALL native-look registrations go through this single Map.
+// The Function.prototype.toString override (below) is the SOLE mechanism
+// for making overridden functions appear native.
+const _nativeFnMap = new Map();
+
+// makeNative: register a function so its toString() returns native code.
+// This is the ONLY way to make an override look native — no other
+// toString patching should exist in this script.
 function makeNative(fn, name) {{
-    const fnStr = fn.toString();
-    const nativeStr = `function ${{name}}() {{ [native code] }}`;
-    Object.defineProperty(fn, 'toString', {{
-        value: function() {{ return nativeStr; }},
-        writable: false,
-        configurable: false,
-        enumerable: false
-    }});
-    // Also handle toString.call()
-    const origToString = Function.prototype.toString;
-    const origCall = origToString.call;
-    const wrappedToString = function() {{
-        if (this === fn) return nativeStr;
-        return origCall.call(origToString, this);
-    }};
-    Object.defineProperty(wrappedToString, 'toString', {{
-        value: function() {{ return 'function toString() {{ [native code] }}'; }},
-        writable: false,
-        configurable: false,
-        enumerable: false
-    }});
+    const nativeStr = `function ${{name || fn.name || ''}}() {{ [native code] }}`;
+    _nativeFnMap.set(fn, nativeStr);
     return fn;
 }}
+
+// SINGLE Function.prototype.toString override — checks _nativeFnMap.
+// Replaces the original toString entirely; no duplicate overrides.
+const _origFnToString = Function.prototype.toString;
+Function.prototype.toString = makeNative(function() {{
+    if (_nativeFnMap.has(this)) {{
+        return _nativeFnMap.get(this);
+    }}
+    return _origFnToString.call(this);
+}}, 'toString');
 
 // Seeded random for consistent fingerprints
 function seededRandom(seed) {{
@@ -191,8 +190,12 @@ Permissions.prototype.query = makeNative(function(queryDesc) {{
     if (queryDesc.name === 'camera' || queryDesc.name === 'microphone') {{
         return Promise.resolve({{ state: 'prompt' }});
     }}
-    // Default: call original
-    return origQuery.call(this, queryDesc);
+    // Default: call original with try/catch for safety
+    try {{
+        return origQuery.call(this, queryDesc);
+    }} catch(e) {{
+        return Promise.resolve({{ state: 'prompt' }});
+    }}
 }}, 'query');
 
 // ═══════════════════════════════════════════════════════════════
@@ -241,7 +244,7 @@ const _cachedPlugins = (function() {{
     arr.length = 3;
     arr.item = function(i) {{ return this[i] || null; }};
     arr.namedItem = function(n) {{
-        for (let i = 0; i < this.length; i++) {{ if (this[i] && this[i].name === n) return this[i]; }}
+        for (let i = 0; i < arr.length; i++) {{ if (this[i] && this[i].name === n) return this[i]; }}
         return null;
     }};
     arr.refresh = function() {{}};
@@ -411,17 +414,8 @@ window.chrome.loadTimes = makeNative(function() {{
         wasAlternateProtocolAvailable: false,
         wasFetchedViaSpdy: true,
         wasNpnNegotiated: true,
-        npnNegotiatedProtocol: 'h2',
         alternateProtocolUsage: 0,
-        connectionInfo: 'h2/16777235',
-        navigationType: 'Other',
-        requestTime: now,
-        startLoadTime: now,
-        firstPaintTime: now,
-        firstPaintAfterLoadTime: 0,
-        finishLoadTime: now,
-        finishDocumentLoadTime: now,
-        commitLoadTime: now,
+        navigationType: 'Other'
     }};
 }}, 'loadTimes');
 
@@ -475,31 +469,21 @@ Object.defineProperty(window, 'devicePixelRatio', {{
 // 8. WEBGL FINGERPRINT — Real GPU Data
 // ═══════════════════════════════════════════════════════════════
 
-// Override getExtension to return spoofed WEBGL_debug_renderer_info
+// Override getExtension to return the REAL extension objects.
+// We only need to spoof getParameter — the real extension has a
+// proper constructor and prototype that detection scripts check.
+// Returning a fake {{ UNMASKED_VENDOR_WEBGL: 37445, ... }} plain object
+// is detectable because it lacks the native prototype chain.
 const origGetExtension = WebGLRenderingContext.prototype.getExtension;
 WebGLRenderingContext.prototype.getExtension = makeNative(function(name) {{
-    const ext = origGetExtension.call(this, name);
-    if (name === 'WEBGL_debug_renderer_info') {{
-        // Return a fake extension object with our vendor/renderer constants
-        return {{
-            UNMASKED_VENDOR_WEBGL: 37445,
-            UNMASKED_RENDERER_WEBGL: 37446
-        }};
-    }}
-    return ext;
+    // Return the REAL extension — getParameter spoofing handles the rest
+    return origGetExtension.call(this, name);
 }}, 'getExtension');
 
 if (typeof WebGL2RenderingContext !== 'undefined' && WebGL2RenderingContext.prototype.getExtension) {{
     const origGetExtension2 = WebGL2RenderingContext.prototype.getExtension;
     WebGL2RenderingContext.prototype.getExtension = makeNative(function(name) {{
-        const ext = origGetExtension2.call(this, name);
-        if (name === 'WEBGL_debug_renderer_info') {{
-            return {{
-                UNMASKED_VENDOR_WEBGL: 37445,
-                UNMASKED_RENDERER_WEBGL: 37446
-            }};
-        }}
-        return ext;
+        return origGetExtension2.call(this, name);
     }}, 'getExtension');
 }}
 
@@ -508,7 +492,7 @@ const origGetParam2 = typeof WebGL2RenderingContext !== 'undefined'
     ? WebGL2RenderingContext.prototype.getParameter
     : null;
 
-WebGLRenderingContext.prototype.getParameter = function(param) {{
+WebGLRenderingContext.prototype.getParameter = makeNative(function(param) {{
     switch(param) {{
         case 37445: return '{webgl_vendor}';
         case 37446: return '{webgl_renderer}';
@@ -522,19 +506,18 @@ WebGLRenderingContext.prototype.getParameter = function(param) {{
         case 34047: return {random.randint(8, 16)};
         case 3413: case 3414: case 3415: return {random.randint(8, 16)};
         case 33902: return [0, {random.uniform(1, 16)}];
-        case 3386: return [{random.randint(16384, 32768)}, {random.randint(16384, 32768)}];
         default: return origGetParam.call(this, param);
     }}
-}};
+}}, 'getParameter');
 
 if (origGetParam2) {{
-    WebGL2RenderingContext.prototype.getParameter = function(param) {{
+    WebGL2RenderingContext.prototype.getParameter = makeNative(function(param) {{
         switch(param) {{
             case 37445: return '{webgl_vendor}';
             case 37446: return '{webgl_renderer}';
             default: return origGetParam2.call(this, param);
         }}
-    }};
+    }}, 'getParameter');
 }}
 
 // ═══════════════════════════════════════════════════════════════
@@ -762,39 +745,15 @@ performance.now = makeNative(function() {{
 }}, 'now');
 
 // ═══════════════════════════════════════════════════════════════
-// 19. toString() PROTECTION — Make Overrides Look Native
-// ═══════════════════════════════════════════════════════════════
-
-// When sites call .toString() on overridden functions, they should
-// see "[native code]" not our implementation
-const nativeToString = Function.prototype.toString;
-const toStringOverrides = new Map();
-
-Function.prototype.toString = makeNative(function() {{
-    if (toStringOverrides.has(this)) {{
-        return toStringOverrides.get(this);
-    }}
-    return nativeToString.call(this);
-}}, 'toString');
-
-// Register overrides we've made
-const overrides = [
-    [navigator.mediaDevices?.enumerateDevices, 'function enumerateDevices() {{ [native code] }}'],
-    [window.fetch, 'function fetch() {{ [native code] }}'],
-    [XMLHttpRequest.prototype.open, 'function open() {{ [native code] }}'],
-    [XMLHttpRequest.prototype.send, 'function send() {{ [native code] }}'],
-    [Permissions.prototype.query, 'function query() {{ [native code] }}'],
-];
-
-for (const [fn, str] of overrides) {{
-    if (fn) toStringOverrides.set(fn, str);
-}}
-
-// ═══════════════════════════════════════════════════════════════
-// 20. GLOBAL CHECK — Silent verification (no console output)
+// 19. GLOBAL CHECK — Silent verification (no console output)
 // ═══════════════════════════════════════════════════════════════
 // NOTE: Do NOT console.log() here — that is a detection signal.
 // Detection scripts monitor console output for framework names.
+//
+// All overridden functions are registered with makeNative() which
+// adds them to the _nativeFnMap. The single Function.prototype.toString
+// override at the top of this IIFE handles all lookups. No duplicate
+// toString patching needed.
 
 }})();
 """

@@ -718,73 +718,110 @@ class AgentBrowser:
 
     async def _setup_headless_stealth_hook(self, page: Page):
         """Hook into page navigation events to re-inject headless stealth overrides.
-        
+
         Chromium's headless mode natively strips navigator.plugins and window.chrome.
-        add_init_script() and CDP Page.addScriptToEvaluateOnNewDocument cannot override
-        these because Chromium enforces them after JS context creation. The ONLY reliable
-        method is page.evaluate() which runs in the page's execution context and CAN
-        override these properties using Object.defineProperty.
-        
-        This method sets up a 'domcontentloaded' event listener on the page that
-        re-injects navigator.plugins (3 realistic Chrome plugins) and window.chrome
-        (complete runtime/app/csi/loadTimes object) after every navigation.
+        CDP Page.addScriptToEvaluateOnNewDocument runs BEFORE page scripts and sets
+        these on the PROTOTYPE level (Navigator.prototype.plugins, window.chrome).
+        However, Chromium's native headless mode may re-strip them after navigation.
+
+        This hook runs AFTER domcontentloaded to VERIFY and FIX any properties that
+        Chromium's headless mode stripped. It checks first before overriding to avoid
+        conflicts with the CDP stealth prototype-level overrides.
+
+        CRITICAL: This hook uses Navigator.prototype-level overrides (not instance-level)
+        to stay consistent with CDP stealth. If we override on the instance while CDP
+        overrides on the prototype, detection scripts can see BOTH descriptors and
+        identify the inconsistency.
         """
         HEADLESS_STEALTH_JS = """() => {
-            // Re-inject navigator.plugins — headless Chromium strips these
+            // ═══ VERIFY AND FIX: navigator.plugins ═══
+            // CDP stealth already sets this on Navigator.prototype.
+            // Only fix if headless Chromium stripped it (plugins.length === 0 or missing).
             try {
-                const _plugins = [
-                    {name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format'},
-                    {name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: ''},
-                    {name: 'Native Client', filename: 'internal-nacl-plugin', description: ''}
-                ];
-                const pluginArray = {
-                    length: 3,
-                    item: function(i) { return _plugins[i] || null; },
-                    namedItem: function(n) { return _plugins.find(p => p.name === n) || null; },
-                    refresh: function() {},
-                    [Symbol.iterator]: function*() { yield* _plugins; }
-                };
-                for (let i = 0; i < _plugins.length; i++) {
-                    pluginArray[i] = _plugins[i];
+                const currentPlugins = navigator.plugins;
+                const needsFix = !currentPlugins || currentPlugins.length === 0 ||
+                    (currentPlugins.length === 1 && currentPlugins[0]?.name === 'Chromium PDF Plugin');
+                if (needsFix) {
+                    const _plugins = [
+                        {name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format', length: 1, 0: {name: 'Portable Document Format', suffixes: 'pdf', description: 'Portable Document Format', type: 'application/x-google-chrome-pdf'}, item: function(i){return this[i]||null;}, namedItem: function(n){return this[0]&&this[0].name===n?this[0]:null;}, refresh: function(){}},
+                        {name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '', length: 1, 0: {name: 'Chrome PDF Viewer', suffixes: '', description: '', type: 'application/x-google-chrome-pdf'}, item: function(i){return this[i]||null;}, namedItem: function(n){return this[0]&&this[0].name===n?this[0]:null;}, refresh: function(){}},
+                        {name: 'Native Client', filename: 'internal-nacl-plugin', description: '', length: 2, 0: {name: 'Native Client Executable', suffixes: '', description: 'Native Client Executable', type: 'application/x-nacl'}, 1: {name: 'Portable Native Client Executable', suffixes: '', description: 'Portable Native Client Executable', type: 'application/x-pnacl'}, item: function(i){return this[i]||null;}, namedItem: function(n){for(let j=0;j<this.length;j++){if(this[j]&&this[j].name===n)return this[j];}return null;}, refresh: function(){}}
+                    ];
+                    const arr = [_plugins[0], _plugins[1], _plugins[2]];
+                    arr.length = 3;
+                    arr.item = function(i) { return arr[i] || null; };
+                    arr.namedItem = function(n) { for (let i = 0; i < arr.length; i++) { if (arr[i].name === n) return arr[i]; } return null; };
+                    arr.refresh = function() {};
+                    arr[Symbol.iterator] = function() { let idx = 0; return { next: function() { if (idx < arr.length) return { value: arr[idx++], done: false }; return { done: true }; } }; };
+                    // Override on PROTOTYPE to stay consistent with CDP stealth
+                    Object.defineProperty(Navigator.prototype, 'plugins', {
+                        get: function() { return arr; },
+                        configurable: true,
+                        enumerable: true
+                    });
                 }
-                Object.defineProperty(navigator, 'plugins', {
-                    get: function() { return pluginArray; },
-                    configurable: true,
-                    enumerable: true
-                });
             } catch(e) {}
 
-            // Re-inject window.chrome — headless Chromium removes this object
+            // ═══ VERIFY AND FIX: window.chrome ═══
+            // CDP stealth already defines window.chrome with Object.defineProperty.
+            // Only fix if headless Chromium stripped it (window.chrome is undefined).
             try {
-                if (!window.chrome) {
+                if (!window.chrome || typeof window.chrome !== 'object') {
                     const _chromeObj = {
                         app: {
                             isInstalled: false,
                             InstallState: { INSTALLED: 'installed', DISABLED: 'disabled', NOT_INSTALLED: 'not_installed' },
                             RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' },
                             getDetails: function() { return null; },
-                            getIsInstalled: function() { return false; }
+                            getIsInstalled: function() { return false; },
+                            installState: function() { return 'not_installed'; },
+                            runningState: function() { return 'cannot_run'; }
                         },
                         runtime: {
                             id: undefined,
                             connect: function() { return { postMessage: function(){}, disconnect: function(){}, onMessage: { addListener: function(){}, removeListener: function(){}, hasListener: function() { return false; } }, onDisconnect: { addListener: function(){}, removeListener: function(){} } }; },
-                            sendMessage: function(msg, cb) { if (typeof cb === 'function') cb(); },
+                            sendMessage: function(msg, cb) { if (typeof cb === 'function') cb(); return Promise.resolve(); },
                             getManifest: function() { return { manifest_version: 3, version: '1.0.0', name: 'Chrome App' }; },
                             getURL: function(path) { return 'chrome-extension://nmmhkkegccagdldgiimedpiccmgmieda/' + (path || ''); },
                             onMessage: { addListener: function(){}, removeListener: function(){}, hasListener: function() { return false; } },
-                            onConnect: { addListener: function(){}, removeListener: function(){} },
-                            onInstalled: { addListener: function(){}, removeListener: function(){} },
-                            lastError: undefined
+                            onConnect: { addListener: function(){}, removeListener: function(){}, hasListener: function() { return false; } },
+                            onInstalled: { addListener: function(){}, removeListener: function(){}, hasListener: function() { return false; } },
+                            lastError: undefined,
+                            OnInstalledReason: { CHROME_UPDATE: 'chrome_update', INSTALL: 'install', SHARED_MODULE_UPDATE: 'shared_module_update', UPDATE: 'update' },
+                            OnRestartRequiredReason: { APP_UPDATE: 'app_update', OS_UPDATE: 'os_update', PERIODIC: 'periodic' },
+                            PlatformOs: { ANDROID: 'android', CROS: 'cros', LINUX: 'linux', MAC: 'mac', OPENBSD: 'openbsd', WIN: 'win' }
                         },
-                        csi: function() { return { onloadT: Date.now(), pageT: Date.now(), startE: Date.now() }; },
+                        csi: function() { return { onloadT: Date.now(), pageT: Date.now(), startE: Date.now(), toString: function() { return '[object Object]'; } }; },
                         loadTimes: function() { var now = Date.now() / 1000; return { commitLoadTime: now, connectionInfo: 'h2', finishDocumentLoadTime: now, finishLoadTime: now, firstPaintAfterLoadTime: 0, firstPaintTime: now, npnNegotiatedProtocol: 'h2', requestTime: now, startLoadTime: now, wasAlternateProtocolAvailable: false, wasFetchedViaSpdy: true, wasNpnNegotiated: true }; },
-                        webstore: { onInstallStageChanged: { addListener: function(){}, removeListener: function(){} }, onDownloadProgress: { addListener: function(){}, removeListener: function(){} } }
+                        webstore: { onInstallStageChanged: { addListener: function(){}, removeListener: function(){}, hasListener: function() { return false; } }, onDownloadProgress: { addListener: function(){}, removeListener: function(){}, hasListener: function() { return false; } } }
                     };
                     Object.defineProperty(window, 'chrome', {
-                        value: _chromeObj,
+                        get: function() { return _chromeObj; },
                         configurable: true,
-                        enumerable: true,
-                        writable: true
+                        enumerable: true
+                    });
+                } else {
+                    // chrome exists but may be missing sub-properties — merge them in
+                    try {
+                        var existing = window.chrome;
+                        if (!existing.app) existing.app = { isInstalled: false, InstallState: { INSTALLED: 'installed', DISABLED: 'disabled', NOT_INSTALLED: 'not_installed' }, RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' }, getDetails: function(){return null;}, getIsInstalled: function(){return false;} };
+                        if (!existing.runtime) existing.runtime = { id: undefined, connect: function(){return {postMessage:function(){},disconnect:function(){},onMessage:{addListener:function(){},removeListener:function(){},hasListener:function(){return false;}},onDisconnect:{addListener:function(){},removeListener:function(){}}}}, sendMessage: function(msg,cb){if(typeof cb==='function')cb();return Promise.resolve();}, getManifest: function(){return {manifest_version:3,version:'1.0.0',name:'Chrome App'};}, getURL: function(path){return 'chrome-extension://nmmhkkegccagdldgiimedpiccmgmieda/'+(path||'');}, onMessage: {addListener:function(){},removeListener:function(){},hasListener:function(){return false;}}, onConnect: {addListener:function(){},removeListener:function(){},hasListener:function(){return false;}}, onInstalled: {addListener:function(){},removeListener:function(){},hasListener:function(){return false;}}, lastError: undefined };
+                        if (!existing.csi) existing.csi = function() { return { onloadT: Date.now(), pageT: Date.now(), startE: Date.now() }; };
+                        if (!existing.loadTimes) existing.loadTimes = function() { var now = Date.now() / 1000; return { commitLoadTime: now, connectionInfo: 'h2', finishDocumentLoadTime: now, finishLoadTime: now, firstPaintAfterLoadTime: 0, firstPaintTime: now, npnNegotiatedProtocol: 'h2', requestTime: now, startLoadTime: now, wasAlternateProtocolAvailable: false, wasFetchedViaSpdy: true, wasNpnNegotiated: true }; };
+                        if (!existing.webstore) existing.webstore = { onInstallStageChanged: { addListener: function(){}, removeListener: function(){}, hasListener: function(){return false;} }, onDownloadProgress: { addListener: function(){}, removeListener: function(){}, hasListener: function(){return false;} } };
+                    } catch(mergeErr) {}
+                }
+            } catch(e) {}
+
+            // ═══ VERIFY AND FIX: navigator.webdriver ═══
+            // CDP stealth already deletes this from Navigator.prototype.
+            // Re-check in case headless mode re-added it.
+            try {
+                if (navigator.webdriver !== undefined) {
+                    Object.defineProperty(Navigator.prototype, 'webdriver', {
+                        get: function() { return undefined; },
+                        configurable: true,
+                        enumerable: false
                     });
                 }
             } catch(e) {}
@@ -1890,9 +1927,14 @@ class AgentBrowser:
         // By calling the ORIGINAL setter, we bypass React's interception and
         // set the DOM value directly. Then we MUST dispatch React-compatible
         // events so React's internal state reconciles with the DOM.
-        const nativeInputValueSetter =
-            Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set ||
-            Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+        // CRITICAL: Use correct setter for element type.
+        const tagName = el.tagName.toLowerCase();
+        let nativeInputValueSetter;
+        if (tagName === 'textarea') {
+            nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+        } else {
+            nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+        }
 
         if (nativeInputValueSetter) {
             nativeInputValueSetter.call(el, value);
@@ -1917,10 +1959,34 @@ class AgentBrowser:
         el.dispatchEvent(new Event('change', { bubbles: true }));
 
         // ── Strategy 3: Trigger React's internal fiber update ──
-        // React stores internal state on the fiber node. In some versions,
-        // we need to force React to process the pending state update.
-        // This is done by focusing and blurring the element, which
-        // triggers React's onChange handler.
+        // Find React's event handler and call onChange directly.
+        const reactEventHandlerKey = Object.keys(el).find(k =>
+            k.startsWith('__reactEventHandlers')
+        );
+        if (reactEventHandlerKey) {
+            const handler = el[reactEventHandlerKey];
+            if (handler && typeof handler.onChange === 'function') {
+                try {
+                    const syntheticEvent = {
+                        type: 'change',
+                        target: el,
+                        currentTarget: el,
+                        bubbles: true,
+                        cancelable: true,
+                        defaultPrevented: false,
+                        isDefaultPrevented: function() { return false; },
+                        isPropagationStopped: function() { return false; },
+                        preventDefault: function() {},
+                        stopPropagation: function() {},
+                        nativeEvent: new Event('change', { bubbles: true }),
+                        persist: function() {},
+                    };
+                    handler.onChange(syntheticEvent);
+                } catch(e) {}
+            }
+        }
+
+        // Focus/blur cycle for React 18+ fiber reconciliation
         el.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
         el.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
         el.focus();
@@ -1936,9 +2002,15 @@ class AgentBrowser:
         // ── Step 1: Use React's internal native setter ──
         // This bypasses React's value interceptor and sets the DOM directly.
         // Without this, React controlled components ignore programmatic changes.
-        const nativeInputValueSetter =
-            Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set ||
-            Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+        // CRITICAL: We must use the CORRECT setter for the element type.
+        // HTMLInputElement and HTMLTextAreaElement have DIFFERENT prototype chains.
+        const tagName = el.tagName.toLowerCase();
+        let nativeInputValueSetter;
+        if (tagName === 'textarea') {
+            nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+        } else {
+            nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+        }
 
         if (nativeInputValueSetter) {
             nativeInputValueSetter.call(el, expectedValue);
@@ -1950,6 +2022,9 @@ class AgentBrowser:
         // React 16+ listens for 'input' events with bubbles:true at the document root.
         // This is how React's onChange handler gets triggered.
         // The InputEvent MUST have inputType and data for React to process it.
+        // CRITICAL: Use 'insertText' inputType which React recognizes as a valid
+        // user input event. Other inputTypes like 'insertReplacementText' are
+        // ignored by some React versions.
         el.dispatchEvent(new InputEvent('input', {
             bubbles: true,
             cancelable: true,
@@ -1961,20 +2036,50 @@ class AgentBrowser:
         el.dispatchEvent(new Event('change', { bubbles: true }));
 
         // ── Step 4: Trigger React fiber reconciliation ──
-        // React stores internal state on the fiber node. Focusing and blurring
-        // forces React to process any pending state updates via its onChange handler.
-        const reactKey = Object.keys(el).find(k =>
-            k.startsWith('__reactEventHandlers') || k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance')
+        // React stores internal state on the fiber node. We need to find the
+        // fiber and update its memoized state to match the DOM value.
+        // Approach: Find React's internal event handler and call it directly.
+        const reactEventHandlerKey = Object.keys(el).find(k =>
+            k.startsWith('__reactEventHandlers')
         );
-        if (reactKey) {
-            // Re-dispatch input event specifically for React's synthetic event system
+        if (reactEventHandlerKey) {
+            const handler = el[reactEventHandlerKey];
+            // React's onChange handler is typically at handler.onChange
+            if (handler && typeof handler.onChange === 'function') {
+                try {
+                    // Create a synthetic-like event object that React expects
+                    const syntheticEvent = {
+                        type: 'change',
+                        target: el,
+                        currentTarget: el,
+                        bubbles: true,
+                        cancelable: true,
+                        defaultPrevented: false,
+                        isDefaultPrevented: function() { return false; },
+                        isPropagationStopped: function() { return false; },
+                        preventDefault: function() {},
+                        stopPropagation: function() {},
+                        nativeEvent: new Event('change', { bubbles: true }),
+                        persist: function() {},
+                    };
+                    handler.onChange(syntheticEvent);
+                } catch(e) {}
+            }
+        }
+
+        // Also try the React fiber approach for React 18+
+        const reactFiberKey = Object.keys(el).find(k =>
+            k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance')
+        );
+        if (reactFiberKey) {
+            // Dispatch additional input event to trigger React's synthetic event system
             el.dispatchEvent(new InputEvent('input', {
                 bubbles: true,
                 cancelable: true,
                 inputType: 'insertText',
                 data: expectedValue
             }));
-            // Force React to reconcile by focus/blur cycle
+            // Focus/blur cycle forces React to reconcile
             el.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
             el.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
         }
