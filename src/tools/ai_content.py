@@ -566,6 +566,33 @@ class AIContentExtractor:
             lang = soup.find("html", lang=True)
             language = lang.get("lang", "") if lang else ""
 
+            # ── Schema.org (JSON-LD) — extract BEFORE decomposing scripts ──
+            schema_org = []
+            for script in soup.find_all("script", type="application/ld+json"):
+                try:
+                    import json as _json
+                    schema_org.append(_json.loads(script.string))
+                except Exception:
+                    pass
+
+            # ── Open Graph — extract BEFORE decomposing ──
+            open_graph = {}
+            for meta in soup.find_all("meta", attrs={"property": True}):
+                prop = meta.get("property", "")
+                if prop.startswith("og:"):
+                    key = prop.replace("og:", "")
+                    val = meta.get("content", "")
+                    if key and val:
+                        open_graph[key] = val
+
+            # ── Meta Tags — extract BEFORE decomposing ──
+            meta = {}
+            for m in soup.find_all("meta", attrs={"name": True, "content": True}):
+                key = m.get("name", "")
+                val = m.get("content", "")
+                if key and val and not key.startswith("og:") and not key.startswith("twitter:"):
+                    meta[key] = val[:500]
+
             # ── Remove boilerplate ──────────────────────────
             for tag_name in ("script", "style", "noscript", "svg", "iframe"):
                 for element in soup.find_all(tag_name):
@@ -665,32 +692,36 @@ class AIContentExtractor:
                 body_text
             )))[:20]
 
-            # ── Schema.org ──────────────────────────────────
-            schema_org = []
-            for script in soup.find_all("script", type="application/ld+json"):
-                try:
-                    import json
-                    schema_org.append(json.loads(script.string))
-                except Exception:
-                    pass
-
-            # ── Open Graph ──────────────────────────────────
-            open_graph = {}
-            for meta in soup.find_all("meta", attrs={"property": re.compile(r"^og:")}):
-                key = meta.get("property", "").replace("og:", "")
-                val = meta.get("content", "")
-                if key and val:
-                    open_graph[key] = val
-
-            # ── Meta ────────────────────────────────────────
-            meta = {}
-            for m in soup.find_all("meta", attrs={"name": True, "content": True}):
-                key = m.get("name", "")
-                val = m.get("content", "")
-                if key and val and not key.startswith("og:") and not key.startswith("twitter:"):
-                    meta[key] = val[:500]
+            # ── Forms ──────────────────────────────────────
+            forms = []
+            for form in soup.find_all("form"):
+                fields = []
+                for inp in form.find_all(["input", "textarea", "select"]):
+                    inp_type = inp.get("type", inp.name)
+                    if inp_type in ("hidden", "submit", "button"):
+                        continue
+                    fields.append({
+                        "name": inp.get("name", inp.get("id", "")),
+                        "type": inp_type,
+                        "label": "",
+                        "required": inp.has_attr("required"),
+                        "placeholder": inp.get("placeholder", ""),
+                    })
+                # Find labels
+                for label in form.find_all("label"):
+                    for_id = label.get("for", "")
+                    if for_id:
+                        field = next((f for f in fields if f["name"] == for_id), None)
+                        if field:
+                            field["label"] = label.get_text(strip=True)
+                forms.append({
+                    "action": form.get("action", ""),
+                    "method": (form.get("method", "GET") or "GET").upper(),
+                    "fields": fields,
+                })
 
             # ── Build Content Object ────────────────────────
+            # (schema_org, open_graph, meta already extracted before decompose)
             content = AIContent(
                 url=url,
                 title=title,
@@ -703,6 +734,7 @@ class AIContentExtractor:
                 tables=tables,
                 lists=lists,
                 code_blocks=code_blocks,
+                forms=forms,
                 links=links[:50],
                 images=images[:30],
                 emails=emails,
