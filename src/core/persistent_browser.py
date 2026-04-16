@@ -168,9 +168,36 @@ class UserContext:
 
         # Layer 2: ANTI_DETECTION_JS via add_init_script (runs on every page load)
         fingerprint_js = evasion.get_injection_js("main")
+        cdp_ok = False  # Track CDP stealth status for Layer 3 decision
         try:
-            # Replace placeholder tokens with profile values
-            stealth_js_filled = self._stealth_js + "\n" + fingerprint_js
+            # Replace placeholder tokens with profile values.
+            # IMPORTANT: Must SET window.__AGENT_OS_* properties BEFORE the
+            # ANTI_DETECTION_JS reads them (e.g., `window.__AGENT_OS_PLATFORM__`).
+            # Also replace bare variable placeholders like __AGENT_OS_SCREEN_WIDTH__.
+            platform = fp.get("platform", "Win32")
+            cores = fp.get("hardware_concurrency", 8)
+            memory = fp.get("device_memory", 8)
+            touch = fp.get("max_touch_points", 0)
+            screen_w = fp.get("screen_width", 1920)
+            screen_h = fp.get("screen_height", 1080)
+            pixel_ratio = fp.get("pixel_ratio", 1.0)
+            platform_init = (
+                f"window.__AGENT_OS_PLATFORM__='{platform}';"
+                f"window.__AGENT_OS_CORES__={cores};"
+                f"window.__AGENT_OS_MEMORY__={memory};"
+                f"window.__AGENT_OS_TOUCH__={touch};"
+            )
+            stealth_js_filled = platform_init + "\n" + self._stealth_js
+            stealth_js_filled = stealth_js_filled.replace(
+                '__AGENT_OS_SCREEN_WIDTH__', str(screen_w)
+            )
+            stealth_js_filled = stealth_js_filled.replace(
+                '__AGENT_OS_SCREEN_HEIGHT__', str(screen_h)
+            )
+            stealth_js_filled = stealth_js_filled.replace(
+                '__AGENT_OS_DEVICE_PIXEL_RATIO__', str(pixel_ratio)
+            )
+            stealth_js_filled = stealth_js_filled + "\n" + fingerprint_js
             await self.context.add_init_script(stealth_js_filled)
             logger.info(f"Stealth Layer 2 (InitScript): ACTIVE for {self.user_id}")
         except Exception as e:
@@ -200,30 +227,39 @@ class UserContext:
 
         self.active_page = self.pages.get("main", list(self.pages.values())[0])
 
-        # Layer 3: God Mode stealth — ULTIMATE anti-detection fallback
-        # Activated when CDP stealth fails or for sites that detect CDP-level patches
-        try:
-            await self._god_stealth.inject_into_page(
-                self.active_page,
-                page_id="main",
-            )
-            logger.info(f"Stealth Layer 3 (God Mode): ACTIVE for {self.user_id}")
-        except Exception as e:
-            logger.warning(f"Stealth Layer 3 (God Mode) failed for {self.user_id}: {e}")
-
         # Layer 1: CDP stealth — PRIMARY injection via Page.addScriptToEvaluateOnNewDocument
         # Runs BEFORE any page JavaScript, including bot detection scripts
         try:
             chrome_ver = fp.get("chrome_version", "124") if fp else "124"
-            await self._cdp_stealth.inject_into_page(
+            cdp_ok = await self._cdp_stealth.inject_into_page(
                 self.active_page,
                 page_id="main",
                 chrome_version=chrome_ver,
                 fingerprint=fp,
             )
-            logger.info(f"Stealth Layer 1 (CDP): ACTIVE for {self.user_id}")
+            if cdp_ok:
+                logger.info(f"Stealth Layer 1 (CDP): ACTIVE for {self.user_id}")
+            else:
+                logger.warning(f"Stealth Layer 1 (CDP): FAILED for {self.user_id}")
         except Exception as e:
             logger.warning(f"Stealth Layer 1 (CDP) failed for {self.user_id}: {e}")
+
+        # Layer 3: God Mode stealth — FALLBACK (only if CDP stealth failed)
+        # GodMode uses its own CDP Page.addScriptToEvaluateOnNewDocument which
+        # can CONFLICT with Layer 1 by overriding the same properties with
+        # different values and causing duplicate CDP override errors.
+        # Only activate when Layer 1 (CDP) actually failed.
+        if not cdp_ok:
+            try:
+                await self._god_stealth.inject_into_page(
+                    self.active_page,
+                    page_id="main",
+                )
+                logger.info(f"Stealth Layer 3 (God Mode): ACTIVE for {self.user_id} (CDP fallback)")
+            except Exception as e:
+                logger.warning(f"Stealth Layer 3 (God Mode) failed for {self.user_id}: {e}")
+        else:
+            logger.info(f"Stealth Layer 3 (God Mode): SKIPPED for {self.user_id} — CDP stealth is active")
 
         logger.info(f"User context initialized: {self.user_id} (profile: {self.profile_dir})")
 

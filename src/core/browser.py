@@ -593,20 +593,21 @@ class AgentBrowser:
         # - Navigator consistency guard
         # ═══════════════════════════════════════════════════════════
         try:
-            # Replace placeholder tokens in ANTI_DETECTION_JS with profile values
-            stealth_js_filled = self._stealth_js
-            stealth_js_filled = stealth_js_filled.replace(
-                '__AGENT_OS_PLATFORM__', f"'{self._active_profile.platform}'"
+            # Replace placeholder tokens in ANTI_DETECTION_JS with profile values.
+            # IMPORTANT: The placeholders appear as both `window.__AGENT_OS_X__`
+            # (property access) and bare `__AGENT_OS_X__` (variable assignment).
+            # For window.__AGENT_OS_X__ references, we must SET the window
+            # property first — replacing `__AGENT_OS_X__` with a quoted string
+            # would create invalid JS like `window.'Win32'`.
+            # Instead, we prepend property-setting statements so
+            # `window.__AGENT_OS_X__` resolves correctly at runtime.
+            platform_init = (
+                f"window.__AGENT_OS_PLATFORM__='{self._active_profile.platform}';"
+                f"window.__AGENT_OS_CORES__={self._active_profile.hardware_concurrency};"
+                f"window.__AGENT_OS_MEMORY__={self._active_profile.device_memory};"
+                f"window.__AGENT_OS_TOUCH__={self._active_profile.max_touch_points};"
             )
-            stealth_js_filled = stealth_js_filled.replace(
-                '__AGENT_OS_CORES__', str(self._active_profile.hardware_concurrency)
-            )
-            stealth_js_filled = stealth_js_filled.replace(
-                '__AGENT_OS_MEMORY__', str(self._active_profile.device_memory)
-            )
-            stealth_js_filled = stealth_js_filled.replace(
-                '__AGENT_OS_TOUCH__', str(self._active_profile.max_touch_points)
-            )
+            stealth_js_filled = platform_init + "\n" + self._stealth_js
             stealth_js_filled = stealth_js_filled.replace(
                 '__AGENT_OS_SCREEN_WIDTH__', str(self._active_profile.screen_width)
             )
@@ -623,24 +624,28 @@ class AgentBrowser:
             logger.warning(f"Stealth Layer 2 (InitScript): FAILED — {e}")
 
         # ═══════════════════════════════════════════════════════════
-        # LAYER 3: GOD MODE STEALTH — ULTIMATE FALLBACK
-        # Only activated if CDP stealth failed, or always active as
-        # additional coverage. Uses ConsistentFingerprint to ensure
-        # ALL detection vectors (WebGL, Canvas, Audio, Screen, etc.)
-        # match real hardware combinations.
+        # LAYER 3: GOD MODE STEALTH — FALLBACK (only if CDP failed)
+        # GodMode uses its OWN CDP Page.addScriptToEvaluateOnNewDocument
+        # injection which can CONFLICT with Layer 1 (CDP stealth) by:
+        # 1. Overriding the same Navigator properties with different values
+        # 2. Causing duplicate CDP Emulation.setUserAgentOverride errors
+        # 3. Doubling the JS execution overhead on every page load
+        # Therefore, only activate when Layer 1 (CDP) actually failed.
         # ═══════════════════════════════════════════════════════════
-        try:
-            # GodModeStealth generates its own ConsistentFingerprint internally
-            god_ok = await self._god_mode_stealth.inject_into_page(
-                self.page, page_id="main",
-            )
-            if god_ok:
-                layers.append("GodMode")
-                logger.info("Stealth Layer 3 (GodMode): ACTIVE — consistent fingerprint + CDP/DevTools detection prevention")
-            else:
-                logger.warning("Stealth Layer 3 (GodMode): injection returned False")
-        except Exception as e:
-            logger.warning(f"Stealth Layer 3 (GodMode): FAILED — {e}")
+        if not cdp_ok:
+            try:
+                god_ok = await self._god_mode_stealth.inject_into_page(
+                    self.page, page_id="main",
+                )
+                if god_ok:
+                    layers.append("GodMode")
+                    logger.info("Stealth Layer 3 (GodMode): ACTIVE — CDP stealth failed, using fallback")
+                else:
+                    logger.warning("Stealth Layer 3 (GodMode): injection returned False")
+            except Exception as e:
+                logger.warning(f"Stealth Layer 3 (GodMode): FAILED — {e}")
+        else:
+            logger.info("Stealth Layer 3 (GodMode): SKIPPED — CDP stealth is active, GodMode not needed")
 
         self._stealth_layers_active["main"] = layers
         logger.info(f"Stealth layers active for 'main': {layers}")

@@ -2001,18 +2001,45 @@ class AgentServer:
         if not url:
             return {"status": "error", "error": "Missing 'url'"}
 
-        # ALWAYS navigate the browser page — the `navigate` command is for
-        # interactive browsing (fill forms, click, etc.), NOT just fetching.
-        # Using smart_navigator alone can return HTTP content without
-        # actually navigating the browser, leaving the page on about:blank.
-        result = await self.browser.navigate(
-            url,
-            wait_until=data.get("wait_until", "domcontentloaded"),
-            retries=data.get("max_retries", 3),
-        )
+        # Navigate the browser page using browser.navigate() for interactive
+        # browsing (fill forms, click, etc.). If the browser crashes or the
+        # page is unreachable, fall back to smart_navigator which can use
+        # HTTP fetching as a last resort — but ALWAYS try browser first so
+        # the browser page is on the correct URL for subsequent commands.
+        result = None
+        try:
+            result = await self.browser.navigate(
+                url,
+                wait_until=data.get("wait_until", "domcontentloaded"),
+                retries=data.get("max_retries", 3),
+            )
+        except Exception as browser_err:
+            logger.warning(f"Browser navigate failed, trying smart_navigator fallback: {browser_err}")
+
+        # If browser.navigate failed or returned an error, try smart_navigator
+        # as fallback (HTTP fetch still works even if browser crashed).
+        if result is None or (isinstance(result, dict) and result.get("status") != "success"):
+            try:
+                smart = self._get_smart_nav()
+                smart_result = await smart.navigate(
+                    url,
+                    prefer_browser=True,
+                    max_retries=data.get("max_retries", 3),
+                )
+                if result is None:
+                    result = smart_result
+                elif isinstance(result, dict) and isinstance(smart_result, dict):
+                    # Merge: keep browser error info but use smart result
+                    if smart_result.get("status") == "success":
+                        result = smart_result
+                        result["fallback"] = "smart_navigator"
+            except Exception as smart_err:
+                logger.warning(f"Smart navigator fallback also failed: {smart_err}")
+                if result is None:
+                    result = {"status": "error", "error": f"Navigation failed: {smart_err}"}
 
         # Auto-detect login pages after navigation
-        if result.get("status") == "success":
+        if isinstance(result, dict) and result.get("status") == "success":
             try:
                 handoff = self._get_login_handoff()
                 user_id = ""

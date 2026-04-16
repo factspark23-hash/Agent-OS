@@ -958,25 +958,31 @@ class CDPStealthInjector:
             ]
 
             # Set User-Agent override with full metadata
-            await cdp.send("Emulation.setUserAgentOverride", {
-                "userAgent": ua,
-                "acceptLanguage": "en-US,en;q=0.9",
-                "platform": fingerprint.get("platform", "Win32"),
-                "userAgentMetadata": {
-                    "brands": brands,
-                    "fullVersionList": [
-                        {**b, "version": f"{b['version']}.0.0.0"} for b in brands
-                    ],
-                    "fullVersion": f"{chrome_version}.0.0.0",
-                    "platform": "Windows",
-                    "platformVersion": "15.0.0",
-                    "architecture": "x86",
-                    "model": "",
-                    "mobile": False,
-                    "bitness": "64",
-                    "wow64": False,
-                },
-            })
+            # (ignore "already in effect" errors from duplicate calls —
+            # can happen if GodMode stealth already set this override)
+            try:
+                await cdp.send("Emulation.setUserAgentOverride", {
+                    "userAgent": ua,
+                    "acceptLanguage": "en-US,en;q=0.9",
+                    "platform": fingerprint.get("platform", "Win32"),
+                    "userAgentMetadata": {
+                        "brands": brands,
+                        "fullVersionList": [
+                            {**b, "version": f"{b['version']}.0.0.0"} for b in brands
+                        ],
+                        "fullVersion": f"{chrome_version}.0.0.0",
+                        "platform": "Windows",
+                        "platformVersion": "15.0.0",
+                        "architecture": "x86",
+                        "model": "",
+                        "mobile": False,
+                        "bitness": "64",
+                        "wow64": False,
+                    },
+                })
+            except Exception as e:
+                if "already in effect" not in str(e).lower():
+                    raise
 
             # Timezone is already set by GodModeStealth (stealth_god.py)
             # to avoid duplicate CDP "Timezone override is already in effect" warning
