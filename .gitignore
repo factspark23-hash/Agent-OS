@@ -24,8 +24,3 @@ production_test_results.json
 grind_results_*.json
 ultimate_grind_results.json
 test_results.json
-
-# Web UI
-web/node_modules/
-web/dist/
-web/.vite/

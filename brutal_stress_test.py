@@ -1451,61 +1451,59 @@ def test_handoff_state_machine():
 
 
 # ═══════════════════════════════════════════════════════════════
-# 20. FRONTEND BUILD CHECK
+# 20. STEALTH MODES CHECK
 # ═══════════════════════════════════════════════════════════════
 
-def test_frontend():
-    suite = TestSuite(category="20. Frontend Build")
+def test_stealth_modes():
+    suite = TestSuite(category="20. Stealth Modes")
     results = []
     
-    web_dir = Path(__file__).parent / "web"
+    src_dir = Path(__file__).parent / "src"
     
-    def test_frontend_files_exist():
-        assert (web_dir / "package.json").exists(), "Missing package.json"
-        assert (web_dir / "vite.config.ts").exists(), "Missing vite.config.ts"
-        assert (web_dir / "src" / "App.tsx").exists(), "Missing App.tsx"
-        assert (web_dir / "src" / "main.tsx").exists(), "Missing main.tsx"
-        assert (web_dir / "index.html").exists(), "Missing index.html"
+    def test_stealth_layer1_cdp():
+        """Layer 1: CDP Stealth Injector must exist and be importable."""
+        cdp_path = src_dir / "core" / "cdp_stealth.py"
+        assert cdp_path.exists(), "Missing cdp_stealth.py"
+        content = cdp_path.read_text()
+        assert "CDPStealthInjector" in content, "Missing CDPStealthInjector class"
+        assert "inject_into_page" in content, "Missing inject_into_page method"
+        assert "Page.addScriptToEvaluateOnNewDocument" in content, "Missing CDP injection"
     
-    results.append(run_test(suite.category, "frontend_files_exist", test_frontend_files_exist))
+    results.append(run_test(suite.category, "stealth_cdp_layer", test_stealth_layer1_cdp))
     
-    def test_frontend_components():
-        components_dir = web_dir / "src" / "components"
-        assert components_dir.exists(), "Missing components directory"
-        tabs_dir = components_dir / "tabs"
-        assert tabs_dir.exists(), "Missing tabs directory"
-        # Key components
-        assert (components_dir / "Sidebar.tsx").exists(), "Missing Sidebar.tsx"
-        assert (tabs_dir / "BrowserTab.tsx").exists(), "Missing BrowserTab.tsx"
-        assert (tabs_dir / "DashboardTab.tsx").exists(), "Missing DashboardTab.tsx"
+    def test_stealth_layer2_init_script():
+        """Layer 2: ANTI_DETECTION_JS must exist in stealth.py."""
+        stealth_path = src_dir / "core" / "stealth.py"
+        assert stealth_path.exists(), "Missing stealth.py"
+        content = stealth_path.read_text()
+        assert "ANTI_DETECTION_JS" in content, "Missing ANTI_DETECTION_JS constant"
+        assert "webdriver" in content.lower(), "Missing webdriver removal"
+        assert "plugins" in content.lower(), "Missing plugins override"
     
-    results.append(run_test(suite.category, "frontend_components_exist", test_frontend_components))
+    results.append(run_test(suite.category, "stealth_init_script_layer", test_stealth_layer2_init_script))
     
-    def test_frontend_services():
-        services_dir = web_dir / "src" / "services"
-        assert services_dir.exists(), "Missing services directory"
-        assert (services_dir / "api.ts").exists(), "Missing api.ts"
+    def test_stealth_layer3_god_mode():
+        """Layer 3: God Mode Stealth must exist with consistent fingerprint."""
+        god_path = src_dir / "core" / "stealth_god.py"
+        assert god_path.exists(), "Missing stealth_god.py"
+        content = god_path.read_text()
+        assert "ConsistentFingerprint" in content, "Missing ConsistentFingerprint class"
+        assert "GodModeStealth" in content, "Missing GodModeStealth class"
+        assert "inject_into_page" in content, "Missing inject_into_page method"
+        assert "HARDWARE_PROFILES" in content, "Missing hardware profiles"
     
-    results.append(run_test(suite.category, "frontend_services_exist", test_frontend_services))
+    results.append(run_test(suite.category, "stealth_god_mode_layer", test_stealth_layer3_god_mode))
     
-    def test_frontend_store():
-        store_dir = web_dir / "src" / "store"
-        assert store_dir.exists(), "Missing store directory"
-        assert (store_dir / "useAppStore.ts").exists(), "Missing useAppStore.ts"
+    def test_browser_wires_all_stealth():
+        """browser.py must import and use all 3 stealth layers."""
+        browser_path = src_dir / "core" / "browser.py"
+        assert browser_path.exists(), "Missing browser.py"
+        content = browser_path.read_text()
+        assert "CDPStealthInjector" in content, "Missing CDP stealth import"
+        assert "ANTI_DETECTION_JS" in content, "Missing ANTI_DETECTION_JS usage (Layer 2)"
+        assert "GodModeStealth" in content or "stealth_god" in content, "Missing GodMode import (Layer 3)"
     
-    results.append(run_test(suite.category, "frontend_store_exist", test_frontend_store))
-    
-    # Check if JWT auth is integrated in frontend
-    def test_jwt_frontend_integration():
-        api_file = web_dir / "src" / "services" / "api.ts"
-        if api_file.exists():
-            content = api_file.read_text()
-            # Check for JWT-related code
-            has_jwt = "jwt" in content.lower() or "token" in content.lower() or "auth" in content.lower()
-            if not has_jwt:
-                raise AssertionError("Frontend api.ts missing JWT/auth/token integration")
-    
-    results.append(run_test(suite.category, "jwt_frontend_integration", test_jwt_frontend_integration, "critical"))
+    results.append(run_test(suite.category, "browser_stealth_wiring", test_browser_wires_all_stealth, "critical"))
     
     add_results(suite, results)
     ALL_SUITES.append(suite)
@@ -1809,8 +1807,8 @@ def main():
     print("▶ Running Handoff State Machine tests...")
     test_handoff_state_machine()
     
-    print("▶ Running Frontend Build tests...")
-    test_frontend()
+    print("▶ Running Stealth Modes tests...")
+    test_stealth_modes()
     
     print("▶ Running Infrastructure tests...")
     test_infra()

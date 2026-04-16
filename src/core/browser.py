@@ -19,11 +19,13 @@ from cryptography.fernet import Fernet
 from patchright.async_api import async_playwright, Browser, Page, BrowserContext
 
 from src.core.stealth import (
+    ANTI_DETECTION_JS,
     handle_request_interception,
 )
 from src.core.tls_spoof import apply_browser_tls_spoofing
 from src.core.tls_proxy import TLSProxyServer, TLSHTTPClient, _CURL_AVAILABLE
 from src.core.cdp_stealth import CDPStealthInjector
+from src.core.stealth_god import GodModeStealth, ConsistentFingerprint
 from src.tools.proxy_rotation import ProxyManager, ProxyInfo
 from src.security.evasion_engine import EvasionEngine
 from src.security.human_mimicry import HumanMimicry
@@ -52,6 +54,8 @@ class BrowserProfile:
     screen_height: int
     timezone_id: str
     locale: str
+    max_touch_points: int = 0
+    pixel_ratio: float = 1.0
 
 
 # Exactly 12 profiles: 4x Windows, 4x macOS, 2x Ubuntu, 2x Windows+Edge
@@ -122,6 +126,8 @@ BROWSER_PROFILES: List[BrowserProfile] = [
         screen_height=1600,
         timezone_id="America/Los_Angeles",
         locale="en-US",
+        max_touch_points=0,
+        pixel_ratio=2.0,
     ),
     BrowserProfile(
         user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
@@ -135,6 +141,8 @@ BROWSER_PROFILES: List[BrowserProfile] = [
         screen_height=1200,
         timezone_id="America/New_York",
         locale="en-US",
+        max_touch_points=0,
+        pixel_ratio=2.0,
     ),
     BrowserProfile(
         user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
@@ -148,6 +156,8 @@ BROWSER_PROFILES: List[BrowserProfile] = [
         screen_height=1800,
         timezone_id="America/Los_Angeles",
         locale="en-US",
+        max_touch_points=0,
+        pixel_ratio=2.0,
     ),
     BrowserProfile(
         user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
@@ -161,6 +171,8 @@ BROWSER_PROFILES: List[BrowserProfile] = [
         screen_height=1080,
         timezone_id="Europe/Paris",
         locale="fr-FR",
+        max_touch_points=0,
+        pixel_ratio=2.0,
     ),
     # ── Ubuntu 22.04 × Chrome 145, 146 ────────────────────────
     BrowserProfile(
@@ -272,9 +284,18 @@ class AgentBrowser:
         self._proxy_rotation_interval: int = 10
         # Evasion engine (TLS + fingerprint + cloudflare)
         self._evasion = EvasionEngine()
-        # CDP Stealth Injector — SOLE stealth injection mechanism via CDP
+        # Layer 1: CDP Stealth Injector — PRIMARY stealth via CDP
         # (Page.addScriptToEvaluateOnNewDocument runs BEFORE page scripts)
         self._cdp_stealth = CDPStealthInjector()
+        # Layer 2: ANTI_DETECTION_JS from stealth.py — backup via add_init_script
+        # Covers additional vectors like Notification API, Battery, Font enum,
+        # Performance Timing, Beacon API, CDP detection, PerimeterX detection
+        self._stealth_js = ANTI_DETECTION_JS
+        # Layer 3: God Mode Stealth — ULTIMATE fallback with consistent fingerprints
+        # Activated when CDP stealth fails or for sites that detect CDP-level patches
+        self._god_mode_stealth = GodModeStealth()
+        # Track which stealth layer is active for each page
+        self._stealth_layers_active: Dict[str, List[str]] = {}
         # Import at class level to avoid repeated imports
         self._mimicry = HumanMimicry()
         # CAPTCHA solver
@@ -537,18 +558,87 @@ class AgentBrowser:
         self._attach_console_listener("main", self.page)
 
         # ═══════════════════════════════════════════════════════════
-        # CDP STEALTH — SOLE injection mechanism
+        # LAYER 1: CDP STEALTH — PRIMARY injection
         # Uses CDP Page.addScriptToEvaluateOnNewDocument which runs BEFORE
         # any page JavaScript, including bot detection scripts.
-        # This is the ONLY stealth JS injection needed — all detection
-        # vectors are handled here (webdriver, plugins, chrome, WebGL, etc.)
         # ═══════════════════════════════════════════════════════════
-        await self._cdp_stealth.inject_into_page(
+        cdp_ok = await self._cdp_stealth.inject_into_page(
             self.page,
             page_id="main",
             chrome_version=chrome_ver,
             fingerprint=fp,
         )
+        layers = []
+        if cdp_ok:
+            layers.append("CDP")
+            logger.info("Stealth Layer 1 (CDP): ACTIVE — Page.addScriptToEvaluateOnNewDocument")
+        else:
+            logger.warning("Stealth Layer 1 (CDP): FAILED — falling back to Layer 3 (God Mode)")
+
+        # ═══════════════════════════════════════════════════════════
+        # LAYER 2: ANTI_DETECTION_JS — BACKUP via add_init_script
+        # Covers additional vectors not in CDP stealth:
+        # - Notification API full mock
+        # - Battery API
+        # - Font enumeration block
+        # - Performance Timing spoof
+        # - Beacon API + sendBeacon interception
+        # - CDP detection prevention
+        # - Cloudflare/PerimeterX challenge detection observer
+        # - Navigator consistency guard
+        # ═══════════════════════════════════════════════════════════
+        try:
+            # Replace placeholder tokens in ANTI_DETECTION_JS with profile values
+            stealth_js_filled = self._stealth_js
+            stealth_js_filled = stealth_js_filled.replace(
+                '__AGENT_OS_PLATFORM__', f"'{self._active_profile.platform}'"
+            )
+            stealth_js_filled = stealth_js_filled.replace(
+                '__AGENT_OS_CORES__', str(self._active_profile.hardware_concurrency)
+            )
+            stealth_js_filled = stealth_js_filled.replace(
+                '__AGENT_OS_MEMORY__', str(self._active_profile.device_memory)
+            )
+            stealth_js_filled = stealth_js_filled.replace(
+                '__AGENT_OS_TOUCH__', str(self._active_profile.max_touch_points)
+            )
+            stealth_js_filled = stealth_js_filled.replace(
+                '__AGENT_OS_SCREEN_WIDTH__', str(self._active_profile.screen_width)
+            )
+            stealth_js_filled = stealth_js_filled.replace(
+                '__AGENT_OS_SCREEN_HEIGHT__', str(self._active_profile.screen_height)
+            )
+            stealth_js_filled = stealth_js_filled.replace(
+                '__AGENT_OS_DEVICE_PIXEL_RATIO__', str(self._active_profile.pixel_ratio)
+            )
+            await self.context.add_init_script(stealth_js_filled)
+            layers.append("InitScript")
+            logger.info("Stealth Layer 2 (InitScript): ACTIVE — ANTI_DETECTION_JS via add_init_script")
+        except Exception as e:
+            logger.warning(f"Stealth Layer 2 (InitScript): FAILED — {e}")
+
+        # ═══════════════════════════════════════════════════════════
+        # LAYER 3: GOD MODE STEALTH — ULTIMATE FALLBACK
+        # Only activated if CDP stealth failed, or always active as
+        # additional coverage. Uses ConsistentFingerprint to ensure
+        # ALL detection vectors (WebGL, Canvas, Audio, Screen, etc.)
+        # match real hardware combinations.
+        # ═══════════════════════════════════════════════════════════
+        try:
+            # GodModeStealth generates its own ConsistentFingerprint internally
+            god_ok = await self._god_mode_stealth.inject_into_page(
+                self.page, page_id="main",
+            )
+            if god_ok:
+                layers.append("GodMode")
+                logger.info("Stealth Layer 3 (GodMode): ACTIVE — consistent fingerprint + CDP/DevTools detection prevention")
+            else:
+                logger.warning("Stealth Layer 3 (GodMode): injection returned False")
+        except Exception as e:
+            logger.warning(f"Stealth Layer 3 (GodMode): FAILED — {e}")
+
+        self._stealth_layers_active["main"] = layers
+        logger.info(f"Stealth layers active for 'main': {layers}")
 
         # Apply TLS fingerprint spoofing via CDP (needs an existing page)
         await apply_browser_tls_spoofing(self.page, chrome_version=chrome_ver)
