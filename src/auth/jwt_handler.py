@@ -5,9 +5,12 @@ and secure defaults.
 """
 import hashlib
 import hmac
+import json
 import logging
+import os
 import secrets
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import jwt as pyjwt
@@ -35,6 +38,9 @@ class JWTHandler:
         self.refresh_expire = timedelta(days=refresh_token_expire_days)
         self.issuer = issuer
         self._blacklist: set = set()  # In production, use Redis
+        self._user_tokens: Dict[str, set] = {}  # user_id → set of JTIs
+        self._blacklist_file = Path(os.path.expanduser("~/.agent-os/jwt_blacklist.json"))
+        self._load_blacklist()
 
     def create_access_token(self, user_id: str, api_key_id: str = None,
                             scopes: list = None, extra: dict = None) -> str:
@@ -55,7 +61,15 @@ class JWTHandler:
         if extra:
             payload.update(extra)
 
-        return pyjwt.encode(payload, self.secret_key, algorithm=self.algorithm)
+        token = pyjwt.encode(payload, self.secret_key, algorithm=self.algorithm)
+
+        # Track JTI for user (for bulk revocation)
+        jti = payload["jti"]
+        if user_id not in self._user_tokens:
+            self._user_tokens[user_id] = set()
+        self._user_tokens[user_id].add(jti)
+
+        return token
 
     def create_refresh_token(self, user_id: str, api_key_id: str = None) -> str:
         """Create a long-lived refresh token."""
@@ -82,6 +96,30 @@ class JWTHandler:
             "token_type": "bearer",
             "expires_in": int(self.access_expire.total_seconds()),
         }
+
+    def _load_blacklist(self):
+        """Load blacklist from disk on startup."""
+        try:
+            if self._blacklist_file.exists():
+                data = json.loads(self._blacklist_file.read_text())
+                self._blacklist = set(data.get("blacklist", []))
+                self._user_tokens = {k: set(v) for k, v in data.get("user_tokens", {}).items()}
+                logger.info(f"Loaded {len(self._blacklist)} blacklisted tokens from disk")
+        except Exception as e:
+            logger.warning(f"Failed to load JWT blacklist: {e}")
+
+    def _save_blacklist(self):
+        """Persist blacklist to disk."""
+        try:
+            self._blacklist_file.parent.mkdir(parents=True, exist_ok=True)
+            data = {
+                "blacklist": list(self._blacklist),
+                "user_tokens": {k: list(v) for k, v in self._user_tokens.items()},
+            }
+            self._blacklist_file.write_text(json.dumps(data))
+            self._blacklist_file.chmod(0o600)
+        except Exception as e:
+            logger.warning(f"Failed to save JWT blacklist: {e}")
 
     def verify_token(self, token: str, token_type: str = "access") -> Optional[Dict]:
         """
@@ -126,6 +164,7 @@ class JWTHandler:
         jti = payload.get("jti")
         if jti:
             self._blacklist.add(jti)
+            self._save_blacklist()
 
         return self.create_token_pair(
             user_id=payload["sub"],
@@ -143,6 +182,7 @@ class JWTHandler:
             jti = payload.get("jti")
             if jti:
                 self._blacklist.add(jti)
+                self._save_blacklist()
                 return True
         except Exception:
             pass
@@ -151,11 +191,16 @@ class JWTHandler:
     def revoke_all_user_tokens(self, user_id: str):
         """
         Revoke all tokens for a user.
-        In production, this would use Redis with user_id prefix.
+        Uses tracked JTIs per user_id to blacklist all their tokens.
         """
-        # For in-memory implementation, we track user JTIs
-        # In production, use Redis sets per user
-        logger.info(f"Revoked all tokens for user {user_id}")
+        jtis = self._user_tokens.get(user_id, set())
+        if jtis:
+            self._blacklist.update(jtis)
+            self._user_tokens[user_id] = set()
+            self._save_blacklist()
+            logger.info(f"Revoked {len(jtis)} tokens for user {user_id}")
+        else:
+            logger.info(f"No tracked tokens to revoke for user {user_id}")
 
     @staticmethod
     def hash_token(token: str) -> str:

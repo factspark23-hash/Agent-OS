@@ -5,8 +5,8 @@ from src.agent_swarm.router.rule_based import QueryClassification, QueryCategory
 
 class ConservativeRouter:
     """Tier 3: Conservative default router.
-    
-    When both Tier 1 (rule-based) and Tier 2 (LLM) are uncertain,
+
+    When both Tier 1 (rule-based) and Tier 2 (provider) are uncertain,
     always classify as NEEDS_WEB. It's safer to over-search than
     miss critical information.
     """

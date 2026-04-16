@@ -56,12 +56,12 @@ export const PROVIDERS: Provider[] = [
     color: '#4a9eff',
   },
   {
-    id: 'ollama',
-    name: 'Ollama (Local)',
-    keyPrefix: 'http://localhost:',
-    baseUrl: 'http://localhost:11434/v1',
-    models: ['llama3', 'mistral', 'codellama', 'qwen2'],
-    icon: '🦙',
+    id: 'local',
+    name: 'Local / Self-hosted',
+    keyPrefix: 'http://',
+    baseUrl: 'http://localhost:8080/v1',
+    models: [],
+    icon: '🏠',
     color: '#6366f1',
   },
 ];
@@ -69,14 +69,14 @@ export const PROVIDERS: Provider[] = [
 export function detectProvider(apiKey: string): Provider | null {
   if (!apiKey || apiKey.trim().length === 0) return null;
 
-  // Check Ollama first (URL-based)
+  // Check by URL prefix first (for local/self-hosted providers)
   if (apiKey.startsWith('http://localhost:') || apiKey.startsWith('http://127.0.0.1:')) {
-    return PROVIDERS.find(p => p.id === 'ollama') || null;
+    return PROVIDERS.find(p => p.id === 'local') || null;
   }
 
-  // Check by prefix
+  // Check by key prefix
   for (const provider of PROVIDERS) {
-    if (provider.id === 'ollama') continue;
+    if (provider.id === 'local') continue;
     if (apiKey.startsWith(provider.keyPrefix)) {
       return provider;
     }
@@ -86,16 +86,16 @@ export function detectProvider(apiKey: string): Provider | null {
 }
 
 export function maskKey(key: string): string {
-  if (key.startsWith('http')) return key; // Ollama URL
+  if (key.startsWith('http')) return key; // Local provider URL
   if (key.length <= 8) return '••••••••';
   return key.slice(0, 4) + '••••' + key.slice(-4);
 }
 
 export function validateKeyFormat(apiKey: string, provider: Provider): { valid: boolean; message: string } {
-  if (provider.id === 'ollama') {
+  if (provider.id === 'local') {
     try {
       new URL(apiKey);
-      return { valid: true, message: 'Valid URL' };
+      return { valid: true, message: 'Valid local provider URL' };
     } catch {
       return { valid: false, message: 'Invalid URL format' };
     }

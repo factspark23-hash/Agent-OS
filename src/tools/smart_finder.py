@@ -273,10 +273,14 @@ class SmartElementFinder:
                 return 0;
             }}
 
-            const allElements = document.querySelectorAll('*');
+            const allElements = document.querySelectorAll('a, button, input, textarea, select, [aria-label], [role="button"], [placeholder], [title], [alt], [for], [onclick], [tabindex], label, h1, h2, h3, h4, img, [data-testid]');
             for (const el of allElements) {{
                 if ({tag_clause} false) continue;
-                if (el.offsetParent === null && el.style.position !== 'fixed') continue; // Skip hidden
+                // Skip truly hidden elements but allow elements with offsetParent === null
+                // that are inside scrollable containers (lazy loaded content)
+                const style = window.getComputedStyle(el);
+                const isHidden = style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0';
+                if (isHidden && el.style.position !== 'fixed') continue;
 
                 const tag = el.tagName.toLowerCase();
 

@@ -18,7 +18,6 @@ State machine:
                     ↘ TIMED_OUT → IDLE
 """
 import asyncio
-import hashlib
 import json
 import logging
 import secrets
@@ -331,7 +330,7 @@ class LoginDetector:
             title_hit = result.get("titleHit")
             text_hit = result.get("textHit")
             has_password = result.get("hasPassword", False)
-            page_title = result.get("title", "")
+            _page_title = result.get("title", "")
 
             # Scoring system: combine signals for confidence
             login_score = 0.0

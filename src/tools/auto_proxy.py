@@ -23,7 +23,6 @@ Features:
 import asyncio
 import json
 import logging
-import os
 import random
 import time
 from typing import Optional, Dict, Any, List, Set
@@ -101,7 +100,7 @@ class BlockDetector:
 
         # Check HTTP status
         if status_code in cls.BLOCK_STATUS_CODES:
-            reason = cls.BLOCK_STATUS_CODES[status_code]
+            _reason = cls.BLOCK_STATUS_CODES[status_code]
 
             # Soft blocks (rate limit) vs hard blocks (WAF)
             if status_code == 429:

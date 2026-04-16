@@ -1,7 +1,7 @@
 """Agent Swarm - Parallel web search agent system integrated into Agent-OS.
 
 Provides:
-- Query routing (3-tier: rule-based → LLM fallback → conservative)
+- Query routing (3-tier: rule-based → provider fallback → conservative)
 - Parallel search agents (news_hound, deep_researcher, price_checker, tech_scanner, generalist)
 - Multiple search backends (HTTP/Bing/DDG, Agent-OS browser)
 - Structured output with quality scoring and deduplication

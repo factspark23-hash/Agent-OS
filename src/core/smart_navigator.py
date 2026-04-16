@@ -43,6 +43,14 @@ class SmartNavigator:
         "underarmour.com",
     ]
 
+    # Sites that need networkidle wait for full JS rendering (login pages, SPA)
+    NETWORKIDLE_REQUIRED_DOMAINS = [
+        "instagram.com", "facebook.com", "twitter.com", "x.com",
+        "linkedin.com", "github.com", "accounts.google.com",
+        "login.microsoftonline.com", "amazon.com", "netflix.com",
+        "spotify.com", "tiktok.com", "reddit.com",
+    ]
+
     # Sites known to need delays between requests
     RATE_SENSITIVE_DOMAINS = [
         "realtor.com", "expedia.com", "booking.com",
@@ -59,8 +67,11 @@ class SmartNavigator:
     def __init__(self, browser: AgentBrowser) -> None:
         self._browser = browser
         self._tls_client = TLSClient()
-        # Cache: domain -> "http" | "browser"
+        # Cache: domain -> "http" | "browser" (with TTL and cap)
         self._strategy_cache: Dict[str, str] = {}
+        self._strategy_cache_times: Dict[str, float] = {}
+        self._strategy_cache_ttl = 3600  # 1 hour
+        self._strategy_cache_max = 1000
         # Stats: domain -> {http_success, browser_success, http_fail, browser_fail}
         self._stats: Dict[str, Dict[str, int]] = defaultdict(
             lambda: {"http_success": 0, "browser_success": 0,
@@ -85,6 +96,28 @@ class SmartNavigator:
 
     # ── Strategy Selection ─────────────────────────────────────
 
+    def _get_cached_strategy(self, domain: str) -> Optional[str]:
+        """Get cached strategy for domain, respecting TTL."""
+        if domain in self._strategy_cache:
+            if time.time() - self._strategy_cache_times.get(domain, 0) > self._strategy_cache_ttl:
+                del self._strategy_cache[domain]
+                del self._strategy_cache_times[domain]
+                return None
+            return self._strategy_cache[domain]
+        return None
+
+    def _set_cached_strategy(self, domain: str, strategy: str) -> None:
+        """Cache strategy for domain with TTL tracking and size cap."""
+        # Cap cache size
+        if len(self._strategy_cache) >= self._strategy_cache_max:
+            # Remove oldest entries
+            oldest = sorted(self._strategy_cache_times.items(), key=lambda x: x[1])[:100]
+            for d, _ in oldest:
+                self._strategy_cache.pop(d, None)
+                self._strategy_cache_times.pop(d, None)
+        self._strategy_cache[domain] = strategy
+        self._strategy_cache_times[domain] = time.time()
+
     def _pick_initial_strategy(self, url: str, prefer_browser: bool) -> str:
         """Decide whether to start with HTTP or browser."""
         domain = self._get_domain(url)
@@ -96,9 +129,9 @@ class SmartNavigator:
                 return "browser"
 
         # 2. Cached strategy from previous successful attempt
-        if domain in self._strategy_cache:
+        cached = self._get_cached_strategy(domain)
+        if cached:
             self._cache_hits += 1
-            cached = self._strategy_cache[domain]
             logger.debug("Strategy cache hit for %s: %s", domain, cached)
             return cached
 
@@ -165,17 +198,30 @@ class SmartNavigator:
         domain = self._get_domain(url)
         start_ms = time.monotonic()
 
+        # Pick wait strategy: use networkidle for JS-heavy/login sites
+        wait_until = "domcontentloaded"
+        for nd in self.NETWORKIDLE_REQUIRED_DOMAINS:
+            if nd in domain:
+                wait_until = "networkidle"
+                logger.info(f"Using networkidle wait for JS-heavy domain: {domain}")
+                break
+
         try:
             nav_result = await self._browser.navigate(
                 url,
                 page_id="main",
-                wait_until="domcontentloaded",
+                wait_until=wait_until,
                 retries=1,
                 warmup=False,
             )
 
             # Grab page content after navigation
             content_result: Dict[str, Any] = {"text": "", "title": ""}
+            
+            # Wait for JS-heavy sites to fully render before reading content
+            if wait_until == "networkidle":
+                await asyncio.sleep(random.uniform(1.0, 2.5))
+            
             try:
                 content_result = await self._browser.get_content(page_id="main")
             except Exception:
@@ -307,7 +353,7 @@ class SmartNavigator:
 
             # ── Success: cache and return ──────────────────────
             if is_success and not is_blocked:
-                self._strategy_cache[domain] = strategy
+                self._set_cached_strategy(domain, strategy)
                 response["attempts"] = attempt + 1
                 return response
 

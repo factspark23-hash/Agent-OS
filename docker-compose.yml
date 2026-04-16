@@ -60,6 +60,11 @@ services:
     build: .
     container_name: agent-os
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: false
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100m
     depends_on:
       postgres:
         condition: service_healthy
@@ -105,14 +110,28 @@ services:
     image: nginx:1.27-alpine
     container_name: agent-os-nginx
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       - agent-os
     ports:
-      - "0.0.0.0:8080:80"
+      - "127.0.0.1:8080:80"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.5"
 
 volumes:
   postgres-data:
   redis-data:
   agent-os-data:
+
+networks:
+  default:
+    driver: bridge
+  internal:
+    driver: bridge
+    internal: true  # No external access

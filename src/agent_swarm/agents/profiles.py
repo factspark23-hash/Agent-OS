@@ -71,7 +71,7 @@ SEARCH_PROFILES: dict[str, SearchProfile] = {
         preferred_sources=["wikipedia.org", "reuters.com"],
         search_depth="medium",
         query_style="broad_exploratory",
-        keywords=[],
+        keywords=["general", "help", "assist", "what", "how", "why", "explain", "tell me", "can you", "information", "question", "query", "find", "search", "look up", "about", "info", "how to", "what is", "overview"],
         priority=1,
     ),
     "social_media_tracker": SearchProfile(

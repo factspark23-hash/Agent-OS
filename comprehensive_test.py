@@ -140,7 +140,7 @@ async def test_swarm():
         profiles = AgentProfiles()
         agents = []
         for i in range(50):
-            pn = ["researcher","fact_checker","summarizer","analyst","explorer","news_hound","deep_researcher","price_checker","tech_scanner","generalist"][i%10]
+            pn = ["social_media_tracker","finance_analyst","health_researcher","legal_eagle","travel_scout","news_hound","deep_researcher","price_checker","tech_scanner","generalist"][i%10]
             try:
                 pd=profiles.get_profile(pn)
                 if pd: agents.append(SearchAgent(name=f"agent_{i:02d}_{pn}",profile_name=pd.get("name",pn),expertise=pd.get("expertise","general"),preferred_sources=pd.get("preferred_sources"),search_depth=pd.get("search_depth","medium"),query_style=pd.get("query_style","broad_exploratory")))

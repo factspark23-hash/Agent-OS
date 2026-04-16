@@ -33,7 +33,6 @@ from typing import Any, Dict, List, Optional, Callable
 from patchright.async_api import async_playwright, Browser, BrowserContext, Page
 
 from src.core.stealth import (
-    ANTI_DETECTION_JS,
     handle_request_interception,
 )
 
@@ -154,18 +153,14 @@ class UserContext:
         }
 
         self.context = await self.browser_instance.browser.new_context(**context_options)
-        # Inject stealth + fingerprint at context level (backup layer)
+        # Set up request interception for bot detection blocking
         from src.security.evasion_engine import EvasionEngine
         from src.core.cdp_stealth import CDPStealthInjector
-        from src.core.stealth_god import GodModeStealth
         evasion = EvasionEngine()
         fp = evasion.generate_fingerprint(page_id="main")
-        fingerprint_js = evasion.get_injection_js("main")
-        await self.context.add_init_script(ANTI_DETECTION_JS + "\n" + fingerprint_js)
         await self.context.route("**/*", self._handle_request)
         self._evasion = evasion
         self._cdp_stealth = CDPStealthInjector()
-        self._god_stealth = GodModeStealth()
 
         # Restore saved state
         state = self._load_state()
@@ -188,14 +183,8 @@ class UserContext:
 
         self.active_page = self.pages.get("main", list(self.pages.values())[0])
 
-        # Apply GOD MODE stealth to active page — THE ULTIMATE FIX
+        # Apply CDP stealth — SOLE anti-detection injection
         try:
-            # GOD MODE stealth — primary anti-detection layer
-            await self._god_stealth.inject_into_page(
-                self.active_page,
-                page_id="main",
-            )
-            # CDP stealth — backup layer
             chrome_ver = fp.get("chrome_version", "124") if fp else "124"
             await self._cdp_stealth.inject_into_page(
                 self.active_page,
@@ -203,9 +192,9 @@ class UserContext:
                 chrome_version=chrome_ver,
                 fingerprint=fp,
             )
-            logger.info(f"GOD MODE stealth applied to active page for {self.user_id}")
+            logger.info(f"CDP stealth applied to active page for {self.user_id}")
         except Exception as e:
-            logger.warning(f"GOD MODE stealth injection failed: {e}")
+            logger.warning(f"CDP stealth injection failed: {e}")
 
         logger.info(f"User context initialized: {self.user_id} (profile: {self.profile_dir})")
 
@@ -353,11 +342,15 @@ class BrowserInstance:
             "--window-size=1920,1080",
             "--disable-features=TranslateUI",
             "--disable-ipc-flooding-protection",
-            "--no-sandbox",
+            "--headless=new",  # New headless mode — preserves plugins, chrome runtime, correct UA
             "--disable-setuid-sandbox",
-            "--disable-dev-shm-usage",
             "--process-per-site",
         ]
+        # In Docker containers, Chromium cannot use its own namespace sandbox
+        # because the container itself IS the sandbox. Add --no-sandbox only
+        # when running inside Docker to avoid "namespace sandbox" failures.
+        if os.getenv("AGENT_OS_DOCKER") == "1":
+            args.append("--no-sandbox")
         return [a for a in args if a]
 
     async def start(self):
@@ -720,147 +713,467 @@ class PersistentBrowserManager:
     # ─── Command Handlers ─────────────────────────────────────
 
     async def _cmd_navigate(self, ctx: UserContext, params: Dict) -> Dict:
-        url = params.get("url")
-        if not url:
-            return {"status": "error", "error": "Missing 'url'"}
-        page_id = params.get("page_id", "main")
-        page = ctx.get_page(page_id)
-        if not page:
-            return {"status": "error", "error": f"Page not found: {page_id}"}
-        await asyncio.sleep(random.uniform(0.3, 1.2))
-        response = await page.goto(url, wait_until=params.get("wait_until", "domcontentloaded"), timeout=30000)
-        await asyncio.sleep(random.uniform(0.5, 1.5))
-        await ctx.save_state()
-        return {"status": "success", "url": page.url, "title": await page.title(), "status_code": response.status if response else 200}
+        try:
+            url = params.get("url")
+            if not url:
+                return {"status": "error", "error": "Missing 'url'"}
+            page_id = params.get("page_id", "main")
+            page = ctx.get_page(page_id)
+            if not page:
+                return {"status": "error", "error": f"Page not found: {page_id}"}
+            await asyncio.sleep(random.uniform(0.3, 1.2))
+            response = await page.goto(url, wait_until=params.get("wait_until", "domcontentloaded"), timeout=30000)
+            await asyncio.sleep(random.uniform(0.5, 1.5))
+            await ctx.save_state()
+            return {"status": "success", "url": page.url, "title": await page.title(), "status_code": response.status if response else 200}
+        except Exception as e:
+            logger.error(f"Navigate error: {e}")
+            return {"status": "error", "error": str(e)}
 
     async def _cmd_click(self, ctx: UserContext, params: Dict) -> Dict:
-        selector = params.get("selector")
-        if not selector:
-            return {"status": "error", "error": "Missing 'selector'"}
-        page = ctx.get_page()
-        el = await page.query_selector(selector)
-        if not el:
-            return {"status": "error", "error": f"Element not found: {selector}"}
-        box = await el.bounding_box()
-        if box:
-            target_x = box["x"] + box["width"] / 2
-            target_y = box["y"] + box["height"] / 2
-            steps = random.randint(5, 20)
-            for i in range(steps + 1):
-                t = i / steps
-                x = box["x"] + (target_x - box["x"]) * t + random.gauss(0, 2)
-                y = box["y"] + (target_y - box["y"]) * t + random.gauss(0, 2)
-                await page.mouse.move(x, y)
-                await asyncio.sleep(random.uniform(0.005, 0.02))
-        await asyncio.sleep(random.uniform(0.05, 0.15))
-        await el.click()
-        await asyncio.sleep(random.uniform(0.2, 0.5))
-        return {"status": "success", "selector": selector}
+        try:
+            selector = params.get("selector")
+            if not selector:
+                return {"status": "error", "error": "Missing 'selector'"}
+            page = ctx.get_page()
+            el = await page.query_selector(selector)
+            if not el:
+                return {"status": "error", "error": f"Element not found: {selector}"}
+            # Scroll element into view before interacting
+            try:
+                await el.scroll_into_view_if_needed()
+            except Exception as e:
+                logger.debug(f"scroll_into_view failed for {selector}: {e}")
+            # Visibility check with force click fallback
+            is_visible = await el.is_visible()
+            box = await el.bounding_box()
+            if box:
+                target_x = box["x"] + box["width"] / 2
+                target_y = box["y"] + box["height"] / 2
+                steps = random.randint(5, 20)
+                for i in range(steps + 1):
+                    t = i / steps
+                    x = box["x"] + (target_x - box["x"]) * t + random.gauss(0, 2)
+                    y = box["y"] + (target_y - box["y"]) * t + random.gauss(0, 2)
+                    await page.mouse.move(x, y)
+                    await asyncio.sleep(random.uniform(0.005, 0.02))
+            await asyncio.sleep(random.uniform(0.05, 0.15))
+            if is_visible:
+                await el.click()
+            else:
+                logger.warning(f"Element {selector} not visible, attempting force click")
+                await el.click(force=True)
+            await asyncio.sleep(random.uniform(0.2, 0.5))
+            return {"status": "success", "selector": selector}
+        except Exception as e:
+            logger.error(f"Click error: {e}")
+            return {"status": "error", "error": str(e)}
 
     async def _cmd_double_click(self, ctx: UserContext, params: Dict) -> Dict:
-        selector = params.get("selector")
-        if not selector:
-            return {"status": "error", "error": "Missing 'selector'"}
-        page = ctx.get_page()
-        await page.dblclick(selector)
-        await asyncio.sleep(random.uniform(0.2, 0.5))
-        return {"status": "success", "selector": selector}
+        try:
+            selector = params.get("selector")
+            if not selector:
+                return {"status": "error", "error": "Missing 'selector'"}
+            page = ctx.get_page()
+            el = await page.query_selector(selector)
+            if not el:
+                return {"status": "error", "error": f"Element not found: {selector}"}
+            # Scroll element into view before interacting
+            try:
+                await el.scroll_into_view_if_needed()
+            except Exception as e:
+                logger.debug(f"scroll_into_view failed for {selector}: {e}")
+            # Visibility check with force click fallback
+            is_visible = await el.is_visible()
+            if is_visible:
+                await page.dblclick(selector)
+            else:
+                logger.warning(f"Element {selector} not visible, attempting force double-click")
+                await page.dblclick(selector, force=True)
+            await asyncio.sleep(random.uniform(0.2, 0.5))
+            return {"status": "success", "selector": selector}
+        except Exception as e:
+            logger.error(f"Double-click error: {e}")
+            return {"status": "error", "error": str(e)}
 
     async def _cmd_right_click(self, ctx: UserContext, params: Dict) -> Dict:
-        selector = params.get("selector")
-        if not selector:
-            return {"status": "error", "error": "Missing 'selector'"}
-        page = ctx.get_page()
-        await page.click(selector, button="right")
-        await asyncio.sleep(random.uniform(0.2, 0.5))
-        return {"status": "success", "selector": selector}
+        try:
+            selector = params.get("selector")
+            if not selector:
+                return {"status": "error", "error": "Missing 'selector'"}
+            page = ctx.get_page()
+            el = await page.query_selector(selector)
+            if not el:
+                return {"status": "error", "error": f"Element not found: {selector}"}
+            # Scroll element into view before interacting
+            try:
+                await el.scroll_into_view_if_needed()
+            except Exception as e:
+                logger.debug(f"scroll_into_view failed for {selector}: {e}")
+            # Visibility check with force click fallback
+            is_visible = await el.is_visible()
+            if is_visible:
+                await page.click(selector, button="right")
+            else:
+                logger.warning(f"Element {selector} not visible, attempting force right-click")
+                await page.click(selector, button="right", force=True)
+            await asyncio.sleep(random.uniform(0.2, 0.5))
+            return {"status": "success", "selector": selector}
+        except Exception as e:
+            logger.error(f"Right-click error: {e}")
+            return {"status": "error", "error": str(e)}
 
     async def _cmd_type(self, ctx: UserContext, params: Dict) -> Dict:
-        text = params.get("text")
-        if not text:
-            return {"status": "error", "error": "Missing 'text'"}
-        page = ctx.get_page()
-        for char in text:
-            await page.keyboard.type(char, delay=random.randint(40, 180))
-        return {"status": "success", "typed": len(text)}
+        try:
+            text = params.get("text")
+            if not text:
+                return {"status": "error", "error": "Missing 'text'"}
+            page = ctx.get_page()
+            # Check if text contains special characters that may not type correctly
+            # with keyboard.type() on non-US keyboard layouts
+            special_chars = set('@#$%^&*{}|:"<>?~`éüñáíóúàèìòù_+!=()')
+            has_special = any(c in special_chars for c in text)
+            if has_special:
+                # Try keyboard.type() first (Patchright handles special chars well)
+                try:
+                    await page.keyboard.type(text, delay=random.randint(30, 120))
+                except Exception:
+                    # Fallback: insert_text() bypasses keyboard layout entirely
+                    await page.keyboard.insert_text(text)
+            else:
+                # Normal typing with human-like delay
+                await page.keyboard.type(text, delay=random.randint(30, 120))
+            return {"status": "success", "typed": len(text)}
+        except Exception as e:
+            logger.error(f"Type error: {e}")
+            return {"status": "error", "error": str(e)}
 
     async def _cmd_press(self, ctx: UserContext, params: Dict) -> Dict:
-        key = params.get("key")
-        if not key:
-            return {"status": "error", "error": "Missing 'key'"}
-        page = ctx.get_page()
-        await page.keyboard.press(key)
-        return {"status": "success", "key": key}
+        try:
+            key = params.get("key")
+            if not key:
+                return {"status": "error", "error": "Missing 'key'"}
+            page = ctx.get_page()
+            await page.keyboard.press(key)
+            return {"status": "success", "key": key}
+        except Exception as e:
+            logger.error(f"Press error: {e}")
+            return {"status": "error", "error": str(e)}
+
+    async def _find_element(self, page, selector: str, timeout_ms: int = 5000):
+        """Find an element using multiple selector strategies with wait.
+
+        Tries the exact selector first, then falls back to common patterns:
+        name attribute, placeholder, id, aria-label, label[for], data-testid,
+        and even by input type (email, password, tel, etc.).
+
+        Returns (element, actual_selector) or (None, None).
+        """
+        import time as _time
+
+        # Build the list of selectors to try, in priority order
+        selector_candidates = [selector]
+
+        is_full_selector = any(c in selector for c in ['[', '#', '.', '>', ':', ' '])
+        if not is_full_selector:
+            selector_candidates.extend([
+                f'input[name="{selector}"]',
+                f'textarea[name="{selector}"]',
+                f'select[name="{selector}"]',
+                f'#{selector}',
+                f'input[placeholder*="{selector}" i]',
+                f'textarea[placeholder*="{selector}" i]',
+                f'input[aria-label*="{selector}" i]',
+                f'textarea[aria-label*="{selector}" i]',
+                f'[data-testid="{selector}"]',
+            ])
+            # Type-based selectors for common fields
+            lower = selector.lower()
+            if 'email' in lower or 'e-mail' in lower or 'mail' in lower:
+                selector_candidates.extend([
+                    'input[type="email"]',
+                    'input[name="email"]',
+                    'input[name="username"]',
+                    'input[autocomplete="email"]',
+                    'input[autocomplete="username"]',
+                ])
+            elif 'password' in lower or 'pass' in lower or 'pwd' in lower:
+                selector_candidates.extend([
+                    'input[type="password"]',
+                    'input[name="password"]',
+                    'input[autocomplete="current-password"]',
+                ])
+            elif 'phone' in lower or 'mobile' in lower or 'tel' in lower:
+                selector_candidates.extend([
+                    'input[type="tel"]',
+                    'input[name="phone"]',
+                    'input[autocomplete="tel"]',
+                ])
+            elif 'search' in lower or 'query' in lower or 'q' == lower:
+                selector_candidates.extend([
+                    'input[type="search"]',
+                    'input[name="q"]',
+                    'input[name="query"]',
+                    'input[name="search"]',
+                ])
+
+        # Remove duplicates
+        seen = set()
+        unique_candidates = []
+        for s in selector_candidates:
+            if s not in seen:
+                seen.add(s)
+                unique_candidates.append(s)
+
+        # Try each selector with a short wait
+        start = _time.time()
+        while (_time.time() - start) * 1000 < timeout_ms:
+            for sel in unique_candidates:
+                try:
+                    el = await page.query_selector(sel)
+                    if el:
+                        return el, sel
+                except Exception:
+                    continue
+            await asyncio.sleep(0.3)
+
+        return None, None
 
     async def _cmd_fill_form(self, ctx: UserContext, params: Dict) -> Dict:
-        fields = params.get("fields", {})
-        if not fields:
-            return {"status": "error", "error": "Missing 'fields'"}
-        page = ctx.get_page()
-        filled = []
-        for selector, value in fields.items():
-            try:
-                el = await page.query_selector(selector)
-                if not el:
-                    for alt in [f'input[name="{selector}"]', f'input[placeholder*="{selector}"]', f'#{selector}']:
-                        el = await page.query_selector(alt)
-                        if el:
-                            break
-                if el:
-                    await el.click()
-                    await asyncio.sleep(random.uniform(0.1, 0.3))
-                    await el.fill("")
-                    for char in str(value):
-                        await el.type(char, delay=random.randint(40, 180))
+        """Fill form fields with React/Vue/Angular compatible event dispatch.
+
+        Handles:
+        - React controlled components via nativeInputValueSetter + InputEvent
+        - Special characters (@, #, etc.) via fill() + insert_text()
+        - Multi-strategy element finding
+        - Value verification with automatic retry
+        """
+        try:
+            fields = params.get("fields", {})
+            if not fields:
+                return {"status": "error", "error": "Missing 'fields'"}
+            page = ctx.get_page()
+            filled = []
+            errors = []
+            for selector, value in fields.items():
+                try:
+                    # Find element using robust multi-strategy finder
+                    el, actual_selector = await self._find_element(page, selector, timeout_ms=8000)
+                    if not el:
+                        errors.append({"selector": selector, "error": "Element not found"})
+                        continue
+                    # Scroll into view before filling
+                    try:
+                        await el.scroll_into_view_if_needed()
+                    except Exception:
+                        pass
+                    # Focus the element (try JS first, then Playwright)
+                    try:
+                        await page.evaluate("""(sel) => {
+                            const el = document.querySelector(sel);
+                            if (el) { el.focus(); el.click(); }
+                        }""", actual_selector)
+                    except Exception:
+                        try:
+                            await el.click()
+                        except Exception:
+                            try:
+                                await el.click(force=True)
+                            except Exception:
+                                errors.append({"selector": selector, "error": "Cannot focus"})
+                                continue
+
+                    await asyncio.sleep(random.uniform(0.05, 0.15))
+
+                    # Clear existing value using keyboard (most reliable for React/Vue)
+                    await page.keyboard.press("Home")
+                    await page.keyboard.press("Control+a")
+                    await page.keyboard.press("Control+a")  # Double-select for reliability
+                    await page.keyboard.press("Backspace")
+                    await asyncio.sleep(random.uniform(0.05, 0.1))
+
+                    # Type value — use fill() for special chars, type() for normal
+                    value_str = str(value)
+                    has_special = any(c in value_str for c in '@#$%^&*()_+{}|:"<>?~`!=éüñáíóúàèìòù')
+                    if has_special:
+                        # fill() handles ALL characters reliably
+                        try:
+                            await el.fill(value_str)
+                        except Exception:
+                            try:
+                                await page.keyboard.insert_text(value_str)
+                            except Exception:
+                                await page.keyboard.type(value_str, delay=random.randint(30, 120))
+                    else:
+                        try:
+                            await page.keyboard.type(value_str, delay=random.randint(30, 120))
+                        except Exception:
+                            try:
+                                await el.fill(value_str)
+                            except Exception:
+                                pass
+
+                    # Verify the value was set correctly
+                    await asyncio.sleep(0.1)
+                    try:
+                        actual_value = await el.evaluate("el => el.value")
+                        if actual_value != value_str:
+                            # Nuclear React override: nativeInputValueSetter + all events
+                            await el.evaluate("""(el, value) => {
+                                const nativeInputValueSetter =
+                                    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set ||
+                                    Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+                                if (nativeInputValueSetter) {
+                                    nativeInputValueSetter.call(el, value);
+                                } else {
+                                    el.value = value;
+                                }
+                                // Dispatch InputEvent (React-compatible)
+                                el.dispatchEvent(new InputEvent('input', {
+                                    bubbles: true, cancelable: true,
+                                    inputType: 'insertText', data: value
+                                }));
+                                el.dispatchEvent(new Event('change', { bubbles: true }));
+                                el.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+                                el.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
+                                el.focus();
+                            }""", value_str)
+                    except Exception:
+                        pass
+
+                    # Dispatch framework-compatible events
+                    try:
+                        await page.evaluate("""(sel) => {
+                            const el = document.querySelector(sel);
+                            if (el) {
+                                el.dispatchEvent(new Event('input', { bubbles: true }));
+                                el.dispatchEvent(new Event('change', { bubbles: true }));
+                                el.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+                                el.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
+                                el.focus();
+                            }
+                        }""", actual_selector)
+                    except Exception:
+                        pass
+
                     filled.append(selector)
-            except Exception as e:
-                logger.warning(f"Fill error for {selector}: {e}")
-        return {"status": "success", "filled": filled, "total": len(fields)}
+                except Exception as e:
+                    logger.warning(f"Fill error for {selector}: {e}")
+                    errors.append({"selector": selector, "error": str(e)})
+            return {"status": "success", "filled": filled, "total": len(fields), "errors": errors if errors else None}
+        except Exception as e:
+            logger.error(f"Fill form error: {e}")
+            return {"status": "error", "error": str(e)}
 
     async def _cmd_clear_input(self, ctx: UserContext, params: Dict) -> Dict:
-        selector = params.get("selector")
-        if not selector:
-            return {"status": "error", "error": "Missing 'selector'"}
-        page = ctx.get_page()
-        el = await page.query_selector(selector)
-        if el:
+        try:
+            selector = params.get("selector")
+            if not selector:
+                return {"status": "error", "error": "Missing 'selector'"}
+            page = ctx.get_page()
+            el = await page.query_selector(selector)
+            if not el:
+                return {"status": "error", "error": f"Element not found: {selector}"}
+            # Scroll into view before clearing
+            try:
+                await el.scroll_into_view_if_needed()
+            except Exception:
+                pass
             await el.click()
             await page.keyboard.press("Control+a")
             await page.keyboard.press("Backspace")
-        return {"status": "success", "selector": selector}
+            # Dispatch input and change events for React/Vue compatibility
+            try:
+                await el.evaluate("""el => {
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                }""")
+            except Exception:
+                pass
+            return {"status": "success", "selector": selector}
+        except Exception as e:
+            logger.error(f"Clear input error: {e}")
+            return {"status": "error", "error": str(e)}
 
     async def _cmd_checkbox(self, ctx: UserContext, params: Dict) -> Dict:
-        selector = params.get("selector")
-        checked = params.get("checked", True)
-        if not selector:
-            return {"status": "error", "error": "Missing 'selector'"}
-        page = ctx.get_page()
-        el = await page.query_selector(selector)
-        if el:
+        try:
+            selector = params.get("selector")
+            checked = params.get("checked", True)
+            if not selector:
+                return {"status": "error", "error": "Missing 'selector'"}
+            page = ctx.get_page()
+            el = await page.query_selector(selector)
+            if not el:
+                return {"status": "error", "error": f"Element not found: {selector}"}
+            # Scroll into view before interacting
+            try:
+                await el.scroll_into_view_if_needed()
+            except Exception as e:
+                logger.debug(f"scroll_into_view failed for {selector}: {e}")
             is_checked = await el.is_checked()
             if is_checked != checked:
-                await el.click()
-        return {"status": "success", "selector": selector, "checked": checked}
+                # Visibility check with force click fallback
+                is_visible = await el.is_visible()
+                if is_visible:
+                    await el.click()
+                else:
+                    logger.warning(f"Checkbox {selector} not visible, attempting force click")
+                    await el.click(force=True)
+            return {"status": "success", "selector": selector, "checked": checked}
+        except Exception as e:
+            logger.error(f"Checkbox error: {e}")
+            return {"status": "error", "error": str(e)}
 
     async def _cmd_select(self, ctx: UserContext, params: Dict) -> Dict:
-        selector = params.get("selector")
-        value = params.get("value")
-        if not selector or not value:
-            return {"status": "error", "error": "Missing 'selector' or 'value'"}
-        page = ctx.get_page()
-        await page.select_option(selector, value)
-        return {"status": "success", "selector": selector, "value": value}
+        try:
+            selector = params.get("selector")
+            value = params.get("value")
+            if not selector or not value:
+                return {"status": "error", "error": "Missing 'selector' or 'value'"}
+            page = ctx.get_page()
+            el = await page.query_selector(selector)
+            if not el:
+                return {"status": "error", "error": f"Element not found: {selector}"}
+            # Scroll into view before selecting
+            try:
+                await el.scroll_into_view_if_needed()
+            except Exception:
+                pass
+            await page.select_option(selector, value)
+            # Dispatch change event for React/Vue compatibility
+            try:
+                await el.evaluate("""el => {
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                }""")
+            except Exception:
+                pass
+            return {"status": "success", "selector": selector, "value": value}
+        except Exception as e:
+            logger.error(f"Select error: {e}")
+            return {"status": "error", "error": str(e)}
 
     async def _cmd_upload(self, ctx: UserContext, params: Dict) -> Dict:
-        selector = params.get("selector")
-        file_path = params.get("file_path")
-        if not selector or not file_path:
-            return {"status": "error", "error": "Missing 'selector' or 'file_path'"}
-        page = ctx.get_page()
-        el = await page.query_selector(selector)
-        if el:
+        try:
+            selector = params.get("selector")
+            file_path = params.get("file_path")
+            if not selector or not file_path:
+                return {"status": "error", "error": "Missing 'selector' or 'file_path'"}
+            page = ctx.get_page()
+            el = await page.query_selector(selector)
+            if not el:
+                return {"status": "error", "error": f"Element not found: {selector}"}
             await el.set_input_files(file_path)
-        return {"status": "success", "selector": selector, "file": file_path}
+            # Dispatch change event for React/Vue compatibility
+            try:
+                await el.evaluate("""el => {
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                }""")
+            except Exception:
+                pass
+            return {"status": "success", "selector": selector, "file": file_path}
+        except Exception as e:
+            logger.error(f"Upload error: {e}")
+            return {"status": "error", "error": str(e)}
 
     async def _cmd_wait(self, ctx: UserContext, params: Dict) -> Dict:
         selector = params.get("selector")
@@ -875,59 +1188,99 @@ class PersistentBrowserManager:
             return {"status": "error", "error": f"Timeout waiting for: {selector}"}
 
     async def _cmd_hover(self, ctx: UserContext, params: Dict) -> Dict:
-        selector = params.get("selector")
-        if not selector:
-            return {"status": "error", "error": "Missing 'selector'"}
-        page = ctx.get_page()
-        el = await page.query_selector(selector)
-        if el:
-            await el.hover()
-        return {"status": "success", "selector": selector}
+        try:
+            selector = params.get("selector")
+            if not selector:
+                return {"status": "error", "error": "Missing 'selector'"}
+            page = ctx.get_page()
+            el = await page.query_selector(selector)
+            if not el:
+                return {"status": "error", "error": f"Element not found: {selector}"}
+            # Scroll element into view before hovering
+            try:
+                await el.scroll_into_view_if_needed()
+            except Exception as e:
+                logger.debug(f"scroll_into_view failed for {selector}: {e}")
+            # Visibility check with force hover fallback
+            is_visible = await el.is_visible()
+            if is_visible:
+                await el.hover()
+            else:
+                logger.warning(f"Element {selector} not visible, attempting force hover")
+                await el.hover(force=True)
+            return {"status": "success", "selector": selector}
+        except Exception as e:
+            logger.error(f"Hover error: {e}")
+            return {"status": "error", "error": str(e)}
 
     async def _cmd_screenshot(self, ctx: UserContext, params: Dict) -> Dict:
-        import base64
-        page = ctx.get_page()
-        img = await page.screenshot(type="png", full_page=params.get("full_page", False))
-        return {"status": "success", "screenshot": base64.b64encode(img).decode(), "format": "png"}
+        try:
+            import base64
+            page = ctx.get_page()
+            if not page:
+                return {"status": "error", "error": "No active page"}
+            img = await page.screenshot(type="png", full_page=params.get("full_page", False))
+            return {"status": "success", "screenshot": base64.b64encode(img).decode(), "format": "png"}
+        except Exception as e:
+            logger.error(f"Screenshot error: {e}")
+            return {"status": "error", "error": str(e)}
 
     async def _cmd_get_content(self, ctx: UserContext, params: Dict) -> Dict:
-        page = ctx.get_page()
-        return {
-            "status": "success",
-            "url": page.url,
-            "title": await page.title(),
-            "html": await page.content(),
-            "text": await page.inner_text("body") if await page.query_selector("body") else "",
-        }
+        try:
+            page = ctx.get_page()
+            if not page:
+                return {"status": "error", "error": "No active page"}
+            body_text = ""
+            try:
+                if await page.query_selector("body"):
+                    body_text = await page.inner_text("body")
+            except Exception:
+                pass
+            return {
+                "status": "success",
+                "url": page.url,
+                "title": await page.title(),
+                "html": await page.content(),
+                "text": body_text,
+            }
+        except Exception as e:
+            logger.error(f"Get content error: {e}")
+            return {"status": "error", "error": str(e)}
 
     async def _cmd_get_dom(self, ctx: UserContext, params: Dict) -> Dict:
-        page = ctx.get_page()
-        dom = await page.evaluate("""() => {
-            function getSnapshot(el, depth) {
-                if (depth > 5) return '';
-                let result = '';
-                const indent = '  '.repeat(depth);
-                const tag = el.tagName?.toLowerCase() || '';
-                if (!tag) return '';
-                const attrs = [];
-                if (el.id) attrs.push('id="' + el.id + '"');
-                if (el.className && typeof el.className === 'string') attrs.push('class="' + el.className + '"');
-                if (el.getAttribute('type')) attrs.push('type="' + el.getAttribute('type') + '"');
-                if (el.getAttribute('name')) attrs.push('name="' + el.getAttribute('name') + '"');
-                if (el.getAttribute('placeholder')) attrs.push('placeholder="' + el.getAttribute('placeholder') + '"');
-                if (el.href) attrs.push('href="' + el.href + '"');
-                const attrStr = attrs.length ? ' ' + attrs.join(' ') : '';
-                const text = el.childNodes.length === 1 && el.childNodes[0].nodeType === 3 ? el.childNodes[0].textContent.trim().substring(0, 100) : '';
-                if (['script', 'style', 'noscript', 'svg'].includes(tag)) return '';
-                const children = Array.from(el.children).map(c => getSnapshot(c, depth + 1)).filter(Boolean).join('');
-                if (children) { result = indent + '<' + tag + attrStr + '>' + (text ? ' ' + text : '') + '\\n' + children + indent + '</' + tag + '>\\n'; }
-                else if (text) { result = indent + '<' + tag + attrStr + '>' + text + '</' + tag + '>\\n'; }
-                else { result = indent + '<' + tag + attrStr + ' />\\n'; }
-                return result;
-            }
-            return getSnapshot(document.body, 0);
-        }""")
-        return {"status": "success", "dom_snapshot": dom}
+        try:
+            page = ctx.get_page()
+            if not page:
+                return {"status": "error", "error": "No active page"}
+            dom = await page.evaluate("""() => {
+                function getSnapshot(el, depth) {
+                    if (depth > 5) return '';
+                    let result = '';
+                    const indent = '  '.repeat(depth);
+                    const tag = el.tagName?.toLowerCase() || '';
+                    if (!tag) return '';
+                    const attrs = [];
+                    if (el.id) attrs.push('id="' + el.id + '"');
+                    if (el.className && typeof el.className === 'string') attrs.push('class="' + el.className + '"');
+                    if (el.getAttribute('type')) attrs.push('type="' + el.getAttribute('type') + '"');
+                    if (el.getAttribute('name')) attrs.push('name="' + el.getAttribute('name') + '"');
+                    if (el.getAttribute('placeholder')) attrs.push('placeholder="' + el.getAttribute('placeholder') + '"');
+                    if (el.href) attrs.push('href="' + el.href + '"');
+                    const attrStr = attrs.length ? ' ' + attrs.join(' ') : '';
+                    const text = el.childNodes.length === 1 && el.childNodes[0].nodeType === 3 ? el.childNodes[0].textContent.trim().substring(0, 100) : '';
+                    if (['script', 'style', 'noscript', 'svg'].includes(tag)) return '';
+                    const children = Array.from(el.children).map(c => getSnapshot(c, depth + 1)).filter(Boolean).join('');
+                    if (children) { result = indent + '<' + tag + attrStr + '>' + (text ? ' ' + text : '') + '\\n' + children + indent + '</' + tag + '>\\n'; }
+                    else if (text) { result = indent + '<' + tag + attrStr + '>' + text + '</' + tag + '>\\n'; }
+                    else { result = indent + '<' + tag + attrStr + ' />\\n'; }
+                    return result;
+                }
+                return getSnapshot(document.body, 0);
+            }""")
+            return {"status": "success", "dom_snapshot": dom}
+        except Exception as e:
+            logger.error(f"Get DOM error: {e}")
+            return {"status": "error", "error": str(e)}
 
     async def _cmd_get_links(self, ctx: UserContext, params: Dict) -> Dict:
         page = ctx.get_page()

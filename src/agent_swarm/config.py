@@ -1,4 +1,9 @@
-"""Agent Swarm configuration - integrated into Agent-OS config system."""
+"""Agent Swarm configuration - integrated into Agent-OS config system.
+
+Uses the user's configured provider as the brain — no separate LLM needed.
+Auto-detects user's provider from environment variables.
+All configuration via environment variables with safe defaults.
+"""
 
 import os
 import json
@@ -18,15 +23,57 @@ def _safe_json_loads(value: str, default=None):
         return default if default is not None else []
 
 
+def _detect_user_provider() -> tuple:
+    """Auto-detect which provider the user has configured from env vars.
+
+    Returns (api_key, base_url, model, provider_name) tuple.
+    Checks common provider env vars in order of preference.
+    If no provider found, returns empty strings (Tier 2 disabled).
+    """
+    # Check explicit SWARM_PROVIDER_* vars first
+    swarm_key = os.getenv("SWARM_PROVIDER_API_KEY", "").strip()
+    swarm_url = os.getenv("SWARM_PROVIDER_BASE_URL", "").strip()
+    swarm_model = os.getenv("SWARM_PROVIDER_MODEL", "").strip()
+    if swarm_key:
+        return swarm_key, swarm_url, swarm_model, "custom"
+
+    # Check common provider env vars
+    provider_checks = [
+        ("OPENAI_API_KEY", "https://api.openai.com/v1", "gpt-4o-mini", "openai"),
+        ("ANTHROPIC_API_KEY", "https://api.anthropic.com/v1", "claude-3-5-haiku-20241022", "anthropic"),
+        ("GOOGLE_API_KEY", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-2.0-flash", "google"),
+        ("XAI_API_KEY", "https://api.x.ai/v1", "grok-2-mini", "xai"),
+        ("MISTRAL_API_KEY", "https://api.mistral.ai/v1", "mistral-small-latest", "mistral"),
+        ("DEEPSEEK_API_KEY", "https://api.deepseek.com/v1", "deepseek-chat", "deepseek"),
+        ("GROQ_API_KEY", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile", "groq"),
+        ("TOGETHER_API_KEY", "https://api.together.xyz/v1", "meta-llama/Llama-3.3-70B-Instruct-Turbo", "together"),
+    ]
+
+    for env_var, base_url, model, provider_name in provider_checks:
+        key = os.getenv(env_var, "").strip()
+        if key:
+            logger.info(f"Auto-detected user provider: {provider_name} (model: {model})")
+            return key, base_url, model, provider_name
+
+    # No provider configured — Tier 2 will be disabled (Tier 1 + Tier 3 still work)
+    logger.info("No user provider detected — Tier 2 classification disabled. Tier 1 + Tier 3 will handle routing.")
+    return "", "", "", ""
+
+
 class RouterConfig(BaseModel):
-    """Query router configuration."""
+    """Query router configuration.
+
+    User's provider = brain. No separate LLM needed.
+    If no provider configured, Tier 2 is simply skipped.
+    """
     confidence_threshold: float = Field(default=0.7, description="Min confidence for rule-based routing")
-    enable_llm_fallback: bool = Field(default=True, description="Enable Tier 2 LLM fallback")
-    llm_api_key: Optional[str] = Field(default=None, description="User's LLM API key")
-    llm_base_url: str = Field(default="https://api.openai.com/v1", description="LLM API base URL")
-    llm_model: str = Field(default="gpt-4o-mini", description="LLM model name")
-    llm_max_tokens: int = Field(default=150, description="Max tokens for LLM classification")
-    llm_timeout: float = Field(default=5.0, description="LLM request timeout in seconds")
+    enable_provider_fallback: bool = Field(default=True, description="Enable Tier 2 user provider fallback")
+    provider_api_key: Optional[str] = Field(default="", description="User's provider API key (auto-detected from env)")
+    provider_base_url: str = Field(default="", description="User's provider API base URL (auto-detected from env)")
+    provider_model: str = Field(default="", description="User's provider model name (auto-detected from env)")
+    provider_name: Optional[str] = Field(default="", description="Provider name (openai, anthropic, google, etc.)")
+    provider_max_tokens: int = Field(default=150, description="Max tokens for provider classification")
+    provider_timeout: float = Field(default=8.0, description="Provider request timeout in seconds")
 
 
 class SwarmAgentConfig(BaseModel):
@@ -68,13 +115,22 @@ class SwarmConfig(BaseModel):
 
     @classmethod
     def from_env(cls) -> "SwarmConfig":
-        """Load configuration from environment variables."""
+        """Load configuration from environment variables.
+
+        Auto-detects user's provider — no separate LLM service needed.
+        If no provider configured, Tier 2 is disabled (Tier 1 + Tier 3 still work).
+        """
+        # Auto-detect user's provider from env vars
+        api_key, base_url, model, provider = _detect_user_provider()
+
+        # Allow explicit overrides
         router_conf = RouterConfig(
             confidence_threshold=float(os.getenv("SWARM_ROUTER_THRESHOLD", "0.7")),
-            enable_llm_fallback=os.getenv("SWARM_LLM_ENABLED", "true").lower() == "true",
-            llm_api_key=os.getenv("SWARM_LLM_API_KEY"),
-            llm_base_url=os.getenv("SWARM_LLM_BASE_URL", "https://api.openai.com/v1"),
-            llm_model=os.getenv("SWARM_LLM_MODEL", "gpt-4o-mini"),
+            enable_provider_fallback=os.getenv("SWARM_PROVIDER_ENABLED", "true").lower() == "true",
+            provider_api_key=api_key,
+            provider_base_url=base_url,
+            provider_model=model,
+            provider_name=provider,
         )
         agent_conf = SwarmAgentConfig(
             max_workers=int(os.getenv("SWARM_MAX_WORKERS", "50")),
@@ -103,18 +159,12 @@ swarm_config = SwarmConfig.from_env()
 
 
 def get_config() -> SwarmConfig:
-    """Get the global swarm configuration instance.
-    
-    Returns the singleton SwarmConfig loaded from environment variables.
-    """
+    """Get the global swarm configuration instance."""
     return swarm_config
 
 
 def reload_config() -> SwarmConfig:
-    """Reload configuration from environment variables.
-    
-    Useful for picking up config changes at runtime without restarting.
-    """
+    """Reload configuration from environment variables."""
     global swarm_config
     swarm_config = SwarmConfig.from_env()
     logger.info("Swarm config reloaded from environment variables")

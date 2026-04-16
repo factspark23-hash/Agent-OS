@@ -16,22 +16,33 @@ JS_DANGEROUS_PATTERNS = [
     r"location\.href\s*=",
     r"location\.replace",
     r"\.innerHTML\s*=",
-    r"eval\s*\(",
-    r"Function\s*\(",
     r"setTimeout\s*\(\s*['\"]",
     r"setInterval\s*\(\s*['\"]",
-    r"new\s+Function",
     r"__proto__",
-    r"constructor\s*\[",
+    r"prototype\s*pollution",
+    r"\.constructor\s*[\.\[]",
     r"import\s*\(",
     r"require\s*\(",
     r"process\.env",
+    r"process\s*[\.\[]",
     r"fs\.",
     r"child_process",
     r"\.exec\s*\(",
 ]
 
+# Patterns for dangerous eval() usage — eval with string literals containing sensitive keywords
+JS_EVAL_DANGEROUS_LITERAL_PATTERNS = [
+    r"eval\s*\(\s*['\"].*?(?:require|process|child_process|import|__proto__|constructor|prototype).*?['\"]",
+]
+
+# Patterns for dangerous Function() usage — Function/new Function with string literals containing sensitive keywords
+JS_FUNCTION_DANGEROUS_LITERAL_PATTERNS = [
+    r"(?:new\s+)?Function\s*\(\s*['\"].*?(?:require|process|child_process|import|__proto__|constructor|prototype).*?['\"]",
+]
+
 COMPILED_JS_PATTERNS = [re.compile(p, re.IGNORECASE) for p in JS_DANGEROUS_PATTERNS]
+COMPILED_JS_EVAL_LITERAL_PATTERNS = [re.compile(p, re.IGNORECASE | re.DOTALL) for p in JS_EVAL_DANGEROUS_LITERAL_PATTERNS]
+COMPILED_JS_FUNCTION_LITERAL_PATTERNS = [re.compile(p, re.IGNORECASE | re.DOTALL) for p in JS_FUNCTION_DANGEROUS_LITERAL_PATTERNS]
 
 # Allowed URL schemes
 ALLOWED_SCHEMES = {"http", "https"}
@@ -95,6 +106,73 @@ def sanitize_string(value: str, max_length: int = 10000, field_name: str = "valu
     return value
 
 
+def _is_private_ip(hostname: str) -> bool:
+    """Check if a hostname is a private/reserved IP address (IPv4 or IPv6)."""
+    import ipaddress
+
+    # Handle bracketed IPv6 addresses like [fe80::1]
+    if hostname.startswith("[") and hostname.endswith("]"):
+        hostname = hostname[1:-1]
+
+    # Try IPv4
+    try:
+        addr = ipaddress.ip_address(hostname)
+        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+            return True
+        # Explicitly check 0.0.0.0 (is_reserved is True for 0.0.0.0 in Python 3.x,
+        # but double-check for clarity)
+        if hostname == "0.0.0.0":
+            return True
+        return False
+    except ValueError:
+        pass
+
+    # Fallback: string-prefix checks for IPv4 (in case ip_address fails on partial IPs)
+    # 10.0.0.0/8
+    if hostname.startswith("10."):
+        return True
+    # 172.16.0.0/12 (172.16.* through 172.31.*)
+    if hostname.startswith("172."):
+        try:
+            second_octet = int(hostname.split(".")[1])
+            if 16 <= second_octet <= 31:
+                return True
+        except (IndexError, ValueError):
+            pass
+    # 192.168.0.0/16
+    if hostname.startswith("192.168."):
+        return True
+    # 169.254.0.0/16 (link-local)
+    if hostname.startswith("169.254."):
+        return True
+    # 127.0.0.0/8 (loopback — belt-and-suspenders with the earlier check)
+    if hostname.startswith("127."):
+        return True
+    # 0.0.0.0
+    if hostname == "0.0.0.0":
+        return True
+
+    # IPv6 string-prefix checks
+    # fe80::/10 (link-local)
+    if hostname.lower().startswith("fe80:"):
+        return True
+    # fc00::/7 (unique local / private) — covers fc00:: and fd00:: prefixes
+    if hostname.lower().startswith("fc") or hostname.lower().startswith("fd"):
+        # More precise: check first hex digit is c or d after f
+        if len(hostname) >= 3 and hostname[2] in (":", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f"):
+            try:
+                addr = ipaddress.ip_address(hostname)
+                return addr.is_private
+            except ValueError:
+                # If we can't parse it, conservatively block fc/fd prefixed addresses
+                return True
+    # ::1 (loopback)
+    if hostname == "::1" or hostname == "0:0:0:0:0:0:0:1":
+        return True
+
+    return False
+
+
 def validate_url(url: str, field_name: str = "url") -> str:
     """Validate and sanitize a URL."""
     url = sanitize_string(url, MAX_URL_LENGTH, field_name)
@@ -113,18 +191,23 @@ def validate_url(url: str, field_name: str = "url") -> str:
     if not parsed.hostname:
         raise ValidationError(f"URL must have a hostname: {field_name}", field_name)
 
-    # Block internal networks (basic SSRF protection)
+    # Block internal networks (SSRF protection)
     hostname = parsed.hostname.lower()
     blocked_hosts = {
-        "localhost", "127.0.0.1", "0.0.0.0", "169.254.169.254",
+        "localhost", "0.0.0.0", "169.254.169.254",
         "metadata.google.internal",
+        "::1",  # IPv6 loopback
     }
     if hostname in blocked_hosts:
         raise ValidationError(f"URL targets blocked host: {hostname}", field_name)
 
-    # Block private IP ranges (basic check)
-    if hostname.startswith("10.") or hostname.startswith("172.16.") or hostname.startswith("192.168."):
-        logger.warning(f"URL targets private IP: {hostname}")
+    # Block all loopback addresses (127.0.0.0/8)
+    if hostname.startswith("127."):
+        raise ValidationError(f"URL targets loopback address: {hostname}", field_name)
+
+    # Block private IP ranges
+    if _is_private_ip(hostname):
+        raise ValidationError(f"URL targets private/reserved IP: {hostname}", field_name)
 
     return url
 
@@ -150,11 +233,31 @@ def validate_javascript(script: str, field_name: str = "script") -> str:
     if not script.strip():
         raise ValidationError(f"{field_name} cannot be empty", field_name)
 
-    # Check for dangerous patterns — reject, don't just log
+    # Check for always-dangerous patterns — reject unconditionally
     for pattern in COMPILED_JS_PATTERNS:
         if pattern.search(script):
             raise ValidationError(
                 f"Dangerous pattern detected in {field_name}: {pattern.pattern}",
+                field_name
+            )
+
+    # Check eval() with string literals containing dangerous keywords
+    # Allows: eval(someDOMExpression), eval(variable)
+    # Blocks: eval('require'), eval('process'), eval('child_process')
+    for pattern in COMPILED_JS_EVAL_LITERAL_PATTERNS:
+        if pattern.search(script):
+            raise ValidationError(
+                f"Dangerous eval() usage detected in {field_name}: {pattern.pattern}",
+                field_name
+            )
+
+    # Check Function()/new Function() with string literals containing dangerous keywords
+    # Allows: new Function('return ' + something), Function(expr)
+    # Blocks: Function('return process'), Function('return require')
+    for pattern in COMPILED_JS_FUNCTION_LITERAL_PATTERNS:
+        if pattern.search(script):
+            raise ValidationError(
+                f"Dangerous Function() usage detected in {field_name}: {pattern.pattern}",
                 field_name
             )
 
@@ -201,6 +304,39 @@ def validate_command_payload(data: dict) -> dict:
         raise ValidationError(f"Invalid command format: {command}")
 
     validated = {"command": command}
+
+    # Command-specific required field validation
+    # Commands that MUST have a URL
+    URL_REQUIRED_COMMANDS = {"navigate", "goto", "open", "visit"}
+    if command in URL_REQUIRED_COMMANDS:
+        if "url" not in data:
+            raise ValidationError(
+                f"Command '{command}' requires a 'url' field",
+                "url"
+            )
+        # Also reject empty/whitespace-only URLs
+        url_val = str(data.get("url", "")).strip()
+        if not url_val:
+            raise ValidationError(
+                f"Command '{command}' requires a non-empty 'url' field",
+                "url"
+            )
+
+    # Commands that MUST have a selector
+    SELECTOR_REQUIRED_COMMANDS = {"click", "tap", "hover", "scroll_into_view"}
+    if command in SELECTOR_REQUIRED_COMMANDS and "selector" not in data and "text" not in data:
+        raise ValidationError(
+            f"Command '{command}' requires a 'selector' or 'text' field",
+            "selector"
+        )
+
+    # Commands that MUST have text or value
+    TEXT_REQUIRED_COMMANDS = {"type", "fill", "press_key"}
+    if command in TEXT_REQUIRED_COMMANDS and "text" not in data and "value" not in data:
+        raise ValidationError(
+            f"Command '{command}' requires a 'text' or 'value' field",
+            "text"
+        )
 
     # Validate common fields
     if "token" in data:

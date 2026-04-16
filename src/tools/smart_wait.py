@@ -27,30 +27,30 @@ _INSTALL_NETWORK_TRACKER_JS = """
     if (window.__agentos_nettracker) return;
     window.__agentos_nettracker = { pending: 0, completed: 0, lastActivity: Date.now() };
 
-    const origFetch = window.fetch;
-    window.fetch = function() {
-        window.__agentos_nettracker.pending++;
-        window.__agentos_nettracker.lastActivity = Date.now();
-        return origFetch.apply(this, arguments).finally(() => {
-            window.__agentos_nettracker.pending--;
-            window.__agentos_nettracker.completed++;
-            window.__agentos_nettracker.lastActivity = Date.now();
+    // Use PerformanceObserver to track network activity WITHOUT overriding fetch/XHR
+    // This avoids conflicts with stealth modules that also override fetch
+    try {
+        const observer = new PerformanceObserver((list) => {
+            for (const entry of list.getEntries()) {
+                window.__agentos_nettracker.completed++;
+                window.__agentos_nettracker.lastActivity = Date.now();
+            }
         });
-    };
-
-    const origXHR = XMLHttpRequest.prototype.open;
-    XMLHttpRequest.prototype.open = function() {
-        this.addEventListener('loadstart', () => {
+        observer.observe({ type: 'resource', buffered: true });
+    } catch(e) {
+        // PerformanceObserver not available, fall back to simple tracking
+        // Track via fetch wrapper that chains properly
+        const origFetch = window.fetch;
+        window.fetch = function() {
             window.__agentos_nettracker.pending++;
             window.__agentos_nettracker.lastActivity = Date.now();
-        });
-        this.addEventListener('loadend', () => {
-            window.__agentos_nettracker.pending--;
-            window.__agentos_nettracker.completed++;
-            window.__agentos_nettracker.lastActivity = Date.now();
-        });
-        return origXHR.apply(this, arguments);
-    };
+            return origFetch.apply(this, arguments).finally(() => {
+                window.__agentos_nettracker.pending--;
+                window.__agentos_nettracker.completed++;
+                window.__agentos_nettracker.lastActivity = Date.now();
+            });
+        };
+    }
 })();
 """
 
@@ -175,11 +175,17 @@ _CHECK_PAGE_READY_JS = """
 _CHECK_JS_CONDITION_JS = """
 ((expr) => {
     try {
-        const result = eval(expr);
+        // Whitelist: only allow safe property access and comparisons
+        // Block: assignment, function calls (except allowed), eval, Function, etc.
+        const FORBIDDEN = /\b(eval|Function|import|require|fetch|XMLHttp|__proto__|constructor)\b|[=!]/i;
+        if (FORBIDDEN.test(expr)) {
+            return { success: false, error: 'Expression contains forbidden patterns', truthy: false };
+        }
+        const result = new Function('return (' + expr + ')')();
         return { success: true, value: result, truthy: !!result };
     } catch(e) {
         return { success: false, error: e.message, truthy: false };
-    };
+    }
 });
 """
 
@@ -216,6 +222,16 @@ class SmartWait:
 
     # How often to poll each strategy (ms)
     DEFAULT_POLL_MS = 150
+
+    def _adaptive_poll_interval(self, elapsed_ms: float) -> float:
+        """Adaptive polling: fast initially, slower over time to reduce CDP overhead."""
+        if elapsed_ms < 5000:
+            return 0.15
+        elif elapsed_ms < 15000:
+            return 0.30
+        else:
+            return 0.50
+
     # Hard maximum wait time (ms) — never wait longer than this
     HARD_MAX_MS = 120_000
 
@@ -274,7 +290,7 @@ class SmartWait:
             else:
                 idle_start = None
 
-            await asyncio.sleep(self.DEFAULT_POLL_MS / 1000)
+            await asyncio.sleep(self._adaptive_poll_interval(elapsed_ms))
 
     async def dom_stable(
         self,
@@ -323,7 +339,7 @@ class SmartWait:
             else:
                 stable_since = None
 
-            await asyncio.sleep(self.DEFAULT_POLL_MS / 1000)
+            await asyncio.sleep(self._adaptive_poll_interval(elapsed_ms))
 
     async def element_ready(
         self,
@@ -367,19 +383,19 @@ class SmartWait:
             last_state = state
 
             if not state["found"]:
-                await asyncio.sleep(self.DEFAULT_POLL_MS / 1000)
+                await asyncio.sleep(self._adaptive_poll_interval(elapsed_ms))
                 continue
 
             if not state["visible"]:
-                await asyncio.sleep(self.DEFAULT_POLL_MS / 1000)
+                await asyncio.sleep(self._adaptive_poll_interval(elapsed_ms))
                 continue
 
             if require_interactable and not state["interactable"]:
-                await asyncio.sleep(self.DEFAULT_POLL_MS / 1000)
+                await asyncio.sleep(self._adaptive_poll_interval(elapsed_ms))
                 continue
 
             if wait_for_animation and state["animating"]:
-                await asyncio.sleep(self.DEFAULT_POLL_MS / 1000)
+                await asyncio.sleep(self._adaptive_poll_interval(elapsed_ms))
                 continue
 
             total_waited = (time.time() - start) * 1000
@@ -448,7 +464,7 @@ class SmartWait:
                     "state": state,
                 }
 
-            await asyncio.sleep(self.DEFAULT_POLL_MS / 1000)
+            await asyncio.sleep(self._adaptive_poll_interval(elapsed_ms))
 
     async def js_condition(
         self,

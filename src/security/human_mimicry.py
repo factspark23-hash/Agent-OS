@@ -9,7 +9,7 @@ Generates realistic human behavior patterns:
 import random
 import math
 import time
-from typing import List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Optional
 
 
 class HumanMimicry:

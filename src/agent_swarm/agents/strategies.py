@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 from enum import Enum
 
-from src.agent_swarm.agents.profiles import SearchProfile, SEARCH_PROFILES
+from src.agent_swarm.agents.profiles import SearchProfile
 
 logger = logging.getLogger(__name__)
 

@@ -442,8 +442,9 @@ def test_config():
 
     # ── Router config ──
     test("LLM fallback enabled", config.router.enable_llm_fallback)
-    test_eq("LLM model default", config.router.llm_model, "gpt-4o-mini")
-    test_eq("LLM timeout default", config.router.llm_timeout, 5.0)
+    # LLM model is empty until user configures a provider — user's provider IS the brain
+    test_eq("LLM model default (empty = user must configure)", config.router.llm_model, "")
+    test_eq("LLM timeout default", config.router.llm_timeout, 8.0)
 
     # ── Search backend config ──
     test_eq("Chrome impersonate", config.search.chrome_impersonate, "chrome146")

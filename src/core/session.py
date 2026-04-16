@@ -184,6 +184,11 @@ class SessionManager:
         if session:
             session.active = False
             # Close associated browser tabs
+            if self.browser is None:
+                logger.warning(
+                    f"Browser instance is None while destroying session {session_id} — "
+                    "browser tabs cannot be closed"
+                )
             if self.browser and hasattr(session, "data") and session.data:
                 tab_ids = session.data.get("tab_ids", [])
                 for tab_id in tab_ids:

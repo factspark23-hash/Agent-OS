@@ -121,8 +121,8 @@ class HTTPSearchBackend(SearchBackend):
     def is_available(self) -> bool:
         """Check if curl_cffi is available."""
         try:
-            from curl_cffi.requests import Session
-            return True
+            import importlib.util
+            return importlib.util.find_spec("curl_cffi") is not None
         except ImportError:
             return False
 
@@ -234,7 +234,7 @@ class HTTPSearchBackend(SearchBackend):
         if retry_on_status is None:
             retry_on_status = {429, 502, 503, 504, 202}
 
-        last_exc = None
+        _last_exc = None
         for attempt in range(self.max_retries + 1):
             try:
                 _request_semaphore.acquire()
@@ -270,7 +270,7 @@ class HTTPSearchBackend(SearchBackend):
                     return response
 
             except Exception as exc:
-                last_exc = exc
+                _last_exc = exc
                 if self._is_session_corrupted_error(exc) and attempt < self.max_retries:
                     wait = 0.5 * (2 ** attempt)
                     logger.debug(

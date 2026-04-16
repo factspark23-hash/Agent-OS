@@ -106,15 +106,36 @@ const pluginArray = {
     length: 3,
     item: function(i) { return _plugins[i] || null; },
     namedItem: function(n) { return _plugins.find(function(p) { return p.name === n; }) || null; },
-    refresh: function() {}
+    refresh: function() {},
+    [Symbol.iterator]: function() {
+        let idx = 0;
+        return {
+            next: function() {
+                if (idx < _plugins.length) {
+                    return { value: _plugins[idx++], done: false };
+                }
+                return { done: true };
+            }
+        };
+    },
+    toArray: function() { return _plugins.slice(); }
 };
 for (let i = 0; i < _plugins.length; i++) {
+    // Each plugin entry needs MimeTypeArray-like structure
     pluginArray[i] = _plugins[i];
 }
+Object.freeze(pluginArray);
 
+// Force-override navigator.plugins — headless Chromium strips this,
+// so we must use a non-configurable getter that cannot be deleted.
+try {
+    // First, try to delete the existing property so we can redefine it
+    delete navigator.plugins;
+} catch(e) {}
 Object.defineProperty(navigator, 'plugins', {
     get: function() { return pluginArray; },
-    configurable: true
+    configurable: false,
+    enumerable: true
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -128,15 +149,15 @@ Object.defineProperty(navigator, 'language', {get: function() { return 'en-US'; 
 // LAYER 4: Platform
 // ═══════════════════════════════════════════════════════════════
 
-Object.defineProperty(navigator, 'platform', {get: function() { return 'Win32'; }, configurable: true});
+Object.defineProperty(navigator, 'platform', {get: function() { return window.__AGENT_OS_PLATFORM__ || 'Win32'; }, configurable: true});
 
 // ═══════════════════════════════════════════════════════════════
-// LAYER 5: Hardware info
+// LAYER 5: Hardware info — dynamic via window.__AGENT_OS_*__
 // ═══════════════════════════════════════════════════════════════
 
-Object.defineProperty(navigator, 'hardwareConcurrency', {get: function() { return 8; }, configurable: true});
-Object.defineProperty(navigator, 'deviceMemory', {get: function() { return 8; }, configurable: true});
-Object.defineProperty(navigator, 'maxTouchPoints', {get: function() { return 0; }, configurable: true});
+Object.defineProperty(navigator, 'hardwareConcurrency', {get: function() { return window.__AGENT_OS_CORES__ || 8; }, configurable: true});
+Object.defineProperty(navigator, 'deviceMemory', {get: function() { return window.__AGENT_OS_MEMORY__ || 8; }, configurable: true});
+Object.defineProperty(navigator, 'maxTouchPoints', {get: function() { return window.__AGENT_OS_TOUCH__ || 0; }, configurable: true});
 
 // ═══════════════════════════════════════════════════════════════
 // LAYER 6: Connection
@@ -208,7 +229,9 @@ function makeListenerObj() {
     };
 }
 
-window.chrome = {
+// Force-override window.chrome — headless Chromium removes this object.
+// We must define it BEFORE any page script runs.
+const _chromeObj = {
     app: {
         isInstalled: false,
         InstallState: {
@@ -306,6 +329,32 @@ window.chrome = {
         onDownloadProgress: makeListenerObj()
     }
 };
+Object.freeze(_chromeObj.app);
+Object.freeze(_chromeObj.runtime);
+Object.freeze(_chromeObj.csi);
+Object.freeze(_chromeObj.loadTimes);
+Object.freeze(_chromeObj.webstore);
+Object.freeze(_chromeObj);
+
+// Force-assign: if window.chrome already exists (non-headless), merge.
+// If it doesn't (headless), define it as non-configurable.
+if (!window.chrome) {
+    Object.defineProperty(window, 'chrome', {
+        get: function() { return _chromeObj; },
+        configurable: false,
+        enumerable: true
+    });
+} else {
+    // Merge any missing properties into existing chrome object
+    try {
+        var existing = window.chrome;
+        if (!existing.app) existing.app = _chromeObj.app;
+        if (!existing.runtime) existing.runtime = _chromeObj.runtime;
+        if (!existing.csi) existing.csi = _chromeObj.csi;
+        if (!existing.loadTimes) existing.loadTimes = _chromeObj.loadTimes;
+        if (!existing.webstore) existing.webstore = _chromeObj.webstore;
+    } catch(e) {}
+}
 
 // ═══════════════════════════════════════════════════════════════
 // LAYER 9: Notification API Full Mock
@@ -755,6 +804,168 @@ try {
 } catch(e) {}
 
 // ═══════════════════════════════════════════════════════════════
+// LAYER 22: CDP (Chrome DevTools Protocol) Detection Prevention
+// ═══════════════════════════════════════════════════════════════
+// Advanced bot detection checks for CDP artifacts:
+// - window.__cdp_bindings__ / window.__nightmare
+// - Runtime.enable / Page.addScriptToEvaluateOnNewDocument markers
+// - CDP-specific properties on window/document
+
+// Remove CDP binding artifacts
+if (window.__cdp_bindings__) {
+    delete window.__cdp_bindings__;
+}
+if (window.__nightmare) {
+    delete window.__nightmare;
+}
+if (window._cdp) {
+    delete window._cdp;
+}
+
+// Override window.cdc_adoQpoasnfa76pfcZLmcfl_Array (ChromeDriver marker)
+Object.keys(window).forEach(function(key) {
+    if (key.match(/^cdc_/)) {
+        delete window[key];
+    }
+});
+
+// Override document.cdc_ markers
+Object.keys(document).forEach(function(key) {
+    if (key.match(/^cdc_/)) {
+        delete document[key];
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// LAYER 23: Navigator Property Consistency Guard
+// ═══════════════════════════════════════════════════════════════
+// Cloudflare and PerimeterX check for navigator property
+// inconsistencies. If userAgent says Windows but platform says MacIntel,
+// that's a dead giveaway. This layer enforces consistency between
+// all related properties based on the injected __AGENT_OS_PLATFORM__.
+
+(function() {
+    var platform = window.__AGENT_OS_PLATFORM__ || 'Win32';
+    var isMac = platform === 'MacIntel';
+    var isWin = platform === 'Win32';
+    var isLinux = platform === 'Linux x86_64';
+
+    // Ensure userAgentData consistency (Chrome 90+)
+    if (navigator.userAgentData) {
+        // We can't easily override the readonly brand array, but we can
+        // ensure the platform property matches
+        try {
+            Object.defineProperty(navigator.userAgentData, 'platform', {
+                get: function() {
+                    if (isMac) return 'macOS';
+                    if (isWin) return 'Windows';
+                    if (isLinux) return 'Linux';
+                    return 'Unknown';
+                },
+                configurable: true
+            });
+        } catch(e) {}
+    }
+
+    // Ensure sec-ch-ua-platform header matches (set via HTTP headers by browser.py)
+    // This is already handled by the BrowserProfile sec_ch_ua_platform setting
+
+    // Connection consistency — vary RTT slightly per page load for realism
+    var baseRtt = 25 + Math.floor(Math.random() * 75); // 25-100ms
+    var baseDownlink = (5 + Math.random() * 15).toFixed(1); // 5-20 Mbps
+    Object.defineProperty(navigator, 'connection', {
+        get: function() {
+            return {
+                rtt: baseRtt,
+                downlink: parseFloat(baseDownlink),
+                effectiveType: baseRtt < 100 ? '4g' : '3g',
+                saveData: false,
+                type: 'wifi',
+                addEventListener: function() {},
+                removeEventListener: function() {},
+                dispatchEvent: function() { return true; },
+                onchange: null
+            };
+        },
+        configurable: true
+    });
+})();
+
+// ═══════════════════════════════════════════════════════════════
+// LAYER 24: Cloudflare/PerimeterX Challenge Detection
+// ═══════════════════════════════════════════════════════════════
+// Detect when a page is showing a Cloudflare "Just a moment..." or
+// PerimeterX challenge page, and signal to the Python layer that
+// bypass is needed. This runs as a MutationObserver that watches
+// for challenge-specific DOM elements.
+
+(function() {
+    // Cloudflare challenge indicators
+    var cfIndicators = [
+        '#challenge-running',           // CF Turnstile
+        '#challenge-stage',             // CF managed challenge
+        '#challenge-error-title',       // CF error
+        '.challenge-running-text',      // CF running text
+        '#cf-challenge-running',        // CF running
+        '#cf-please-wait',              // CF wait
+        'iframe[src*="challenges.cloudflare.com"]', // Turnstile iframe
+        // PerimeterX indicators
+        '#px-captcha',                  // PX captcha container
+        'div[id^="px-"]',              // PX elements
+        // DataDome indicators
+        'iframe[src*="datadome"]',     // DataDome captcha
+        // Akamai indicators
+        '#ak-challenge',               // Akamai challenge
+        'iframe[src*="akamai"]',       // Akamai iframe
+    ];
+
+    function checkForChallenge() {
+        for (var i = 0; i < cfIndicators.length; i++) {
+            try {
+                var el = document.querySelector(cfIndicators[i]);
+                if (el) {
+                    // Signal to Python layer via a custom event
+                    window.dispatchEvent(new CustomEvent('__AGENT_OS_CHALLENGE__', {
+                        detail: {
+                            type: 'bot_challenge_detected',
+                            selector: cfIndicators[i],
+                            url: window.location.href,
+                            timestamp: Date.now()
+                        }
+                    }));
+                    console.debug('[Agent-OS stealth] Challenge detected:', cfIndicators[i]);
+                    return true;
+                }
+            } catch(e) {}
+        }
+        return false;
+    }
+
+    // Check immediately (page might already have challenge)
+    checkForChallenge();
+
+    // Also check after DOM mutations (challenges can be injected dynamically)
+    var _challengeObserver = new MutationObserver(function() {
+        checkForChallenge();
+    });
+
+    if (document.documentElement) {
+        _challengeObserver.observe(document.documentElement, {
+            childList: true,
+            subtree: true
+        });
+    } else {
+        document.addEventListener('DOMContentLoaded', function() {
+            _challengeObserver.observe(document.documentElement, {
+                childList: true,
+                subtree: true
+            });
+            checkForChallenge();
+        });
+    }
+})();
+
+// ═══════════════════════════════════════════════════════════════
 // LAYER 21: Iframe stealth propagation
 // ═══════════════════════════════════════════════════════════════
 // Pages with iframes can detect automation in the parent but not
@@ -766,7 +977,8 @@ function patchFrame(frame) {
         var win = frame.contentWindow;
         if (!win || !win.navigator) return;
 
-        // Core patches for iframe
+        // Core patches for iframe — use SAME dynamic values as parent window
+        // so macOS profiles get MacIntel in iframes too, etc.
         Object.defineProperty(win.navigator, 'webdriver', {get: function() { return undefined; }, configurable: true});
 
         // Chrome runtime in iframe
@@ -780,9 +992,13 @@ function patchFrame(frame) {
 
         // Languages
         Object.defineProperty(win.navigator, 'languages', {get: function() { return ['en-US', 'en']; }, configurable: true});
-        Object.defineProperty(win.navigator, 'platform', {get: function() { return 'Win32'; }, configurable: true});
-        Object.defineProperty(win.navigator, 'hardwareConcurrency', {get: function() { return 8; }, configurable: true});
-        Object.defineProperty(win.navigator, 'deviceMemory', {get: function() { return 8; }, configurable: true});
+
+        // Platform + Hardware — read from parent's dynamic globals so iframe
+        // profile matches the BrowserProfile that was injected by Python
+        Object.defineProperty(win.navigator, 'platform', {get: function() { return window.__AGENT_OS_PLATFORM__ || 'Win32'; }, configurable: true});
+        Object.defineProperty(win.navigator, 'hardwareConcurrency', {get: function() { return window.__AGENT_OS_CORES__ || 8; }, configurable: true});
+        Object.defineProperty(win.navigator, 'deviceMemory', {get: function() { return window.__AGENT_OS_MEMORY__ || 8; }, configurable: true});
+        Object.defineProperty(win.navigator, 'maxTouchPoints', {get: function() { return window.__AGENT_OS_TOUCH__ || 0; }, configurable: true});
 
     } catch(e) {
         // Cross-origin frames throw SecurityError — silently ignore
@@ -819,22 +1035,44 @@ if (document.documentElement) {
 // DONE
 // ═══════════════════════════════════════════════════════════════
 
-console.log('[Agent-OS] Stealth patches loaded v4.1 (21 layers)');
+console.log('[Agent-OS] Stealth patches loaded v5.0 (24 layers)');
 
 })();
 """
 
 # ─── Screen Dimension Template Replacer ─────────────────────
 
-def apply_screen_dimensions(stealth_js: str, screen_width: int, screen_height: int, device_pixel_ratio: float = 1.0) -> str:
-    """Replace screen dimension placeholders in stealth JS with real profile values.
+def apply_screen_dimensions(
+    stealth_js: str,
+    screen_width: int,
+    screen_height: int,
+    device_pixel_ratio: float = 1.0,
+    platform: str = "Win32",
+    hardware_concurrency: int = 8,
+    device_memory: int = 8,
+    max_touch_points: int = 0,
+) -> str:
+    """Replace all profile-dependent placeholders in stealth JS with real values.
 
     Called from browser.py when injecting init scripts so each page gets
-    screen dimensions matching its BrowserProfile.
+    screen dimensions, platform, and hardware matching its BrowserProfile.
+    This ensures macOS profiles report MacIntel, Windows report Win32, etc.
     """
+    # Screen dimensions (used by Layer 15 - Screen fingerprint consistency)
     js = stealth_js.replace("__AGENT_OS_SCREEN_WIDTH__", str(screen_width))
-    js = js.replace("__AGENT_OS_SCREEN_HEIGHT__", str(screen_height))
-    js = js.replace("__AGENT_OS_DEVICE_PIXEL_RATIO__", str(device_pixel_ratio))
+    js = stealth_js.replace("__AGENT_OS_SCREEN_HEIGHT__", str(screen_height))
+    js = stealth_js.replace("__AGENT_OS_DEVICE_PIXEL_RATIO__", str(device_pixel_ratio))
+
+    # Platform (used by Layer 4 - must match BrowserProfile.platform)
+    js = js.replace("'Win32'",  f"'{platform}'") if platform != "Win32" else js
+    # Inject platform via window globals for the dynamic getter in Layer 4
+    platform_inject = f"window.__AGENT_OS_PLATFORM__='{platform}';"
+    platform_inject += f"window.__AGENT_OS_CORES__={hardware_concurrency};"
+    platform_inject += f"window.__AGENT_OS_MEMORY__={device_memory};"
+    platform_inject += f"window.__AGENT_OS_TOUCH__={max_touch_points};"
+    # Prepend the globals so they're set before the stealth layers read them
+    js = platform_inject + "\n" + js
+
     return js
 
 
@@ -904,6 +1142,8 @@ def handle_request_interception(url: str, resource_type: str):
         "challenges.cloudflare.com",
         "cloudflare.com/cdn-cgi/challenge",
         "captcha.px-cloud.net",
+        "perimeterx.net",
+        "cdn.perimeterx.net",
         "px-cdn.net",
         "px-client.net",
         "px-captcha.net",

@@ -2,6 +2,11 @@ import { create } from 'zustand';
 import type { TabId, APIKey, ChatMessage, HandoffSession, BrowserState, AgentSession, SwarmAgent, ServerStatus } from '../types';
 import { detectProvider, maskKey } from '../config/providers';
 
+interface AppSettings {
+  apiKey: string;
+  authToken: string;
+}
+
 interface AppState {
   // Navigation
   activeTab: TabId;
@@ -47,6 +52,8 @@ interface AppState {
   setServerUrl: (url: string) => void;
   theme: 'dark' | 'light';
   setTheme: (t: 'dark' | 'light') => void;
+  settings: AppSettings;
+  setSettings: (s: Partial<AppSettings>) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -143,4 +150,6 @@ export const useAppStore = create<AppState>((set) => ({
   setServerUrl: (url) => set({ serverUrl: url }),
   theme: 'dark',
   setTheme: (t) => set({ theme: t }),
+  settings: { apiKey: '', authToken: '' },
+  setSettings: (s) => set((state) => ({ settings: { ...state.settings, ...s } })),
 }));

@@ -47,6 +47,8 @@ USER agentos
 ENV PLAYWRIGHT_BROWSERS_PATH=/home/agentos/.cache/ms-playwright
 # Bind to 0.0.0.0 for Docker (not 127.0.0.1)
 ENV AGENT_OS_HOST=0.0.0.0
+# Signal that we're running inside Docker (browser uses --no-sandbox)
+ENV AGENT_OS_DOCKER=1
 
 # Expose ports
 # 8000 = WebSocket (agents connect here)

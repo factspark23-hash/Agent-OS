@@ -14,6 +14,8 @@ class FormFiller:
     # Common field name patterns and their semantic meaning
     FIELD_PATTERNS = {
         "email": ["email", "e-mail", "mail", "user_email"],
+        "username": ["username", "user_name", "user", "userid", "user_id", "login", "login_id"],
+        "password": ["password", "passwd", "pass", "pwd", "user_password", "user_pass"],
         "first_name": ["first_name", "firstname", "fname", "first-name", "given_name"],
         "last_name": ["last_name", "lastname", "lname", "last-name", "family_name"],
         "full_name": ["full_name", "fullname", "name", "your_name", "candidate_name"],
@@ -31,6 +33,13 @@ class FormFiller:
         "resume": ["resume", "cv", "file", "upload"],
     }
 
+    # Cross-field mappings: when looking for 'username', also check 'email' fields
+    # This handles sites like Instagram that use name="email" for username input
+    CROSS_FIELD_MAP = {
+        "username": ["email"],
+        "email": ["username"],
+    }
+
     def __init__(self, browser):
         self.browser = browser
 
@@ -45,30 +54,38 @@ class FormFiller:
         logger.info(f"Filling job application at {url}")
 
         # Navigate to the job page
-        nav_result = await self.browser.navigate(url)
-        if nav_result.get("status") != "success":
-            return nav_result
+        try:
+            nav_result = await self.browser.navigate(url)
+            if nav_result.get("status") != "success":
+                return nav_result
+        except Exception as e:
+            logger.error(f"Navigation failed for {url}: {e}")
+            return {"status": "error", "error": f"Navigation failed: {e}"}
 
         # Detect all form fields
-        fields = await self.browser.evaluate_js("""() => {
-            const fields = [];
-            document.querySelectorAll('input, textarea, select').forEach(el => {
-                if (el.type === 'hidden' || el.type === 'submit') return;
-                fields.push({
-                    tag: el.tagName.toLowerCase(),
-                    type: el.type || 'text',
-                    name: el.name || '',
-                    id: el.id || '',
-                    placeholder: el.placeholder || '',
-                    label: el.labels?.[0]?.textContent?.trim() || '',
-                    required: el.required,
-                    options: el.tagName === 'SELECT'
-                        ? Array.from(el.options).map(o => ({value: o.value, text: o.text}))
-                        : []
+        try:
+            fields = await self.browser.evaluate_js("""() => {
+                const fields = [];
+                document.querySelectorAll('input, textarea, select').forEach(el => {
+                    if (el.type === 'hidden' || el.type === 'submit') return;
+                    fields.push({
+                        tag: el.tagName.toLowerCase(),
+                        type: el.type || 'text',
+                        name: el.name || '',
+                        id: el.id || '',
+                        placeholder: el.placeholder || '',
+                        label: el.labels?.[0]?.textContent?.trim() || '',
+                        required: el.required,
+                        options: el.tagName === 'SELECT'
+                            ? Array.from(el.options).map(o => ({value: o.value, text: o.text}))
+                            : []
+                    });
                 });
-            });
-            return fields;
-        }""")
+                return fields;
+            }""")
+        except Exception as e:
+            logger.error(f"Field detection failed: {e}")
+            return {"status": "error", "error": f"Field detection failed: {e}"}
 
         if not fields:
             return {"status": "error", "error": "No form fields found on page"}
@@ -85,7 +102,11 @@ class FormFiller:
             return {"status": "error", "error": "No matching fields found for profile data"}
 
         # Fill the form with human-like timing
-        result = await self.browser.fill_form(fill_map)
+        try:
+            result = await self.browser.fill_form(fill_map)
+        except Exception as e:
+            logger.error(f"Form filling failed: {e}")
+            return {"status": "error", "error": f"Form filling failed: {e}"}
 
         return {
             "status": "success",
@@ -109,15 +130,31 @@ class FormFiller:
             '#submit',
         ]
 
+        submitted = False
+        submitted_via = None
+
         for selector in submit_selectors:
-            result = await self.browser.click(selector)
-            if result.get("status") == "success":
-                return {"status": "success", "submitted_via": selector}
+            try:
+                result = await self.browser.click(selector)
+                if result.get("status") == "success":
+                    submitted = True
+                    submitted_via = selector
+                    break  # Stop after first successful submit to prevent double submission
+            except Exception as e:
+                logger.warning(f"Failed to click submit selector '{selector}': {e}")
+                continue
+
+        if submitted:
+            return {"status": "success", "submitted_via": submitted_via}
 
         return {"status": "error", "error": "Could not find submit button"}
 
     def _match_field(self, field: Dict, profile: Dict) -> Optional[str]:
-        """Match a form field to profile data."""
+        """Match a form field to profile data.
+
+        Handles cross-field mappings (e.g., username field can match email profile data).
+        Many sites like Instagram use input[name='email'] for the username field.
+        """
         name = (field.get("name") or "").lower()
         id_ = (field.get("id") or "").lower()
         placeholder = (field.get("placeholder") or "").lower()
@@ -129,6 +166,13 @@ class FormFiller:
                 value = profile.get(field_type)
                 if value:
                     return value
+                # Try cross-field mapping (e.g., username field → email profile data)
+                cross_fields = self.CROSS_FIELD_MAP.get(field_type, [])
+                for cross_field in cross_fields:
+                    cross_value = profile.get(cross_field)
+                    if cross_value:
+                        logger.debug(f"Cross-field match: {field_type} → {cross_field} for field '{name}'")
+                        return cross_value
 
         return None
 

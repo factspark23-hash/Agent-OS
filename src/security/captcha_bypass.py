@@ -106,6 +106,7 @@ class CaptchaBypass:
     CDN_DOMAINS_REQUIRING_PATH = [
         "gstatic.com",
         "googleapis.com",
+        "google.com",
         "cdnjs.cloudflare.com",
         "jsdelivr.net",
         "unpkg.com",

@@ -272,16 +272,15 @@ class TestHumanMimicry:
 
     def test_mouse_path_points(self):
         h = HumanMimicry()
-        path = h.mouse_path(500, 500)
+        path = h.mouse_path(0, 0, 500, 500)
         assert len(path) > 5
-        # Start from (0,0) since it's first call
         # End near target
         assert abs(path[-1][0] - 500) < 5
         assert abs(path[-1][1] - 500) < 5
 
     def test_mouse_path_has_curve(self):
         h = HumanMimicry()
-        path = h.mouse_path(200, 200)
+        path = h.mouse_path(0, 0, 200, 200)
         # Check that path isn't perfectly straight
         x_coords = [p[0] for p in path]
         # If it's a straight line, all intermediate points would be evenly spaced

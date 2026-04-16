@@ -308,31 +308,17 @@ Object.keys = makeNative(function(obj) {{
 // Block console.log timing detection
 // Sites measure time between console.log calls
 // When DevTools is open, timing changes
-const origConsoleLog = console.log;
-console.log = makeNative(function() {{
-    // Add tiny random delay to defeat timing analysis
-    const start = performance.now();
-    const result = origConsoleLog.apply(this, arguments);
-    // Ensure consistent timing
-    const elapsed = performance.now() - start;
-    if (elapsed < 0.1) {{
-        // Busy-wait for consistency
-        while (performance.now() - start < 0.1 + timingRNG() * 0.05) {{}}
-    }}
-    return result;
-}}, 'log');
+// NOTE: Do NOT wrap console.log with busy-wait loops.
+// Busy-waiting (while(performance.now()...)) can freeze pages and
+// is itself detectable via timing analysis by advanced scripts.
+// Original console.log is left intact — DevTools timing detection
+// is handled by the timing offset in performance.now() instead.
 
-// Block debugger statement detection
-// Sites use debugger to check if DevTools is open
-const origFunction = window.Function;
-window.Function = makeNative(function() {{
-    const code = arguments[arguments.length - 1];
-    if (typeof code === 'string' && code.includes('debugger')) {{
-        // Return a function that does nothing
-        return function() {{}};
-    }}
-    return origFunction.apply(this, arguments);
-}}, 'Function');
+// NOTE: Do NOT replace window.Function. Overriding Function constructor
+// to block 'debugger' statements breaks legitimate libraries that use
+// new Function() for templating, dynamic code generation, etc.
+// DevTools detection via debugger is handled by the performance.now()
+// timing offset and stack trace sanitization instead.
 
 // Block element inspector detection
 // Sites check element styles that change when inspected
@@ -437,96 +423,160 @@ Object.defineProperty(Navigator.prototype, 'languages', {{
     configurable: true, enumerable: true
 }});
 
-// Connection
+// Connection — use JS-side random so value varies per page load
+// (Python random.randint() is evaluated once at script generation time,
+// producing the same value on every page — detectable)
+const _connSeed = Math.floor(Math.random() * 2147483647);
+const _connRNG = createRNG(_connSeed);
+const _cachedConnection = {{
+    rtt: Math.floor(20 + _connRNG() * 80),
+    downlink: +(5 + _connRNG() * 45).toFixed(1),
+    effectiveType: '4g',
+    saveData: false,
+    type: 'wifi',
+    onchange: null
+}};
+
 Object.defineProperty(Navigator.prototype, 'connection', {{
-    get: function() {{
-        return {{
-            rtt: {random.randint(20, 100)},
-            downlink: {random.randint(5, 50)},
-            effectiveType: '4g',
-            saveData: false,
-            type: 'wifi',
-            onchange: null
-        }};
-    }},
+    get: function() {{ return _cachedConnection; }},
     configurable: true, enumerable: true
 }});
 
 // ═══════════════════════════════════════════════════════════════
-// 6. PLUGINS — Realistic Chrome Plugin List
+// 6. PLUGINS — Realistic Chrome Plugin List (CACHED for consistency)
 // ═══════════════════════════════════════════════════════════════
+// Detection scripts call navigator.plugins multiple times and compare
+// references. If we return a new object each time, it's detectable.
+// We MUST cache and return the same object always.
+
+const _cachedPlugins = (function() {{
+    const p0 = Object.create(Object.getPrototypeOf(navigator.plugins) || Object.prototype);
+    p0.name = 'Chrome PDF Plugin';
+    p0.filename = 'internal-pdf-viewer';
+    p0.description = 'Portable Document Format';
+    p0.length = 1;
+    p0[0] = {{ name: 'Portable Document Format', suffixes: 'pdf', description: 'Portable Document Format', type: 'application/x-google-chrome-pdf' }};
+
+    const p1 = Object.create(Object.getPrototypeOf(navigator.plugins) || Object.prototype);
+    p1.name = 'Chrome PDF Viewer';
+    p1.filename = 'mhjfbmdgcfjbbpaeojofohoefgiehjai';
+    p1.description = '';
+    p1.length = 1;
+    p1[0] = {{ name: 'Chrome PDF Viewer', suffixes: '', description: '', type: 'application/x-google-chrome-pdf' }};
+
+    const p2 = Object.create(Object.getPrototypeOf(navigator.plugins) || Object.prototype);
+    p2.name = 'Native Client';
+    p2.filename = 'internal-nacl-plugin';
+    p2.description = '';
+    p2.length = 2;
+    p2[0] = {{ name: 'Native Client Executable', suffixes: '', description: 'Native Client Executable', type: 'application/x-nacl' }};
+    p2[1] = {{ name: 'Portable Native Client Executable', suffixes: '', description: 'Portable Native Client Executable', type: 'application/x-pnacl' }};
+
+    const arr = Object.create(Object.getPrototypeOf(navigator.plugins) || Object.prototype);
+    arr[0] = p0;
+    arr[1] = p1;
+    arr[2] = p2;
+    arr.length = 3;
+    arr.item = makeNative(function(i) {{ return arr[i] || null; }}, 'item');
+    arr.namedItem = makeNative(function(n) {{ for (let i = 0; i < arr.length; i++) {{ if (arr[i].name === n) return arr[i]; }} return null; }}, 'namedItem');
+    arr.refresh = makeNative(function() {{}}, 'refresh');
+    arr[Symbol.iterator] = function() {{ let idx = 0; return {{ next: function() {{ if (idx < arr.length) return {{ value: arr[idx++], done: false }}; return {{ done: true }}; }} }}; }};
+    Object.defineProperty(arr, 'length', {{ value: 3, writable: false, configurable: false }});
+    return arr;
+}})();
 
 Object.defineProperty(Navigator.prototype, 'plugins', {{
-    get: function() {{
-        const plugins = [
-            {{ name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format', length: 1 }},
-            {{ name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '', length: 1 }},
-            {{ name: 'Native Client', filename: 'internal-nacl-plugin', description: '', length: 2 }}
-        ];
-        plugins.length = 3;
-        plugins.item = function(i) {{ return this[i] || null; }};
-        plugins.namedItem = function(n) {{ return this.find(p => p.name === n) || null; }};
-        plugins.refresh = function() {{}};
-        return plugins;
-    }},
-    configurable: true, enumerable: true
+    get: function() {{ return _cachedPlugins; }},
+    configurable: false, enumerable: true
 }});
 
 // ═══════════════════════════════════════════════════════════════
 // 7. CHROME OBJECT — Complete Real Chrome Structure
 // ═══════════════════════════════════════════════════════════════
+// Headless Chromium strips window.chrome entirely. We must define it
+// as a non-configurable property so page scripts can't delete it.
+// Using Object.defineProperty instead of direct assignment prevents
+// detection via property descriptor checks.
 
-window.chrome = window.chrome || {{}};
-window.chrome.app = {{
-    isInstalled: false,
-    InstallState: {{ INSTALLED: 'installed', DISABLED: 'disabled', NOT_INSTALLED: 'not_installed' }},
-    RunningState: {{ CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' }},
-    getDetails: function() {{ return null; }},
-    getIsInstalled: function() {{ return false; }},
-    installState: function() {{ return 'not_installed'; }},
-    runningState: function() {{ return 'cannot_run'; }}
+const _chromeObj = {{
+    app: {{
+        isInstalled: false,
+        InstallState: {{ INSTALLED: 'installed', DISABLED: 'disabled', NOT_INSTALLED: 'not_installed' }},
+        RunningState: {{ CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' }},
+        getDetails: makeNative(function() {{ return null; }}, 'getDetails'),
+        getIsInstalled: makeNative(function() {{ return false; }}, 'getIsInstalled'),
+        installState: makeNative(function() {{ return 'not_installed'; }}, 'installState'),
+        runningState: makeNative(function() {{ return 'cannot_run'; }}, 'runningState')
+    }},
+    runtime: {{
+        OnInstalledReason: {{ CHROME_UPDATE: 'chrome_update', INSTALL: 'install', SHARED_MODULE_UPDATE: 'shared_module_update', UPDATE: 'update' }},
+        OnRestartRequiredReason: {{ APP_UPDATE: 'app_update', OS_UPDATE: 'os_update', PERIODIC: 'periodic' }},
+        PlatformArch: {{ ARM: 'arm', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64' }},
+        PlatformNaclArch: {{ ARM: 'arm', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64' }},
+        PlatformOs: {{ ANDROID: 'android', CROS: 'cros', LINUX: 'linux', MAC: 'mac', OPENBSD: 'openbsd', WIN: 'win' }},
+        RequestUpdateCheckStatus: {{ NO_UPDATE: 'no_update', THROTTLED: 'throttled', UPDATE_AVAILABLE: 'update_available' }},
+        connect: makeNative(function() {{ return {{ postMessage: function(){{}}, disconnect: function(){{}}, onMessage: {{ addListener: function(){{}}, removeListener: function(){{}}, hasListener: function(){{ return false; }} }}, onDisconnect: {{ addListener: function(){{}}, removeListener: function(){{}}, hasListener: function(){{ return false; }} }} }}; }}, 'connect'),
+        sendMessage: makeNative(function(msg, cb) {{ if (typeof cb === 'function') cb(); return Promise.resolve(); }}, 'sendMessage'),
+        id: undefined,
+        getManifest: makeNative(function() {{ return {{ manifest_version: 3, version: '1.0.0', name: 'Chrome App' }}; }}, 'getManifest'),
+        getURL: makeNative(function(path) {{ return 'chrome-extension://nmmhkkegccagdldgiimedpiccmgmieda/' + (path || ''); }}, 'getURL'),
+        onMessage: {{ addListener: function(){{}}, removeListener: function(){{}}, hasListener: function(){{ return false; }} }},
+        onConnect: {{ addListener: function(){{}}, removeListener: function(){{}}, hasListener: function(){{ return false; }} }},
+        onInstalled: {{ addListener: function(){{}}, removeListener: function(){{}}, hasListener: function(){{ return false; }} }},
+        lastError: undefined
+    }},
+    csi: makeNative(function() {{
+        return {{
+            onloadT: Date.now(),
+            pageT: Date.now(),
+            startE: Date.now(),
+            toString: function() {{ return '[object Object]'; }}
+        }};
+    }}, 'csi'),
+    loadTimes: makeNative(function() {{
+        const now = Date.now() / 1000;
+        return {{
+            commitLoadTime: now,
+            connectionInfo: 'h2',
+            finishDocumentLoadTime: now,
+            finishLoadTime: now,
+            firstPaintAfterLoadTime: 0,
+            firstPaintTime: now,
+            npnNegotiatedProtocol: 'h2',
+            requestTime: now,
+            startLoadTime: now,
+            wasAlternateProtocolAvailable: false,
+            wasFetchedViaSpdy: true,
+            wasNpnNegotiated: true,
+        }};
+    }}, 'loadTimes'),
+    webstore: {{
+        onInstallStageChanged: {{ addListener: function(){{}}, removeListener: function(){{}}, hasListener: function(){{ return false; }} }},
+        onDownloadProgress: {{ addListener: function(){{}}, removeListener: function(){{}}, hasListener: function(){{ return false; }} }}
+    }}
 }};
+Object.freeze(_chromeObj.app);
+Object.freeze(_chromeObj.runtime);
+Object.freeze(_chromeObj.webstore);
+Object.freeze(_chromeObj);
 
-window.chrome.runtime = {{
-    OnInstalledReason: {{ CHROME_UPDATE: 'chrome_update', INSTALL: 'install', SHARED_MODULE_UPDATE: 'shared_module_update', UPDATE: 'update' }},
-    OnRestartRequiredReason: {{ APP_UPDATE: 'app_update', OS_UPDATE: 'os_update', PERIODIC: 'periodic' }},
-    PlatformArch: {{ ARM: 'arm', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64' }},
-    PlatformNaclArch: {{ ARM: 'arm', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64' }},
-    PlatformOs: {{ ANDROID: 'android', CROS: 'cros', LINUX: 'linux', MAC: 'mac', OPENBSD: 'openbsd', WIN: 'win' }},
-    RequestUpdateCheckStatus: {{ NO_UPDATE: 'no_update', THROTTLED: 'throttled', UPDATE_AVAILABLE: 'update_available' }},
-    connect: makeNative(function() {{}}, 'connect'),
-    sendMessage: makeNative(function() {{}}, 'sendMessage'),
-    id: undefined,
-    getManifest: makeNative(function() {{ return {{}}; }}, 'getManifest'),
-    getURL: makeNative(function(path) {{ return 'chrome-extension://invalid/' + path; }}, 'getURL')
-}};
-
-window.chrome.csi = makeNative(function() {{
-    return {{
-        onloadT: Date.now(),
-        pageT: Date.now(),
-        startE: Date.now(),
-        toString: function() {{ return '[object Object]'; }}
-    }};
-}}, 'csi');
-
-window.chrome.loadTimes = makeNative(function() {{
-    const now = Date.now() / 1000;
-    return {{
-        commitLoadTime: now,
-        connectionInfo: 'h2',
-        finishDocumentLoadTime: now,
-        finishLoadTime: now,
-        firstPaintAfterLoadTime: 0,
-        firstPaintTime: now,
-        npnNegotiatedProtocol: 'h2',
-        requestTime: now,
-        startLoadTime: now,
-        wasAlternateProtocolAvailable: false,
-        wasFetchedViaSpdy: true,
-        wasNpnNegotiated: true,
-    }};
-}}, 'loadTimes');
+if (!window.chrome) {{
+    Object.defineProperty(window, 'chrome', {{
+        get: function() {{ return _chromeObj; }},
+        configurable: false,
+        enumerable: true
+    }});
+}} else {{
+    // Merge missing properties into existing chrome object
+    try {{
+        var existing = window.chrome;
+        if (!existing.app) existing.app = _chromeObj.app;
+        if (!existing.runtime) existing.runtime = _chromeObj.runtime;
+        if (!existing.csi) existing.csi = _chromeObj.csi;
+        if (!existing.loadTimes) existing.loadTimes = _chromeObj.loadTimes;
+        if (!existing.webstore) existing.webstore = _chromeObj.webstore;
+    }} catch(e) {{}}
+}}
 
 // ═══════════════════════════════════════════════════════════════
 // 8. SCREEN — Consistent Hardware Profile
@@ -832,14 +882,10 @@ for (const prop of globalProps) {{
 }}
 
 // ═══════════════════════════════════════════════════════════════
-// 20. VERIFICATION LOGGING
+// 20. VERIFICATION — Silent (no console output)
 // ═══════════════════════════════════════════════════════════════
-
-console.log('[Agent-OS] GOD MODE v5.0 loaded');
-console.log('[Agent-OS] Fingerprint:', '{fp.fp_id}');
-console.log('[Agent-OS] Hardware:', '{fp.hardware["name"]}');
-console.log('[Agent-OS] Chrome:', '{fp.chrome_version}');
-console.log('[Agent-OS] navigator.webdriver:', navigator.webdriver);
+// NOTE: Do NOT console.log() here — that is a detection signal.
+// Detection scripts monitor console output for framework names.
 
 }})();
 """

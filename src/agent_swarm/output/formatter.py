@@ -35,14 +35,14 @@ class SearchOutput:
         """Convert to Markdown format."""
         lines = [
             f"# Search Results: {self.query}",
-            f"",
+            "",
             f"**Category:** {self.category} | **Confidence:** {self.confidence:.2f} | **Tier:** {self.tier_used}",
             f"**Agents:** {', '.join(self.agents_used)} | **Results:** {self.total_results}",
             f"**Time:** {self.execution_time:.2f}s | **Timestamp:** {self.timestamp}",
-            f"",
+            "",
         ]
         if self.summary:
-            lines.extend([f"## Summary", f"", f"{self.summary}", f""])
+            lines.extend(["## Summary", "", f"{self.summary}", ""])
         lines.append("## Results")
         lines.append("")
         for i, result in enumerate(self.results, 1):
@@ -52,13 +52,13 @@ class SearchOutput:
             agent = result.get("agent_name", "")
             score = result.get("relevance_score", 0)
             lines.append(f"### {i}. {title}")
-            lines.append(f"")
+            lines.append("")
             lines.append(f"- **URL:** {url}")
             lines.append(f"- **Agent:** {agent}")
             lines.append(f"- **Relevance:** {score:.2f}")
             if snippet:
                 lines.append(f"- **Snippet:** {snippet}")
-            lines.append(f"")
+            lines.append("")
         if self.sources:
             lines.append("## Sources")
             lines.append("")

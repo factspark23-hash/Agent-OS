@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 class AgentOSBackend(SearchBackend):
     """Uses Agent-OS's browser automation for search.
-    
+
     Connects to the Agent-OS HTTP API and uses its browser
     to perform web searches with full JavaScript rendering.
     """

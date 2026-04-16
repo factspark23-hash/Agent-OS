@@ -230,7 +230,7 @@ class AgentOS:
         # Log swarm status
         if self.config.get("swarm.enabled", False):
             http_port = self.config.get("server.http_port", 8001)
-            self.logger.info(f"  Swarm Endpoints:")
+            self.logger.info("  Swarm Endpoints:")
             self.logger.info(f"    Health:  GET  http://0.0.0.0:{http_port}/swarm/health")
             self.logger.info(f"    Search:  POST http://0.0.0.0:{http_port}/swarm/search")
             self.logger.info(f"    Route:   POST http://0.0.0.0:{http_port}/swarm/route")

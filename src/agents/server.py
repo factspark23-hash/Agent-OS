@@ -75,6 +75,14 @@ class AgentServer:
         self._rate_window_seconds = config.get("server.rate_limit_window", 60)
         self._rate_cleanup_task = None
 
+        # Per-command timeout (seconds)
+        self._command_timeout = config.get("server.command_timeout", 60)
+
+        # WebSocket auth cache (avoid re-authenticating every message)
+        self._ws_auth_cache: Dict[str, Dict] = {}  # token prefix → auth_context
+        self._ws_auth_cache_ttl = 300  # Re-validate every 5 minutes
+        self._ws_auth_cache_times: Dict[str, float] = {}  # token prefix → last_validation_time
+
     async def start(self):
         """Start both WebSocket and HTTP servers."""
         ws_host = self.config.get("server.host", "0.0.0.0")
@@ -368,8 +376,16 @@ class AgentServer:
                     data = json.loads(message)
                     token = data.get("token", "")
 
-                    # Re-authenticate each message
-                    auth_context = await self._authenticate_ws(token)
+                    # Re-authenticate each message (with caching)
+                    cache_key = token[:32]  # Use first 32 chars as cache key
+                    last_validated = self._ws_auth_cache_times.get(cache_key, 0)
+                    if (time.time() - last_validated) < self._ws_auth_cache_ttl and cache_key in self._ws_auth_cache:
+                        auth_context = self._ws_auth_cache[cache_key]
+                    else:
+                        auth_context = await self._authenticate_ws(token)
+                        if auth_context:
+                            self._ws_auth_cache[cache_key] = auth_context
+                            self._ws_auth_cache_times[cache_key] = time.time()
                     if not auth_context:
                         await websocket.send(json.dumps({
                             "status": "error", "error": "Invalid token"
@@ -426,7 +442,7 @@ class AgentServer:
                     await websocket.send(json.dumps({"status": "error", "error": "Invalid JSON"}))
                 except Exception as e:
                     logger.error(f"WS error: {e}")
-                    await websocket.send(json.dumps({"status": "error", "error": str(e)}))
+                    await websocket.send(json.dumps({"status": "error", "error": self._sanitize_error_message(str(e))}))
         finally:
             self._ws_clients.pop(client_id, None)
             logger.info(f"Agent disconnected: {client_id}")
@@ -468,7 +484,7 @@ class AgentServer:
                                       headers=self._get_cors_headers())
         except ValueError as e:
             return web.json_response(
-                {"status": "error", "error": str(e)},
+                {"status": "error", "error": self._sanitize_error_message(str(e))},
                 status=400, headers=self._get_cors_headers(),
             )
         except Exception as e:
@@ -578,8 +594,9 @@ class AgentServer:
                 headers=self._get_cors_headers(),
             )
         except Exception as e:
+            logger.error(f"Token refresh error: {e}")
             return web.json_response(
-                {"status": "error", "error": str(e)},
+                {"status": "error", "error": "Token refresh failed"},
                 status=400, headers=self._get_cors_headers(),
             )
 
@@ -622,8 +639,9 @@ class AgentServer:
                 headers=self._get_cors_headers(),
             )
         except Exception as e:
+            logger.error(f"API key creation error: {e}")
             return web.json_response(
-                {"status": "error", "error": str(e)},
+                {"status": "error", "error": "Failed to create API key"},
                 status=400, headers=self._get_cors_headers(),
             )
 
@@ -827,7 +845,8 @@ class AgentServer:
             b64 = await self.browser.screenshot()
             return web.Response(body=b64, content_type="text/plain")
         except Exception as e:
-            return web.json_response({"error": str(e)}, status=500)
+            logger.error(f"Screenshot error: {e}")
+            return web.json_response({"error": self._sanitize_error_message(str(e))}, status=500)
 
     # ─── Persistent Browser Endpoints ────────────────────────
 
@@ -858,17 +877,105 @@ class AgentServer:
             result = await self.persistent_manager.execute_for_user(user_id, command, data)
             return web.json_response(result)
         except Exception as e:
-            return web.json_response({"status": "error", "error": str(e)}, status=400)
+            logger.error(f"Persistent command error: {e}")
+            return web.json_response({"status": "error", "error": self._sanitize_error_message(str(e))}, status=400)
 
-    # ─── Agent Swarm Endpoints ─────────────────────────────
+    # ─── Error Sanitization ───────────────────────────────────
+
+    # Known error patterns mapped to user-friendly messages
+    _KNOWN_ERROR_MAP = {
+        "browser has been closed": "Browser session has been lost. Reconnecting…",
+        "browser closed": "Browser session has been lost. Reconnecting…",
+        "browser crashed": "Browser crashed unexpectedly. Recovering…",
+        "target closed": "Browser target was closed. Recovering…",
+        "target got disconnected": "Browser connection lost. Recovering…",
+        "disconnected": "Browser connection lost. Recovering…",
+        "connection closed": "Browser connection was closed. Recovering…",
+        "page has been closed": "Browser page was closed. Recovering…",
+        "context has been closed": "Browser context was closed. Recovering…",
+        "session expired": "Session has expired. Please re-authenticate.",
+        "navigation to": "Navigation failed. The page may be unreachable.",
+        "net::err": "Network error occurred while loading the page.",
+        "timeout": "Operation timed out. The page may be unresponsive.",
+        "element is not attached": "Element is no longer available on the page.",
+        "waiting for selector": "Could not find the requested element on the page.",
+        "no element found": "Could not find the requested element on the page.",
+    }
+
+    # Keywords that indicate a browser crash requiring recovery
+    _BROWSER_CRASH_KEYWORDS = (
+        "browser has been closed",
+        "browser crashed",
+        "browser closed",
+        "target closed",
+        "target got disconnected",
+        "disconnected",
+        "page has been closed",
+        "context has been closed",
+        "connection closed",
+    )
+
+    @staticmethod
+    def _is_browser_crash_error(error_str: str) -> bool:
+        """Check if an error message indicates a browser crash requiring recovery."""
+        lower = error_str.lower()
+        return any(kw in lower for kw in AgentServer._BROWSER_CRASH_KEYWORDS)
+
+    @staticmethod
+    def _sanitize_error_message(error_str: str) -> str:
+        """
+        Sanitize error messages before returning to clients.
+
+        - Maps known browser/connection errors to user-friendly messages.
+        - Strips file paths, Python tracebacks, memory addresses, and internal state.
+        - Returns a generic 'Internal error' for anything unrecognized,
+          never leaking implementation details.
+        """
+        import re
+
+        raw = str(error_str)
+
+        # 1. Check for known error patterns first (match against the original, unsanitized string)
+        raw_lower = raw.lower()
+        for pattern, friendly in AgentServer._KNOWN_ERROR_MAP.items():
+            if pattern in raw_lower:
+                return friendly
+
+        # 2. Strip sensitive / internal details from the raw message
+        sanitized = raw
+
+        # Remove absolute file paths (Unix and Windows styles)
+        sanitized = re.sub(r'(?:/[^\s:"]+| [A-Za-z]:\\[^\s:"]+)', '[path]', sanitized)
+
+        # Remove Python traceback lines (e.g. 'File "x", line N')
+        sanitized = re.sub(r'File\s+"[^"]*".*?(?:,\s*line\s*\d+)?', '[traceback]', sanitized, flags=re.IGNORECASE)
+
+        # Remove memory addresses (0x7f..., 0x000...)
+        sanitized = re.sub(r'0x[0-9a-fA-F]{4,}', '[addr]', sanitized)
+
+        # Remove Python object repr hints like <module 'x' at ...> or <class 'x'>
+        sanitized = re.sub(r'<[^>]+>', '[object]', sanitized)
+
+        # Remove internal variable names / dict keys that look like __dunder__
+        sanitized = re.sub(r'__\w+__', '[internal]', sanitized)
+
+        # 3. If after sanitization the message is empty or looks like only redacted tokens
+        #    plus minor residue (line numbers, punctuation), return a generic message.
+        stripped = sanitized.replace('[path]', '').replace('[traceback]', '').replace('[addr]', '').replace('[object]', '').replace('[internal]', '').strip()
+        # Remove leftover residue like ":42", ": line 10", stray punctuation
+        import re as _re
+        stripped_meaningful = _re.sub(r'[:\d\s,]', '', stripped)
+        if not stripped_meaningful or len(stripped_meaningful) < 3:
+            return "Internal error"
+
+        # 4. Truncate to a reasonable length
+        return sanitized[:300]
 
     def _sanitize_error(self, error: str) -> str:
-        """Sanitize error messages to prevent internal detail leakage."""
-        # Remove file paths, internal IDs, stack traces
-        import re
-        sanitized = re.sub(r'/[^\s]+\.py', '[path]', str(error))
-        sanitized = re.sub(r'0x[0-9a-fA-F]+', '[hex]', sanitized)
-        return sanitized[:200]  # Limit length
+        """Sanitize error messages to prevent internal detail leakage (backward-compat wrapper)."""
+        return self._sanitize_error_message(error)
+
+    # ─── Agent Swarm Endpoints ─────────────────────────────
 
     async def _init_swarm(self):
         """Lazily initialize swarm components (thread-safe)."""
@@ -887,12 +994,13 @@ class AgentServer:
                 from src.agent_swarm.router import QueryRouter
                 self._swarm_router = QueryRouter(
                     confidence_threshold=swarm_config.router.confidence_threshold,
-                    enable_llm_fallback=swarm_config.router.enable_llm_fallback,
-                    llm_api_key=swarm_config.router.llm_api_key,
-                    llm_base_url=swarm_config.router.llm_base_url,
-                    llm_model=swarm_config.router.llm_model,
-                    llm_max_tokens=swarm_config.router.llm_max_tokens,
-                    llm_timeout=swarm_config.router.llm_timeout,
+                    enable_provider_fallback=swarm_config.router.enable_provider_fallback,
+                    provider_api_key=swarm_config.router.provider_api_key,
+                    provider_base_url=swarm_config.router.provider_base_url,
+                    provider_model=swarm_config.router.provider_model,
+                    provider_name=swarm_config.router.provider_name,
+                    provider_max_tokens=swarm_config.router.provider_max_tokens,
+                    provider_timeout=swarm_config.router.provider_timeout,
                 )
 
                 from src.agent_swarm.search.http_backend import HTTPSearchBackend
@@ -934,10 +1042,11 @@ class AgentServer:
             from src.agent_swarm.router import QueryRouter
             self._swarm_router = QueryRouter(
                 confidence_threshold=swarm_config.router.confidence_threshold,
-                enable_llm_fallback=swarm_config.router.enable_llm_fallback,
-                llm_api_key=swarm_config.router.llm_api_key,
-                llm_base_url=swarm_config.router.llm_base_url,
-                llm_model=swarm_config.router.llm_model,
+                enable_provider_fallback=swarm_config.router.enable_provider_fallback,
+                provider_api_key=swarm_config.router.provider_api_key,
+                provider_base_url=swarm_config.router.provider_base_url,
+                provider_model=swarm_config.router.provider_model,
+                provider_name=swarm_config.router.provider_name,
             )
 
             from src.agent_swarm.search.http_backend import HTTPSearchBackend
@@ -1017,7 +1126,7 @@ class AgentServer:
         if self._swarm_router is not None:
             health["backend_available"] = self._swarm_backend.is_available() if self._swarm_backend else False
             health["pool_status"] = self._swarm_pool.get_status() if self._swarm_pool else None
-            health["llm_available"] = (
+            health["provider_available"] = (
                 self._swarm_router.tier2.is_available()
                 if self._swarm_router and self._swarm_router.tier2
                 else False
@@ -1162,7 +1271,7 @@ class AgentServer:
 
                 # If temp agents were spawned, also run them and merge results
                 if temp_agents_list:
-                    from src.agent_swarm.agents.base import AgentResult, AgentStatus
+                    from src.agent_swarm.agents.base import AgentResult
                     temp_tasks = []
                     for temp_agent in temp_agents_list:
                         temp_tasks.append(
@@ -1327,8 +1436,8 @@ class AgentServer:
 
         # Mask sensitive fields
         config_dict = swarm_config.model_dump()
-        if config_dict.get("router", {}).get("llm_api_key"):
-            config_dict["router"]["llm_api_key"] = "***masked***"
+        if config_dict.get("router", {}).get("provider_api_key"):
+            config_dict["router"]["provider_api_key"] = "***masked***"
         if config_dict.get("search", {}).get("agent_os_api_key"):
             config_dict["search"]["agent_os_api_key"] = "***masked***"
 
@@ -1356,8 +1465,8 @@ class AgentServer:
 
         # Only allow certain config updates at runtime
         allowed_updates = {
-            "confidence_threshold", "enable_llm_fallback",
-            "llm_api_key", "llm_base_url", "llm_model",
+            "confidence_threshold", "enable_provider_fallback",
+            "provider_api_key", "provider_base_url", "provider_model",
             "max_results", "max_workers", "search_timeout",
         }
 
@@ -1370,22 +1479,26 @@ class AgentServer:
                     self._swarm_router.tier1.confidence_threshold = val
                     updated["confidence_threshold"] = val
 
-            if "enable_llm_fallback" in data:
-                val = bool(data["enable_llm_fallback"])
-                self._swarm_router.enable_llm_fallback = val
-                updated["enable_llm_fallback"] = val
+            if "enable_provider_fallback" in data:
+                val = bool(data["enable_provider_fallback"])
+                self._swarm_router.enable_provider_fallback = val
+                updated["enable_provider_fallback"] = val
 
-            if "llm_api_key" in data:
-                self._swarm_router.update_llm_config(api_key=data["llm_api_key"])
-                updated["llm_api_key"] = "***updated***"
+            if "provider_api_key" in data:
+                self._swarm_router.update_provider_config(api_key=data["provider_api_key"])
+                updated["provider_api_key"] = "***updated***"
 
-            if "llm_base_url" in data:
-                self._swarm_router.update_llm_config(base_url=data["llm_base_url"])
-                updated["llm_base_url"] = data["llm_base_url"]
+            if "provider_base_url" in data:
+                self._swarm_router.update_provider_config(base_url=data["provider_base_url"])
+                updated["provider_base_url"] = data["provider_base_url"]
 
-            if "llm_model" in data:
-                self._swarm_router.update_llm_config(model=data["llm_model"])
-                updated["llm_model"] = data["llm_model"]
+            if "provider_model" in data:
+                self._swarm_router.update_provider_config(model=data["provider_model"])
+                updated["provider_model"] = data["provider_model"]
+
+            if "provider_name" in data:
+                self._swarm_router.update_provider_config(provider=data["provider_name"])
+                updated["provider_name"] = data["provider_name"]
 
         if self._swarm_pool and "max_workers" in data:
             val = int(data["max_workers"])
@@ -1419,7 +1532,7 @@ class AgentServer:
     # ─── Command Processing ─────────────────────────────────
 
     async def _process_command(self, data: Dict, auth_context: Dict = None) -> Dict[str, Any]:
-        """Process any agent command with auth context."""
+        """Process any agent command with auth context, crash recovery, and timeout."""
         command = data.get("command", "").lower()
         if not command:
             return {"status": "error", "error": "Missing 'command'"}
@@ -1432,13 +1545,81 @@ class AgentServer:
 
         session.commands_executed += 1
 
+        # Execute with per-command timeout
+        timeout_seconds = self._command_timeout
         try:
-            result = await self._execute_command(command, data, session)
+            result = await asyncio.wait_for(
+                self._execute_command(command, data, session),
+                timeout=timeout_seconds,
+            )
             result["session_id"] = session.session_id
             return result
+        except asyncio.TimeoutError:
+            logger.error(f"Command timed out [{command}] after {timeout_seconds}s")
+            # A timeout may have been caused by a browser hang; attempt recovery
+            try:
+                logger.info("Attempting browser recovery after command timeout…")
+                await asyncio.wait_for(self.browser.recover(), timeout=30)
+                logger.info("Browser recovered after timeout; retrying command once")
+                try:
+                    result = await asyncio.wait_for(
+                        self._execute_command(command, data, session),
+                        timeout=timeout_seconds,
+                    )
+                    result["session_id"] = session.session_id
+                    return result
+                except Exception as retry_exc:
+                    logger.error(f"Command retry after recovery failed [{command}]: {retry_exc}")
+                    return {
+                        "status": "error",
+                        "error": self._sanitize_error_message(str(retry_exc)),
+                        "session_id": session.session_id,
+                    }
+            except Exception as recover_exc:
+                logger.error(f"Browser recovery after timeout failed: {recover_exc}")
+            return {
+                "status": "error",
+                "error": "Command timed out",
+                "session_id": session.session_id,
+            }
         except Exception as e:
+            error_str = str(e)
             logger.error(f"Command error [{command}]: {e}", exc_info=True)
-            return {"status": "error", "error": str(e), "session_id": session.session_id}
+
+            # Detect browser crash and attempt recovery + single retry
+            if self._is_browser_crash_error(error_str):
+                try:
+                    logger.info(f"Browser crash detected for command [{command}]; attempting recovery…")
+                    await asyncio.wait_for(self.browser.recover(), timeout=30)
+                    logger.info("Browser recovered; retrying command once")
+                    try:
+                        result = await asyncio.wait_for(
+                            self._execute_command(command, data, session),
+                            timeout=timeout_seconds,
+                        )
+                        result["session_id"] = session.session_id
+                        return result
+                    except Exception as retry_exc:
+                        logger.error(f"Command retry after crash recovery failed [{command}]: {retry_exc}")
+                        return {
+                            "status": "error",
+                            "error": self._sanitize_error_message(str(retry_exc)),
+                            "session_id": session.session_id,
+                        }
+                except Exception as recover_exc:
+                    logger.error(f"Browser crash recovery failed: {recover_exc}")
+                    return {
+                        "status": "error",
+                        "error": "Browser recovery failed. Please try again later.",
+                        "session_id": session.session_id,
+                    }
+
+            # Non-crash error: sanitize before returning to client
+            return {
+                "status": "error",
+                "error": self._sanitize_error_message(error_str),
+                "session_id": session.session_id,
+            }
 
     async def _execute_command(self, command: str, data: Dict, session) -> Dict:
         """Route command to appropriate handler."""
@@ -2760,7 +2941,8 @@ class AgentServer:
                 return {"status": "success", "proxy": proxy.to_dict()}
             return {"status": "error", "error": "No proxy available"}
         except Exception as e:
-            return {"status": "error", "error": str(e)}
+            logger.error(f"Proxy rotate error: {e}")
+            return {"status": "error", "error": self._sanitize_error_message(str(e))}
 
     async def _cmd_proxy_save(self, data: Dict, session) -> Dict:
         return self._get_proxy_manager().save(filename=data.get("filename", "proxies.json"))

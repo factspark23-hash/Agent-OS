@@ -114,7 +114,7 @@ class TestHumanMimicry:
     def test_mouse_path(self):
         """Test mouse path generation."""
         mimicry = HumanMimicry()
-        path = mimicry.mouse_path(500, 300)
+        path = mimicry.mouse_path(0, 0, 500, 300)
         assert len(path) >= 5
         # Path should start near origin and end near target
         assert abs(path[-1][0] - 500) < 10
@@ -123,7 +123,7 @@ class TestHumanMimicry:
     def test_mouse_path_is_curved(self):
         """Test that mouse paths are not straight lines (human-like curves)."""
         mimicry = HumanMimicry()
-        path = mimicry.mouse_path(200, 200)
+        path = mimicry.mouse_path(0, 0, 200, 200)
         # Check that intermediate points deviate from straight line
         deviations = []
         for i in range(1, len(path) - 1):
@@ -215,7 +215,7 @@ class TestIntegration:
 
     async def test_browser_anti_detection_js(self):
         """Test that anti-detection JS is properly defined."""
-        from src.core.browser import ANTI_DETECTION_JS
+        from src.core.stealth import ANTI_DETECTION_JS
         assert "webdriver" in ANTI_DETECTION_JS
         assert "plugins" in ANTI_DETECTION_JS
         assert "chrome" in ANTI_DETECTION_JS.lower()
@@ -387,6 +387,138 @@ class TestServerSecurity:
 
         # Different user should still work
         assert server._check_rate_limit("other-user") is True
+
+
+# ─── RuleBasedRouter Tests ─────────────────────────────────────
+
+class TestRuleBasedRouter:
+    """Tests for RuleBasedRouter classification accuracy.
+
+    Covers the 4 previously-misclassified queries plus basic correct
+    classifications for all 5 categories.
+    """
+
+    def _get_router(self):
+        from src.agent_swarm.router.rule_based import RuleBasedRouter
+        return RuleBasedRouter()
+
+    # ─── Previously misclassified queries (now fixed) ───
+
+    def test_solve_captcha_routes_to_security(self):
+        """'solve the captcha' must route to needs_security, NOT needs_calculation."""
+        router = self._get_router()
+        result = router.classify("solve the captcha")
+        assert result.category.value == "needs_security", (
+            f"Expected needs_security, got {result.category.value}"
+        )
+
+    def test_bypass_cloudflare_protection_routes_to_security(self):
+        """'bypass cloudflare protection' must route to needs_security, NOT ambiguous."""
+        router = self._get_router()
+        result = router.classify("bypass cloudflare protection")
+        assert result.category.value == "needs_security", (
+            f"Expected needs_security, got {result.category.value}"
+        )
+
+    def test_fill_login_form_routes_to_security(self):
+        """'fill the login form' must route to needs_security, NOT ambiguous."""
+        router = self._get_router()
+        result = router.classify("fill the login form")
+        assert result.category.value == "needs_security", (
+            f"Expected needs_security, got {result.category.value}"
+        )
+
+    def test_scrape_product_data_routes_to_web(self):
+        """'scrape product data' must route to needs_web, NOT ambiguous."""
+        router = self._get_router()
+        result = router.classify("scrape product data")
+        assert result.category.value == "needs_web", (
+            f"Expected needs_web, got {result.category.value}"
+        )
+
+    # ─── Basic correct classifications ───
+
+    def test_math_expression_routes_to_calculation(self):
+        """'2+2' must route to needs_calculation."""
+        router = self._get_router()
+        result = router.classify("2+2")
+        assert result.category.value == "needs_calculation", (
+            f"Expected needs_calculation, got {result.category.value}"
+        )
+
+    def test_write_code_routes_to_code(self):
+        """'write a Python function' must route to needs_code."""
+        router = self._get_router()
+        result = router.classify("write a Python function")
+        assert result.category.value == "needs_code", (
+            f"Expected needs_code, got {result.category.value}"
+        )
+
+    def test_knowledge_query_routes_to_knowledge(self):
+        """'what is gravity' must route to needs_knowledge."""
+        router = self._get_router()
+        result = router.classify("what is gravity")
+        assert result.category.value == "needs_knowledge", (
+            f"Expected needs_knowledge, got {result.category.value}"
+        )
+
+    def test_latest_news_routes_to_web(self):
+        """'latest AI news' must route to needs_web."""
+        router = self._get_router()
+        result = router.classify("latest AI news")
+        assert result.category.value == "needs_web", (
+            f"Expected needs_web, got {result.category.value}"
+        )
+
+    def test_latest_cricket_scores_routes_to_web(self):
+        """'latest cricket scores' must route to needs_web (plural scores)."""
+        router = self._get_router()
+        result = router.classify("latest cricket scores")
+        assert result.category.value == "needs_web", (
+            f"Expected needs_web, got {result.category.value}"
+        )
+
+    def test_stock_price_routes_to_web(self):
+        """'stock price of Apple' must route to needs_web (live financial data)."""
+        router = self._get_router()
+        result = router.classify("stock price of Apple")
+        assert result.category.value == "needs_web", (
+            f"Expected needs_web, got {result.category.value}"
+        )
+
+    def test_currency_conversion_routes_to_web(self):
+        """'convert 100 USD to EUR' must route to needs_web (live exchange rate)."""
+        router = self._get_router()
+        result = router.classify("convert 100 USD to EUR")
+        assert result.category.value == "needs_web", (
+            f"Expected needs_web, got {result.category.value}"
+        )
+
+    def test_formula_for_area_routes_to_knowledge(self):
+        """'formula for area of circle' must route to needs_knowledge, NOT needs_calculation."""
+        router = self._get_router()
+        result = router.classify("formula for area of circle")
+        assert result.category.value == "needs_knowledge", (
+            f"Expected needs_knowledge, got {result.category.value}"
+        )
+
+    def test_security_queries_high_confidence(self):
+        """Security-related queries must have high confidence (>= 0.7)."""
+        router = self._get_router()
+        security_queries = [
+            "solve the captcha",
+            "bypass cloudflare protection",
+            "detect headless browser",
+            "spoof tls fingerprint",
+        ]
+        for query in security_queries:
+            result = router.classify(query)
+            assert result.category.value == "needs_security", (
+                f"'{query}' → {result.category.value}, expected needs_security"
+            )
+            assert result.confidence >= 0.7, (
+                f"'{query}' confidence {result.confidence:.2f} < 0.7"
+            )
 
 
 # ─── Import Tests for New Modules ─────────────────────────────

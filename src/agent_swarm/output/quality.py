@@ -1,6 +1,5 @@
 """Quality scoring for search results."""
 
-import re
 import logging
 import datetime
 from typing import Optional

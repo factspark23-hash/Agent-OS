@@ -43,13 +43,13 @@ export function ApiKeysTab() {
         <h3 className="text-sm font-semibold text-white/60 uppercase tracking-wider mb-4">Add New Key</h3>
         <div className="space-y-4">
           <div>
-            <label className="text-xs text-white/40 mb-1.5 block">API Key or Ollama URL</label>
+            <label className="text-xs text-white/40 mb-1.5 block">API Key</label>
             <div className="relative">
               <input
                 type={showKey ? 'text' : 'password'}
                 value={newKey}
                 onChange={(e) => { setNewKey(e.target.value); setError(''); }}
-                placeholder="sk-... / sk-ant-... / AIza... / xai-... / http://localhost:11434"
+                placeholder="sk-... / sk-ant-... / AIza... / xai-..."
                 className="input-field pr-20"
               />
               <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
@@ -75,7 +75,7 @@ export function ApiKeysTab() {
           {!detectedProvider && newKey.length > 5 && (
             <div className="flex items-center gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/20">
               <XCircle size={16} className="text-red-400" />
-              <p className="text-xs text-red-400">Unknown key format. Supported: OpenAI, Anthropic, Google, xAI, Mistral, DeepSeek, Ollama</p>
+              <p className="text-xs text-red-400">Unknown key format. Supported: OpenAI, Anthropic, Google, xAI, Mistral, DeepSeek</p>
             </div>
           )}
 

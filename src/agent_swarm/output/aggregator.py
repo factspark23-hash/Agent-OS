@@ -1,7 +1,6 @@
 """Result aggregation - combines results from multiple agents."""
 
 import logging
-from typing import Optional
 
 from src.agent_swarm.agents.base import AgentResult
 

@@ -20,14 +20,13 @@ Strategy: Multi-layer bypass combining:
   5. Automatic challenge detection and strategy selection
 """
 import asyncio
-import hashlib
 import json
 import logging
 import os
 import random
 import re
 import time
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -262,7 +261,7 @@ class ChallengeDetector:
                 break
 
         # Check for cf_clearance cookie (in headers or page)
-        has_clearance = "cf_clearance" in html_lower or "cf_clearance" in str(headers)
+        _has_clearance = "cf_clearance" in html_lower or "cf_clearance" in str(headers)
 
         # Check server header
         server = headers.get("server", headers.get("Server", ""))
@@ -825,14 +824,14 @@ class CloudflareBypassEngine:
             # Navigate
             try:
                 response = await page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
-                status_code = response.status if response else 200
+                _status_code = response.status if response else 200
             except Exception as e:
                 logger.error(f"Navigation failed: {e}")
                 # Try with networkidle on timeout
                 if "timeout" in str(e).lower():
                     try:
                         response = await page.goto(url, wait_until="networkidle", timeout=timeout * 1000)
-                        status_code = response.status if response else 200
+                        _status_code = response.status if response else 200
                     except Exception as e2:
                         if attempt < max_attempts - 1:
                             await asyncio.sleep(random.uniform(2, 5))

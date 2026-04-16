@@ -38,7 +38,7 @@ class AgentResult:
 
 class SearchAgent:
     """Base class for search agents.
-    
+
     Each agent has a profile that defines its search behavior,
     preferred sources, and query reformulation strategy.
     """

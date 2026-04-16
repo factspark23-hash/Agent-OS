@@ -23,10 +23,9 @@ Usage::
     # → {"needs_web": False, "confidence": 0.6, "reason": "...", "category": "general_knowledge"}
 """
 import re
-import time
 import logging
-from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass, field
+from typing import Dict, List, Optional
+from dataclasses import dataclass
 
 logger = logging.getLogger("agent-os.web_query_router")
 

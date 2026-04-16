@@ -196,64 +196,61 @@ Permissions.prototype.query = makeNative(function(queryDesc) {{
 }}, 'query');
 
 // ═══════════════════════════════════════════════════════════════
-// 4. PLUGINS — Realistic Chrome Plugin List
+// 4. PLUGINS — Realistic Chrome Plugin List (CACHED for consistency)
 // ═══════════════════════════════════════════════════════════════
+// Detection scripts call navigator.plugins multiple times and compare
+// references (navigator.plugins === navigator.plugins). If we return
+// a new object each time, it's detectable. We MUST cache the result.
+
+const _cachedPlugins = (function() {{
+    const p0 = {{
+        name: 'Chrome PDF Plugin',
+        filename: 'internal-pdf-viewer',
+        description: 'Portable Document Format',
+        length: 1,
+        0: {{ name: 'Portable Document Format', suffixes: 'pdf', description: 'Portable Document Format', type: 'application/x-google-chrome-pdf' }},
+        item: function(i) {{ return this[i] || null; }},
+        namedItem: function(n) {{ return this[0] && this[0].name === n ? this[0] : null; }},
+        refresh: function() {{}}
+    }};
+    const p1 = {{
+        name: 'Chrome PDF Viewer',
+        filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai',
+        description: '',
+        length: 1,
+        0: {{ name: 'Chrome PDF Viewer', suffixes: '', description: '', type: 'application/x-google-chrome-pdf' }},
+        item: function(i) {{ return this[i] || null; }},
+        namedItem: function(n) {{ return this[0] && this[0].name === n ? this[0] : null; }},
+        refresh: function() {{}}
+    }};
+    const p2 = {{
+        name: 'Native Client',
+        filename: 'internal-nacl-plugin',
+        description: '',
+        length: 2,
+        0: {{ name: 'Native Client Executable', suffixes: '', description: 'Native Client Executable', type: 'application/x-nacl' }},
+        1: {{ name: 'Portable Native Client Executable', suffixes: '', description: 'Portable Native Client Executable', type: 'application/x-pnacl' }},
+        item: function(i) {{ return this[i] || null; }},
+        namedItem: function(n) {{
+            for (let i = 0; i < this.length; i++) {{ if (this[i] && this[i].name === n) return this[i]; }}
+            return null;
+        }},
+        refresh: function() {{}}
+    }};
+    const arr = [p0, p1, p2];
+    arr.length = 3;
+    arr.item = function(i) {{ return this[i] || null; }};
+    arr.namedItem = function(n) {{
+        for (let i = 0; i < this.length; i++) {{ if (this[i] && this[i].name === n) return this[i]; }}
+        return null;
+    }};
+    arr.refresh = function() {{}};
+    arr[Symbol.iterator] = function() {{ let idx = 0; return {{ next: function() {{ if (idx < arr.length) return {{ value: arr[idx++], done: false }}; return {{ done: true }}; }} }}; }};
+    return arr;
+}})();
 
 Object.defineProperty(Navigator.prototype, 'plugins', {{
-    get: function() {{
-        const plugins = [
-            {{
-                name: 'Chrome PDF Plugin',
-                filename: 'internal-pdf-viewer',
-                description: 'Portable Document Format',
-                length: 1,
-                item: function(i) {{ return this[i] || null; }},
-                namedItem: function(n) {{
-                    for (let i = 0; i < this.length; i++) {{
-                        if (this[i].name === n) return this[i];
-                    }}
-                    return null;
-                }},
-                refresh: function() {{}}
-            }},
-            {{
-                name: 'Chrome PDF Viewer',
-                filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai',
-                description: '',
-                length: 1,
-                item: function(i) {{ return this[i] || null; }},
-                namedItem: function(n) {{
-                    for (let i = 0; i < this.length; i++) {{
-                        if (this[i].name === n) return this[i];
-                    }}
-                    return null;
-                }},
-                refresh: function() {{}}
-            }},
-            {{
-                name: 'Native Client',
-                filename: 'internal-nacl-plugin',
-                description: '',
-                length: 2,
-                item: function(i) {{ return this[i] || null; }},
-                namedItem: function(n) {{
-                    for (let i = 0; i < this.length; i++) {{
-                        if (this[i].name === n) return this[i];
-                    }}
-                    return null;
-                }},
-                refresh: function() {{}}
-            }}
-        ];
-
-        // Make plugins array-like
-        plugins.length = 3;
-        plugins.item = function(i) {{ return this[i] || null; }};
-        plugins.namedItem = function(n) {{ return this.find(p => p.name === n) || null; }};
-        plugins.refresh = function() {{}};
-
-        return plugins;
-    }},
+    get: function() {{ return _cachedPlugins; }},
     configurable: true,
     enumerable: true
 }});
@@ -301,18 +298,22 @@ Object.defineProperty(Navigator.prototype, 'maxTouchPoints', {{
     enumerable: true
 }});
 
-// Connection
+// Connection — use JS-side random so value varies per page load
+// (Python random.randint() is evaluated once at script generation time,
+// producing the same value on every page — detectable)
+const _connSeed = Math.floor(Math.random() * 2147483647);
+const _connRNG = seededRandom(_connSeed);
+const _cachedConnection = {{
+    rtt: Math.floor(25 + _connRNG() * 75),
+    downlink: +(5 + _connRNG() * 15).toFixed(1),
+    effectiveType: '4g',
+    saveData: false,
+    type: 'wifi',
+    onchange: null
+}};
+
 Object.defineProperty(Navigator.prototype, 'connection', {{
-    get: function() {{
-        return {{
-            rtt: {random.randint(20, 100)},
-            downlink: {random.randint(5, 50)},
-            effectiveType: '4g',
-            saveData: false,
-            type: 'wifi',
-            onchange: null
-        }};
-    }},
+    get: function() {{ return _cachedConnection; }},
     configurable: true,
     enumerable: true
 }});
@@ -447,7 +448,7 @@ Object.defineProperty(Screen.prototype, 'availWidth', {{
 }});
 
 Object.defineProperty(Screen.prototype, 'availHeight', {{
-    get: function() {{ return {screen_height - random.randint(30, 80)}; }},
+    get: function() {{ return {screen_height} - Math.floor(30 + Math.random() * 50); }},
     configurable: true,
     enumerable: true
 }});
@@ -762,14 +763,10 @@ for (const [fn, str] of overrides) {{
 }}
 
 // ═══════════════════════════════════════════════════════════════
-// 20. GLOBAL CHECK — Final Verification
+// 20. GLOBAL CHECK — Silent verification (no console output)
 // ═══════════════════════════════════════════════════════════════
-
-// Ensure navigator.webdriver is truly undefined
-console.log('[Agent-OS] CDP Stealth v4.0 loaded');
-console.log('[Agent-OS] navigator.webdriver:', navigator.webdriver);
-console.log('[Agent-OS] navigator.plugins.length:', navigator.plugins.length);
-console.log('[Agent-OS] window.chrome:', !!window.chrome);
+// NOTE: Do NOT console.log() here — that is a detection signal.
+// Detection scripts monitor console output for framework names.
 
 }})();
 """
@@ -844,31 +841,36 @@ class CDPStealthInjector:
             # This runs BEFORE any page JavaScript
             cdp = await page.context.new_cdp_session(page)
 
-            # Remove previous injection if any
-            old_script_id = self._injected_pages.get(page_id)
-            if old_script_id:
+            try:
+                # Remove previous injection if any
+                old_script_id = self._injected_pages.get(page_id)
+                if old_script_id:
+                    try:
+                        await cdp.send("Page.removeScriptToEvaluateOnNewDocument", {
+                            "identifier": old_script_id
+                        })
+                    except Exception:
+                        pass
+
+                # Inject the stealth script
+                result = await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
+                    "source": stealth_js,
+                    "runImmediately": True,  # Run on current page too, not just new navigations
+                    "worldName": "",  # Main world (default)
+                })
+
+                script_id = result.get("identifier", "")
+                self._injected_pages[page_id] = script_id
+
+                # Also set CDP-level overrides for User-Agent metadata
+                await self._apply_cdp_overrides(cdp, fingerprint, chrome_version)
+
+            finally:
+                # ALWAYS detach CDP session to prevent leaks
                 try:
-                    await cdp.send("Page.removeScriptToEvaluateOnNewDocument", {
-                        "identifier": old_script_id
-                    })
+                    await cdp.detach()
                 except Exception:
                     pass
-
-            # Inject the stealth script
-            result = await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
-                "source": stealth_js,
-                "runImmediately": True,  # Run on current page too, not just new navigations
-                "worldName": "",  # Main world (default)
-            })
-
-            script_id = result.get("identifier", "")
-            self._injected_pages[page_id] = script_id
-
-            # Also set CDP-level overrides for User-Agent metadata
-            await self._apply_cdp_overrides(cdp, fingerprint, chrome_version)
-
-            # Detach CDP session (script stays injected)
-            await cdp.detach()
 
             logger.info(f"CDP stealth injected into page '{page_id}' (Chrome {chrome_version})")
             return True
@@ -916,20 +918,27 @@ class CDPStealthInjector:
             temp_page = await context.new_page()
             cdp = await context.new_cdp_session(temp_page)
 
-            # Inject via CDP — applies to ALL pages in the context
-            result = await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
-                "source": stealth_js,
-                "runImmediately": True,
-            })
+            try:
+                # Inject via CDP — applies to ALL pages in the context
+                result = await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
+                    "source": stealth_js,
+                    "runImmediately": True,
+                })
 
-            script_id = result.get("identifier", "")
-            self._injected_pages[page_id] = script_id
+                script_id = result.get("identifier", "")
+                self._injected_pages[page_id] = script_id
 
-            # Apply CDP overrides
-            await self._apply_cdp_overrides(cdp, fingerprint, chrome_version)
+                # Apply CDP overrides
+                await self._apply_cdp_overrides(cdp, fingerprint, chrome_version)
 
-            # Clean up
-            await cdp.detach()
+            finally:
+                # ALWAYS detach CDP session to prevent leaks
+                try:
+                    await cdp.detach()
+                except Exception:
+                    pass
+
+            # Clean up temp page
             await temp_page.close()
 
             logger.info(f"CDP stealth injected into context (Chrome {chrome_version})")

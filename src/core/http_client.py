@@ -6,7 +6,6 @@ Falls back to standard httpx if curl-cffi is unavailable.
 """
 import logging
 import random
-import time
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
@@ -142,7 +141,7 @@ class TLSClient:
     def _build_headers(self, url: str, user_headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
         """
         Build realistic browser headers for the given URL.
-        
+
         Automatically adds Sec-CH-UA and stealth headers for anti-bot sites.
         User-provided headers override defaults.
         """

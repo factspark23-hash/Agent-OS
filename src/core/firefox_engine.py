@@ -15,7 +15,6 @@ Features:
 - Geckodriver compatibility layer
 """
 import asyncio
-import json
 import logging
 import random
 import time

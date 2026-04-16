@@ -3,12 +3,10 @@
 import asyncio
 import time
 import logging
-import concurrent.futures
 from typing import Optional, Callable
 
 from src.agent_swarm.agents.base import SearchAgent, AgentResult, AgentStatus
-from src.agent_swarm.agents.profiles import SearchProfile, SEARCH_PROFILES, get_profile, get_profiles_for_query
-from src.agent_swarm.agents.strategies import create_search_plan
+from src.agent_swarm.agents.profiles import SEARCH_PROFILES, get_profile
 
 logger = logging.getLogger(__name__)
 

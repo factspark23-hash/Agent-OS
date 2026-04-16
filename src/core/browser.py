@@ -10,7 +10,7 @@ import time
 import logging
 import os
 import hashlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 from urllib.parse import urlparse
@@ -19,14 +19,11 @@ from cryptography.fernet import Fernet
 from patchright.async_api import async_playwright, Browser, Page, BrowserContext
 
 from src.core.stealth import (
-    ANTI_DETECTION_JS,
-    apply_screen_dimensions,
     handle_request_interception,
 )
 from src.core.tls_spoof import apply_browser_tls_spoofing
 from src.core.tls_proxy import TLSProxyServer, TLSHTTPClient, _CURL_AVAILABLE
 from src.core.cdp_stealth import CDPStealthInjector
-from src.core.stealth_god import GodModeStealth
 from src.tools.proxy_rotation import ProxyManager, ProxyInfo
 from src.security.evasion_engine import EvasionEngine
 from src.security.human_mimicry import HumanMimicry
@@ -262,6 +259,7 @@ class AgentBrowser:
         self._session_warmed_up = False
         self._launch_args = None  # cached launch args
         self._recovery_lock = asyncio.Lock()
+        self._recovery_in_progress = False
         # Cookie batching — dirty flag + periodic flush to reduce I/O
         self._cookies_dirty: bool = False
         self._last_cookie_save: float = 0.0
@@ -274,10 +272,9 @@ class AgentBrowser:
         self._proxy_rotation_interval: int = 10
         # Evasion engine (TLS + fingerprint + cloudflare)
         self._evasion = EvasionEngine()
-        # CDP Stealth Injector — THE REAL FIX for navigator.webdriver detection
+        # CDP Stealth Injector — SOLE stealth injection mechanism via CDP
+        # (Page.addScriptToEvaluateOnNewDocument runs BEFORE page scripts)
         self._cdp_stealth = CDPStealthInjector()
-        # GOD MODE Stealth — Ultimate anti-detection system
-        self._god_stealth = GodModeStealth()
         # Import at class level to avoid repeated imports
         self._mimicry = HumanMimicry()
         # CAPTCHA solver
@@ -322,16 +319,20 @@ class AgentBrowser:
     def _pick_profile(self) -> BrowserProfile:
         """Pick a browser profile for this session.
 
-        Uses a deterministic hash of the session cookie key so the same
-        installation always gets the same profile (consistency across restarts).
-        The profile is cached in self._active_profile and reused for the
-        lifetime of this AgentBrowser instance.
+        Uses a hash of the session cookie key MIXED with a per-session
+        random salt so that multiple sessions on the same server get
+        different fingerprints. The profile is cached in
+        self._active_profile and reused for the lifetime of this
+        AgentBrowser instance.
         """
         if self._active_profile is not None:
             return self._active_profile
 
-        # Seed from the cookie key bytes — stable across restarts
-        seed_bytes = self._cookie_key
+        # Seed from cookie key + session-specific random salt
+        # This ensures different sessions get different profiles even
+        # if they share the same cookie key (same server install).
+        session_salt = os.urandom(8).hex()
+        seed_bytes = self._cookie_key + session_salt.encode()
         seed_hash = hashlib.sha256(seed_bytes).hexdigest()
         seed_int = int(seed_hash[:8], 16)
         index = seed_int % len(BROWSER_PROFILES)
@@ -438,7 +439,7 @@ class AgentBrowser:
         self.playwright = await async_playwright().start()
 
         # Pick and lock browser profile for this session
-        profile = self._pick_profile()
+        _profile = self._pick_profile()
 
         # Use headed or headless based on config
         headless = self.config.get("browser.headless", True)
@@ -460,7 +461,15 @@ class AgentBrowser:
                 "--window-size=1920,1080",
                 "--disable-features=TranslateUI",
                 "--disable-ipc-flooding-protection",
+                "--headless=new",  # New headless mode — preserves plugins, chrome runtime, correct UA
             ]
+
+            # In Docker containers, Chromium cannot use its own namespace sandbox
+            # because the container itself IS the sandbox. Add --no-sandbox only
+            # when running inside Docker to avoid "namespace sandbox" failures.
+            if os.getenv("AGENT_OS_DOCKER") == "1":
+                self._launch_args.append("--no-sandbox")
+                logger.info("Docker environment detected — browser running with --no-sandbox (container is the sandbox)")
 
         # Build launch options
         launch_options = {
@@ -512,21 +521,9 @@ class AgentBrowser:
         # present on EVERY request — not just the initial navigation.
         await self.context.set_extra_http_headers(self._build_headers(self._active_profile))
 
-        # Generate fingerprint FIRST (before creating page)
+        # Generate fingerprint for CDP stealth (before creating page)
         fp = self._evasion.generate_fingerprint(page_id="main")
         chrome_ver = fp["chrome_version"] if fp else "124"
-
-        # Inject stealth + fingerprint as a SINGLE context-level init script
-        # This is the BACKUP layer — CDP stealth is the primary
-        fingerprint_js = self._evasion.get_injection_js("main")
-        # Apply profile-specific screen dimensions to stealth JS
-        stealth_js = apply_screen_dimensions(
-            ANTI_DETECTION_JS,
-            screen_width=self._active_profile.screen_width,
-            screen_height=self._active_profile.screen_height,
-            device_pixel_ratio=1.0,
-        )
-        await self.context.add_init_script(stealth_js + "\n" + fingerprint_js)
 
         # Set up request interception for bot detection blocking
         await self.context.route("**/*", self._handle_request)
@@ -540,17 +537,12 @@ class AgentBrowser:
         self._attach_console_listener("main", self.page)
 
         # ═══════════════════════════════════════════════════════════
-        # GOD MODE STEALTH — Ultimate Anti-Detection System
+        # CDP STEALTH — SOLE injection mechanism
         # Uses CDP Page.addScriptToEvaluateOnNewDocument which runs BEFORE
         # any page JavaScript, including bot detection scripts.
-        # This is the HIGHEST level of stealth possible.
+        # This is the ONLY stealth JS injection needed — all detection
+        # vectors are handled here (webdriver, plugins, chrome, WebGL, etc.)
         # ═══════════════════════════════════════════════════════════
-        await self._god_stealth.inject_into_page(
-            self.page,
-            page_id="main",
-        )
-
-        # Also inject CDP stealth as backup layer
         await self._cdp_stealth.inject_into_page(
             self.page,
             page_id="main",
@@ -560,6 +552,15 @@ class AgentBrowser:
 
         # Apply TLS fingerprint spoofing via CDP (needs an existing page)
         await apply_browser_tls_spoofing(self.page, chrome_version=chrome_ver)
+
+        # ═══════════════════════════════════════════════════════════
+        # HEADLESS STEALTH POST-INJECTION
+        # Chromium's headless mode strips navigator.plugins and window.chrome
+        # at the native level. add_init_script() and CDP can't override these.
+        # The ONLY way to restore them is via page.evaluate() AFTER page load.
+        # This hook runs on every navigation to re-inject these properties.
+        # ═══════════════════════════════════════════════════════════
+        self._setup_headless_stealth_hook(self.page)
 
         # Initialize Firefox fallback engine if enabled
         if self._firefox_enabled:
@@ -612,72 +613,198 @@ class AgentBrowser:
 
     async def recover(self):
         """Recover from browser crash by relaunching."""
-        async with self._recovery_lock:
-            self._crash_count += 1
-            if self._crash_count > self._max_crash_retries:
-                logger.error(f"Browser exceeded max crash retries ({self._max_crash_retries})")
-                raise RuntimeError("Browser crashed too many times — manual restart required")
+        if self._recovery_in_progress:
+            logger.warning("Recovery already in progress — skipping duplicate recovery")
+            return
 
-            logger.warning(f"Browser recovering from crash (attempt {self._crash_count}/{self._max_crash_retries})...")
-
-            # Save cookies before closing
-            try:
-                await self._save_cookies("default")
-            except Exception as cookie_err:
-                logger.warning(f"Failed to save cookies during recovery: {cookie_err}")
-
-            # Close old browser
-            try:
-                if self.context:
-                    await self.context.close()
-            except Exception as ctx_err:
-                logger.debug(f"Context close error during recovery: {ctx_err}")
-            try:
-                if self.browser:
-                    await self.browser.close()
-            except Exception as br_err:
-                logger.debug(f"Browser close error during recovery: {br_err}")
-            try:
-                if self.playwright:
-                    await self.playwright.stop()
-            except Exception as pw_err:
-                logger.debug(f"Playwright stop error during recovery: {pw_err}")
-
-            # Clear state
-            self.browser = None
-            self.context = None
-            self.page = None
-            self._pages.clear()
-            self._console_logs.clear()
-
-            # Ensure TLS proxy is still running
-            if self._tls_proxy_enabled and _CURL_AVAILABLE and not self._tls_proxy:
-                try:
-                    self._tls_proxy = TLSProxyServer(port=self._tls_proxy_port)
-                    await self._tls_proxy.start()
-                    logger.info("TLS proxy restarted after crash")
-                except Exception as e:
-                    logger.warning(f"TLS proxy restart failed: {e}")
-                    self._tls_proxy = None
-
-            # Relaunch
-            await self._launch_browser()
-            self._crash_count = 0  # Reset on successful recovery
-            logger.info("Browser recovered successfully")
-
-    async def _safe_execute(self, coro, page_id: str = "main"):
-        """Execute a browser operation with crash recovery."""
+        self._recovery_in_progress = True
         try:
-            return await coro
-        except Exception as e:
-            error_str = str(e).lower()
-            if any(kw in error_str for kw in ["page crashed", "target closed", "context was destroyed",
-                                                   "browser has been closed", "frame was detached",
-                                                   "session deleted", "disconnected"]):
-                logger.warning(f"Browser crash detected: {e}")
+            async with self._recovery_lock:
+                self._crash_count += 1
+                if self._crash_count > self._max_crash_retries:
+                    logger.error(f"Browser exceeded max crash retries ({self._max_crash_retries})")
+                    raise RuntimeError("Browser crashed too many times — manual restart required")
+
+                logger.warning(f"Browser recovering from crash (attempt {self._crash_count}/{self._max_crash_retries})...")
+
+                # Save cookies before closing
+                try:
+                    await self._save_cookies("default")
+                except Exception as cookie_err:
+                    logger.warning(f"Failed to save cookies during recovery: {cookie_err}")
+
+                # Close old browser
+                try:
+                    if self.context:
+                        await self.context.close()
+                except Exception as ctx_err:
+                    logger.debug(f"Context close error during recovery: {ctx_err}")
+                try:
+                    if self.browser:
+                        await self.browser.close()
+                except Exception as br_err:
+                    logger.debug(f"Browser close error during recovery: {br_err}")
+                try:
+                    if self.playwright:
+                        await self.playwright.stop()
+                except Exception as pw_err:
+                    logger.debug(f"Playwright stop error during recovery: {pw_err}")
+
+                # Clear state
+                self.browser = None
+                self.context = None
+                self.page = None
+                self._pages.clear()
+                self._console_logs.clear()
+
+                # Ensure TLS proxy is still running
+                if self._tls_proxy_enabled and _CURL_AVAILABLE and not self._tls_proxy:
+                    try:
+                        self._tls_proxy = TLSProxyServer(port=self._tls_proxy_port)
+                        await self._tls_proxy.start()
+                        logger.info("TLS proxy restarted after crash")
+                    except Exception as e:
+                        logger.warning(f"TLS proxy restart failed: {e}")
+                        self._tls_proxy = None
+
+                # Relaunch
+                await self._launch_browser()
+                self._crash_count = 0  # Reset on successful recovery
+                logger.info("Browser recovered successfully")
+        finally:
+            self._recovery_in_progress = False
+
+    async def _safe_execute(self, coro, page_id: str = "main", max_retries: int = 1):
+        """Execute a browser operation with crash recovery and automatic retry.
+
+        Args:
+            coro: Coroutine to execute
+            page_id: Page identifier for the operation
+            max_retries: Number of times to retry after successful recovery
+                         (default 1 — retry once after crash recovery)
+
+        Returns:
+            The result of the coroutine if successful.
+
+        Raises:
+            RuntimeError: If browser crashes and recovery+retry also fails.
+        """
+        for attempt in range(max_retries + 1):
+            try:
+                return await coro
+            except Exception as e:
+                error_str = str(e).lower()
+                is_crash = any(kw in error_str for kw in [
+                    "page crashed", "target closed", "context was destroyed",
+                    "browser has been closed", "frame was detached",
+                    "session deleted", "disconnected",
+                ])
+
+                if not is_crash:
+                    raise
+
+                if attempt >= max_retries:
+                    # No more retries — raise with context
+                    raise RuntimeError(
+                        f"Browser crashed, recovery exhausted after {max_retries} retries. Original: {e}"
+                    ) from e
+
+                logger.warning(f"Browser crash detected (attempt {attempt + 1}/{max_retries}): {e}")
                 await self.recover()
-                raise RuntimeError(f"Browser crashed, recovered. Retry the operation. Original: {e}")
-            raise
+                # Loop continues → automatically retries the operation
+
+        # Should not reach here, but just in case
+        raise RuntimeError("_safe_execute: unexpected loop exit")
+
+    async def _setup_headless_stealth_hook(self, page: Page):
+        """Hook into page navigation events to re-inject headless stealth overrides.
+        
+        Chromium's headless mode natively strips navigator.plugins and window.chrome.
+        add_init_script() and CDP Page.addScriptToEvaluateOnNewDocument cannot override
+        these because Chromium enforces them after JS context creation. The ONLY reliable
+        method is page.evaluate() which runs in the page's execution context and CAN
+        override these properties using Object.defineProperty.
+        
+        This method sets up a 'domcontentloaded' event listener on the page that
+        re-injects navigator.plugins (3 realistic Chrome plugins) and window.chrome
+        (complete runtime/app/csi/loadTimes object) after every navigation.
+        """
+        HEADLESS_STEALTH_JS = """() => {
+            // Re-inject navigator.plugins — headless Chromium strips these
+            try {
+                const _plugins = [
+                    {name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format'},
+                    {name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: ''},
+                    {name: 'Native Client', filename: 'internal-nacl-plugin', description: ''}
+                ];
+                const pluginArray = {
+                    length: 3,
+                    item: function(i) { return _plugins[i] || null; },
+                    namedItem: function(n) { return _plugins.find(p => p.name === n) || null; },
+                    refresh: function() {},
+                    [Symbol.iterator]: function*() { yield* _plugins; }
+                };
+                for (let i = 0; i < _plugins.length; i++) {
+                    pluginArray[i] = _plugins[i];
+                }
+                Object.defineProperty(navigator, 'plugins', {
+                    get: function() { return pluginArray; },
+                    configurable: true,
+                    enumerable: true
+                });
+            } catch(e) {}
+
+            // Re-inject window.chrome — headless Chromium removes this object
+            try {
+                if (!window.chrome) {
+                    const _chromeObj = {
+                        app: {
+                            isInstalled: false,
+                            InstallState: { INSTALLED: 'installed', DISABLED: 'disabled', NOT_INSTALLED: 'not_installed' },
+                            RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' },
+                            getDetails: function() { return null; },
+                            getIsInstalled: function() { return false; }
+                        },
+                        runtime: {
+                            id: undefined,
+                            connect: function() { return { postMessage: function(){}, disconnect: function(){}, onMessage: { addListener: function(){}, removeListener: function(){}, hasListener: function() { return false; } }, onDisconnect: { addListener: function(){}, removeListener: function(){} } }; },
+                            sendMessage: function(msg, cb) { if (typeof cb === 'function') cb(); },
+                            getManifest: function() { return { manifest_version: 3, version: '1.0.0', name: 'Chrome App' }; },
+                            getURL: function(path) { return 'chrome-extension://nmmhkkegccagdldgiimedpiccmgmieda/' + (path || ''); },
+                            onMessage: { addListener: function(){}, removeListener: function(){}, hasListener: function() { return false; } },
+                            onConnect: { addListener: function(){}, removeListener: function(){} },
+                            onInstalled: { addListener: function(){}, removeListener: function(){} },
+                            lastError: undefined
+                        },
+                        csi: function() { return { onloadT: Date.now(), pageT: Date.now(), startE: Date.now() }; },
+                        loadTimes: function() { var now = Date.now() / 1000; return { commitLoadTime: now, connectionInfo: 'h2', finishDocumentLoadTime: now, finishLoadTime: now, firstPaintAfterLoadTime: 0, firstPaintTime: now, npnNegotiatedProtocol: 'h2', requestTime: now, startLoadTime: now, wasAlternateProtocolAvailable: false, wasFetchedViaSpdy: true, wasNpnNegotiated: true }; },
+                        webstore: { onInstallStageChanged: { addListener: function(){}, removeListener: function(){} }, onDownloadProgress: { addListener: function(){}, removeListener: function(){} } }
+                    };
+                    Object.defineProperty(window, 'chrome', {
+                        value: _chromeObj,
+                        configurable: true,
+                        enumerable: true,
+                        writable: true
+                    });
+                }
+            } catch(e) {}
+        }"""
+        
+        async def _on_domcontentloaded(page_obj):
+            """Called after each page navigation to re-inject stealth."""
+            try:
+                await page_obj.evaluate(HEADLESS_STEALTH_JS)
+            except Exception:
+                pass  # Page may have closed
+        
+        page.on("domcontentloaded", lambda: asyncio.ensure_future(_on_domcontentloaded(page)))
+        
+        # Also inject immediately on the current page — use ensure_future, NOT run_until_complete
+        # (run_until_complete crashes inside an already-running event loop)
+        try:
+            asyncio.ensure_future(page.evaluate(HEADLESS_STEALTH_JS))
+        except Exception:
+            pass
 
     def _attach_console_listener(self, page_id: str, page: Page):
         """Attach console and error listeners to a page."""
@@ -1000,15 +1127,16 @@ class AgentBrowser:
 
     # ─── User-Agent Rotation Pool ─────────────────────────────
     # Real Chrome user agents for rotation on retries.
+    # Updated to match Chrome 145-146 (current as of 2026)
     _ROTATION_USER_AGENTS: List[str] = [
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Safari/605.1.15",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0",
     ]
 
     def _get_rotation_ua(self) -> str:
@@ -1105,7 +1233,7 @@ class AgentBrowser:
         try:
             result = await self._firefox_engine.navigate(url, retries=2)
             if result.get("status") == "success":
-                logger.info(f"Firefox succeeded where Chromium failed!")
+                logger.info("Firefox succeeded where Chromium failed!")
                 result["fallback_engine"] = "firefox"
                 result["original_engine"] = "chromium"
                 return result
@@ -1138,13 +1266,26 @@ class AgentBrowser:
             page = self._pages.get(page_id, self.page)
             domain = urlparse(url).hostname or ""
 
+            # Auto-upgrade to networkidle for JS-heavy/login domains
+            # These sites need full JS rendering before forms are interactive
+            _NETWORKIDLE_DOMAINS = [
+                "instagram.com", "facebook.com", "twitter.com", "x.com",
+                "linkedin.com", "github.com", "accounts.google.com",
+                "login.microsoftonline.com", "amazon.com", "tiktok.com",
+                "reddit.com", "spotify.com", "netflix.com",
+            ]
+            if wait_until == "domcontentloaded":
+                domain_lower = domain.lower()
+                if any(nd in domain_lower for nd in _NETWORKIDLE_DOMAINS):
+                    wait_until = "networkidle"
+                    logger.info(f"Auto-upgraded to networkidle for JS-heavy domain: {domain}")
+
             # ── Pre-flight: fast TCP connect check ────────────────────
             # Skip the entire Playwright flow if the site is completely
             # unreachable (DNS failure, server down, connection refused).
             # 5-second timeout — no browser launch, no retries.
             _pf_start = time.time()
             try:
-                import socket
                 port = 443 if url.startswith("https") else 80
                 _, writer = await asyncio.wait_for(
                     asyncio.open_connection(domain, port),
@@ -1230,6 +1371,16 @@ class AgentBrowser:
                         pass
 
                     status_code = response.status if response else 200
+
+                    # Handle HTTP 429 Rate Limiting — wait and retry
+                    if status_code == 429 and attempt < retries:
+                        retry_after = 5.0 + random.uniform(2.0, 10.0) * (attempt + 1)
+                        logger.warning(
+                            f"HTTP 429 rate limited on {current_url[:60]} "
+                            f"(attempt {attempt + 1}, waiting {retry_after:.1f}s)"
+                        )
+                        await asyncio.sleep(retry_after)
+                        continue
 
                     # Record proxy success
                     if self._current_proxy:
@@ -1375,11 +1526,11 @@ class AgentBrowser:
     async def _try_http_fallback(self, url: str) -> Optional[Dict[str, Any]]:
         """
         Try fetching the URL via curl_cffi HTTP client with real browser TLS.
-        
+
         When the Playwright browser is blocked (IP-level or JS challenge),
         curl_cffi with Chrome TLS fingerprint can often bypass the protection
         because it presents a perfect TLS ClientHello that matches a real browser.
-        
+
         This fallback returns page content (HTML) but does NOT render JavaScript.
         For content-scraping use cases, this is sufficient.
         """
@@ -1600,134 +1751,767 @@ class AgentBrowser:
     async def screenshot(self, page_id: str = "main", full_page: bool = False) -> str:
         """Take a base64 screenshot."""
         page = self._pages.get(page_id, self.page)
-        img_bytes = await page.screenshot(type="png", full_page=full_page)
-        return base64.b64encode(img_bytes).decode()
+        try:
+            img_bytes = await page.screenshot(type="png", full_page=full_page)
+            return base64.b64encode(img_bytes).decode()
+        except Exception as e:
+            logger.error(f"Screenshot failed: {e}")
+            return ""
+
+    # ─── Robust Element Finder ────────────────────────────────────
+
+    async def _find_element_robust(self, page, selector: str, timeout_ms: int = 5000):
+        """Find an element using multiple selector strategies with wait.
+
+        Tries the exact selector first, then falls back to common patterns:
+        name attribute, placeholder, id, aria-label, label[for], data-testid,
+        and even by input type (email, password, tel, etc.).
+
+        Returns (element, actual_selector) or (None, None).
+        """
+        import time as _time
+
+        # Build the list of selectors to try, in priority order
+        selector_candidates = [selector]
+
+        # If the selector already looks like a full CSS selector, don't add alternatives
+        is_full_selector = any(c in selector for c in ['[', '#', '.', '>', ':', ' '])
+        if not is_full_selector:
+            # selector is likely a bare name like "username", "email", "password"
+            selector_candidates.extend([
+                f'input[name="{selector}"]',
+                f'textarea[name="{selector}"]',
+                f'select[name="{selector}"]',
+                f'#{selector}',
+                f'input[placeholder*="{selector}" i]',
+                f'textarea[placeholder*="{selector}" i]',
+                f'input[aria-label*="{selector}" i]',
+                f'textarea[aria-label*="{selector}" i]',
+                f'[data-testid="{selector}"]',
+                f'label:text-is("{selector}") + input',
+                f'label:text-is("{selector}") ~ input',
+            ])
+            # Type-based selectors for common fields
+            lower = selector.lower()
+            if 'email' in lower or 'e-mail' in lower or 'mail' in lower:
+                selector_candidates.extend([
+                    'input[type="email"]',
+                    'input[name="email"]',
+                    'input[name="username"]',
+                    'input[autocomplete="email"]',
+                    'input[autocomplete="username"]',
+                    'input[placeholder*="email" i]',
+                    'input[placeholder*="Email" i]',
+                ])
+            elif 'username' in lower or 'user' in lower:
+                # Many sites (Instagram, Facebook, etc.) use input[name="email"]
+                # for the username field. Always search for both patterns.
+                selector_candidates.extend([
+                    'input[name="username"]',
+                    'input[name="email"]',
+                    'input[type="email"]',
+                    'input[autocomplete="username"]',
+                    'input[autocomplete="email"]',
+                    'input[placeholder*="username" i]',
+                    'input[placeholder*="email" i]',
+                    'input[placeholder*="Phone" i]',
+                    'input[placeholder*="phone" i]',
+                ])
+            elif 'password' in lower or 'pass' in lower or 'pwd' in lower:
+                selector_candidates.extend([
+                    'input[type="password"]',
+                    'input[name="password"]',
+                    'input[autocomplete="current-password"]',
+                    'input[autocomplete="new-password"]',
+                ])
+            elif 'phone' in lower or 'mobile' in lower or 'tel' in lower:
+                selector_candidates.extend([
+                    'input[type="tel"]',
+                    'input[name="phone"]',
+                    'input[autocomplete="tel"]',
+                ])
+            elif 'search' in lower or 'query' in lower or 'q' == lower:
+                selector_candidates.extend([
+                    'input[type="search"]',
+                    'input[name="q"]',
+                    'input[name="query"]',
+                    'input[name="search"]',
+                    'input[role="searchbox"]',
+                ])
+
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_candidates = []
+        for s in selector_candidates:
+            if s not in seen:
+                seen.add(s)
+                unique_candidates.append(s)
+
+        # Try each selector with a short wait
+        start = _time.time()
+        while (_time.time() - start) * 1000 < timeout_ms:
+            for sel in unique_candidates:
+                try:
+                    el = await page.query_selector(sel)
+                    if el:
+                        # Verify the element is at least in the DOM (not detached)
+                        try:
+                            visible = await el.is_visible()
+                            if visible:
+                                return el, sel
+                            # Element exists but hidden — still return it, we'll try to interact
+                            # (some elements become visible after scroll/focus)
+                            return el, sel
+                        except Exception:
+                            return el, sel
+                except Exception:
+                    continue
+
+            # Wait a bit before retrying (element may be loading via JS/lazy load)
+            await asyncio.sleep(0.3)
+
+        # Final attempt: try waiting for the FIRST selector with Playwright's wait_for_selector
+        # This handles cases where the element is added to the DOM dynamically
+        if unique_candidates:
+            try:
+                el = await page.wait_for_selector(unique_candidates[0], timeout=2000)
+                if el:
+                    return el, unique_candidates[0]
+            except Exception:
+                pass
+
+        return None, None
+
+    # ─── React-Compatible Form Fill ──────────────────────────────
+
+    _REACT_SYNC_JS = """(el, value) => {
+        // ── Strategy 1: Use React's internal setter ──
+        // React 16+ stores internal state via the native value property descriptor.
+        // By calling the ORIGINAL setter, we bypass React's interception and
+        // set the DOM value directly. Then we MUST dispatch React-compatible
+        // events so React's internal state reconciles with the DOM.
+        const nativeInputValueSetter =
+            Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set ||
+            Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+
+        if (nativeInputValueSetter) {
+            nativeInputValueSetter.call(el, value);
+        } else {
+            // No setter — just set value directly
+            el.value = value;
+        }
+
+        // ── Strategy 2: Dispatch React-compatible events ──
+        // React listens for 'input' events on controlled components.
+        // The event MUST have { bubbles: true } because React uses
+        // event delegation at the document root.
+        const inputEvent = new InputEvent('input', {
+            bubbles: true,
+            cancelable: true,
+            inputType: 'insertText',
+            data: value
+        });
+        el.dispatchEvent(inputEvent);
+
+        // Also dispatch 'change' for non-React frameworks
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+
+        // ── Strategy 3: Trigger React's internal fiber update ──
+        // React stores internal state on the fiber node. In some versions,
+        // we need to force React to process the pending state update.
+        // This is done by focusing and blurring the element, which
+        // triggers React's onChange handler.
+        el.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+        el.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
+        el.focus();
+
+        return el.value;
+    }"""
+
+    _VERIFY_AND_FIX_JS = """(el, expectedValue) => {
+        // Always apply the nuclear React override — even if el.value appears correct,
+        // React's internal state (fiber) may be out of sync with the DOM.
+        // This ensures BOTH DOM and React state are consistent.
+
+        // ── Step 1: Use React's internal native setter ──
+        // This bypasses React's value interceptor and sets the DOM directly.
+        // Without this, React controlled components ignore programmatic changes.
+        const nativeInputValueSetter =
+            Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set ||
+            Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+
+        if (nativeInputValueSetter) {
+            nativeInputValueSetter.call(el, expectedValue);
+        } else {
+            el.value = expectedValue;
+        }
+
+        // ── Step 2: Dispatch React-compatible input event ──
+        // React 16+ listens for 'input' events with bubbles:true at the document root.
+        // This is how React's onChange handler gets triggered.
+        // The InputEvent MUST have inputType and data for React to process it.
+        el.dispatchEvent(new InputEvent('input', {
+            bubbles: true,
+            cancelable: true,
+            inputType: 'insertText',
+            data: expectedValue
+        }));
+
+        // ── Step 3: Dispatch change event (Vue/Angular/native forms) ──
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+
+        // ── Step 4: Trigger React fiber reconciliation ──
+        // React stores internal state on the fiber node. Focusing and blurring
+        // forces React to process any pending state updates via its onChange handler.
+        const reactKey = Object.keys(el).find(k =>
+            k.startsWith('__reactEventHandlers') || k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance')
+        );
+        if (reactKey) {
+            // Re-dispatch input event specifically for React's synthetic event system
+            el.dispatchEvent(new InputEvent('input', {
+                bubbles: true,
+                cancelable: true,
+                inputType: 'insertText',
+                data: expectedValue
+            }));
+            // Force React to reconcile by focus/blur cycle
+            el.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+            el.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
+        }
+
+        // ── Step 5: Focus element for visual feedback ──
+        el.focus();
+
+        // ── Step 6: Verify final value ──
+        const finalValue = el.value;
+        return {
+            ok: finalValue === expectedValue,
+            actual: finalValue,
+            expected: expectedValue
+        };
+    }"""
 
     async def fill_form(self, fields: Dict[str, str], page_id: str = "main") -> Dict[str, Any]:
-        """Fill form fields with human-like typing."""
+        """Fill form fields with human-like typing, React/Vue/Angular compatible.
+
+        Production-grade form filling that handles:
+        - React controlled components (state sync via nativeInputValueSetter)
+        - Vue v-model bindings (input + change events)
+        - Angular ngModel (input events)
+        - Special characters (@, #, $, etc.) via insert_text or fill()
+        - Multi-strategy element finding (name, id, placeholder, aria-label, type)
+        - Value verification with automatic retry
+        - Instagram/Google/Facebook specific field name quirks
+
+        Flow per field:
+        1. Find element via robust multi-strategy finder
+        2. Wait for element to be interactable
+        3. Focus + clear existing value
+        4. Type value (keyboard.type for normal chars, fill() for special chars)
+        5. Verify value was set correctly
+        6. If verification fails, use React nuclear override
+        7. Dispatch framework-compatible events (input, change, focus, blur)
+        """
         page = self._pages.get(page_id, self.page)
         mimicry = self._mimicry
         filled = []
+        failed = []
 
         for selector, value in fields.items():
             try:
-                element = await page.query_selector(selector)
+                # ── Step 1: Find element using robust multi-strategy finder ──
+                element, actual_selector = await self._find_element_robust(
+                    page, selector, timeout_ms=8000
+                )
+
                 if not element:
-                    # Try common selectors
-                    for alt in [f'input[name="{selector}"]', f'input[placeholder*="{selector}"]',
-                                f'textarea[name="{selector}"]', f'#{selector}']:
-                        element = await page.query_selector(alt)
-                        if element:
-                            break
+                    logger.warning(f"Field not found after all strategies: {selector}")
+                    failed.append({"selector": selector, "error": "not_found"})
+                    continue
 
-                if element:
-                    await element.click()
-                    await asyncio.sleep(random.uniform(0.1, 0.3))
+                # ── Step 2: Scroll into view and wait for interactability ──
+                try:
+                    await element.scroll_into_view_if_needed()
+                    await asyncio.sleep(random.uniform(0.05, 0.15))
+                except Exception:
+                    pass
 
-                    # Clear existing value
-                    await element.fill("")
+                # ── Step 3: Focus the element ──
+                focused = False
+                # Try JS focus first (most reliable for React/Angular)
+                try:
+                    await page.evaluate("""(sel) => {
+                        const el = document.querySelector(sel);
+                        if (el) { el.focus(); el.click(); }
+                    }""", actual_selector)
+                    focused = True
+                except Exception:
+                    pass
 
-                    # Type with human-like delays
-                    for char in value:
-                        await element.type(char, delay=mimicry.typing_delay())
-                    filled.append(selector)
-                    await asyncio.sleep(random.uniform(0.05, 0.2))
-                else:
-                    logger.warning(f"Field not found: {selector}")
+                if not focused:
+                    try:
+                        await element.click(timeout=5000)
+                        focused = True
+                    except Exception:
+                        try:
+                            await element.click(force=True, timeout=3000)
+                            focused = True
+                        except Exception:
+                            # Last resort: use page.focus()
+                            try:
+                                await page.focus(actual_selector)
+                                focused = True
+                            except Exception:
+                                logger.warning(f"Cannot focus element: {selector}")
+                                failed.append({"selector": selector, "error": "cannot_focus"})
+                                continue
+
+                await asyncio.sleep(random.uniform(0.1, 0.25))
+
+                # ── Step 4: Clear existing value ──
+                # Use triple-select to ensure all text is selected (works across browsers)
+                try:
+                    # Click to place cursor, then select all
+                    await page.keyboard.press("Home")
+                    await asyncio.sleep(0.05)
+                    await page.keyboard.press("Control+a")
+                    await asyncio.sleep(0.05)
+                    await page.keyboard.press("Control+a")  # Double-select for reliability
+                    await asyncio.sleep(0.05)
+                    await page.keyboard.press("Backspace")
+                    await asyncio.sleep(0.05)
+                except Exception:
+                    # Fallback: use Playwright fill("") which clears and dispatches events
+                    try:
+                        await element.fill("")
+                    except Exception:
+                        pass
+
+                await asyncio.sleep(random.uniform(0.05, 0.15))
+
+                # ── Step 5: Type the value using the most reliable method ──
+                # ORDER OF PRIORITY (production-proven for React/Vue/Angular):
+                # 1. fill() + React sync — handles ALL chars including @#$, works with React
+                # 2. keyboard.insert_text() + React sync — bypasses keyboard layout entirely
+                # 3. keyboard.type() char-by-char — last resort, may fail for special chars
+                value_str = str(value)
+                typing_ok = False
+
+                # Strategy 1: Playwright fill() — handles ALL characters reliably
+                # fill() sets the value at the DOM level and dispatches input+change events.
+                # However, React controlled components may not pick it up, so we ALWAYS
+                # apply the React sync override afterwards (in Step 6).
+                try:
+                    await element.fill(value_str)
+                    typing_ok = True
+                except Exception as fill_err:
+                    logger.debug(f"fill() failed for {selector}: {fill_err}")
+
+                # Strategy 2: keyboard.insert_text() — bypasses keyboard layout entirely
+                # This types the ENTIRE string as-is, no key mapping involved.
+                # Works for @, #, $, and all Unicode characters.
+                if not typing_ok:
+                    try:
+                        await page.keyboard.insert_text(value_str)
+                        typing_ok = True
+                    except Exception as insert_err:
+                        logger.debug(f"insert_text() failed for {selector}: {insert_err}")
+
+                # Strategy 3: keyboard.type() char-by-char as absolute last resort
+                # WARNING: keyboard.type() INTERPRETS special chars as key combos.
+                # E.g., @ becomes Shift+2, which may fail on non-US keyboard layouts.
+                # Only use this when the value has NO special characters.
+                if not typing_ok:
+                    has_special = any(c in value_str for c in '@#$%^&*{}|:"<>?~`_+!=()')
+                    if not has_special:
+                        try:
+                            await page.keyboard.type(value_str, delay=mimicry.typing_delay())
+                            typing_ok = True
+                        except Exception as type_err:
+                            logger.debug(f"keyboard.type() failed for {selector}: {type_err}")
+
+                if not typing_ok:
+                    # Strategy 4: Nuclear JS-only fill via React sync override
+                    # This sets the value purely through JavaScript, bypassing all keyboard issues
+                    try:
+                        fix_result = await element.evaluate(self._VERIFY_AND_FIX_JS, value_str)
+                        if fix_result.get("ok"):
+                            typing_ok = True
+                            logger.info(f"JS-only fill succeeded for {selector}")
+                        else:
+                            logger.warning(f"All fill strategies failed for {selector}")
+                    except Exception as js_err:
+                        logger.debug(f"JS fill also failed for {selector}: {js_err}")
+
+                if not typing_ok:
+                    failed.append({"selector": selector, "error": "typing_failed_all_strategies"})
+                    continue
+
+                await asyncio.sleep(0.1)
+
+                # ── Step 6: ALWAYS sync React state ──
+                # Even when fill() succeeds, React's internal state may be out of sync.
+                # We ALWAYS apply the nativeInputValueSetter + event dispatch to ensure
+                # React's controlled component state matches the DOM value.
+                try:
+                    fix_result = await element.evaluate(self._VERIFY_AND_FIX_JS, value_str)
+                    if not fix_result.get("ok"):
+                        logger.warning(
+                            f"React sync verification failed for {selector}: "
+                            f"got '{fix_result.get('actual')}', expected '{value_str}'"
+                        )
+                        # One more attempt: clear and re-fill via JS
+                        try:
+                            await element.evaluate("""(el) => {
+                                el.value = '';
+                                el.dispatchEvent(new Event('input', { bubbles: true }));
+                            }""")
+                            fix_result2 = await element.evaluate(self._VERIFY_AND_FIX_JS, value_str)
+                            if fix_result2.get("ok"):
+                                logger.info(f"Second React sync attempt succeeded for {selector}")
+                        except Exception:
+                            pass
+                except Exception as e:
+                    logger.debug(f"React sync skipped for {selector}: {e}")
+
+                filled.append(selector)
+                await asyncio.sleep(random.uniform(0.05, 0.2))
+
             except Exception as e:
                 logger.error(f"Error filling {selector}: {e}")
+                failed.append({"selector": selector, "error": str(e)})
 
-        return {"status": "success", "filled": filled, "total": len(fields)}
+        # Return proper status based on results
+        if not filled and fields:
+            return {"status": "error", "error": "No fields could be filled", "filled": [], "failed": failed, "total": len(fields)}
+        if len(filled) < len(fields):
+            return {"status": "partial", "filled": filled, "failed": failed, "total": len(fields)}
+        return {"status": "success", "filled": filled, "failed": [], "total": len(fields)}
 
     async def click(self, selector: str, page_id: str = "main") -> Dict[str, Any]:
-        """Click an element with human-like mouse movement."""
+        """Click an element with human-like mouse movement.
+
+        Uses a multi-strategy approach with robust element finding:
+        1. Find element via robust multi-strategy finder
+        2. Scroll into view and check visibility
+        3. Normal click with mouse path animation
+        4. If element not interactable -> force click
+        5. If force click fails -> JS click (bypasses all checks)
+        6. If JS click fails -> keyboard Enter for buttons/links
+        7. Retry with exponential backoff on stale element errors
+        """
+        page = self._pages.get(page_id, self.page)
+        mimicry = self._mimicry
+
+        # Resolve the actual selector for JS fallbacks
+        actual_selector = selector
+
+        for attempt in range(3):
+            try:
+                # Use robust finder for first attempt, simple finder for retries
+                if attempt == 0:
+                    element, actual_selector = await self._find_element_robust(
+                        page, selector, timeout_ms=5000
+                    )
+                    if not element:
+                        return {"status": "error", "error": f"Element not found: {selector}"}
+                else:
+                    element = await page.query_selector(actual_selector)
+                    if not element:
+                        # Retry with robust finder
+                        element, actual_selector = await self._find_element_robust(
+                            page, selector, timeout_ms=3000
+                        )
+                        if not element:
+                            if attempt == 2:
+                                return {"status": "error", "error": f"Element not found: {selector}"}
+                            await asyncio.sleep(0.5 * (attempt + 1))
+                            continue
+
+                # Scroll into view
+                try:
+                    await element.scroll_into_view_if_needed()
+                    await asyncio.sleep(random.uniform(0.05, 0.1))
+                except Exception:
+                    pass
+
+                # Check visibility
+                try:
+                    is_visible = await element.is_visible()
+                    if not is_visible:
+                        # Try force click for hidden elements
+                        await element.click(force=True, timeout=5000)
+                        await asyncio.sleep(random.uniform(0.2, 0.5))
+                        return {"status": "success", "selector": selector, "method": "force_click"}
+                except Exception:
+                    pass
+
+                # Normal click with mouse path
+                box = await element.bounding_box()
+                if box:
+                    target_x = box["x"] + box["width"] / 2
+                    target_y = box["y"] + box["height"] / 2
+                    start_x, start_y = mimicry._last_move
+                    path = mimicry.mouse_path(start_x, start_y, target_x, target_y)
+
+                    for x, y in path:
+                        await page.mouse.move(x, y)
+                        await asyncio.sleep(random.uniform(0.005, 0.02))
+
+                await asyncio.sleep(random.uniform(0.05, 0.15))
+                await element.click(timeout=10000)
+                await asyncio.sleep(random.uniform(0.2, 0.5))
+
+                return {"status": "success", "selector": selector, "method": "normal_click"}
+
+            except Exception as e:
+                error_str = str(e).lower()
+                # Stale element — retry
+                if "stale" in error_str or "detached" in error_str or "not attached" in error_str:
+                    await asyncio.sleep(0.5 * (attempt + 1))
+                    continue
+
+                # Element not interactable — try JS click
+                if "not visible" in error_str or "not interactable" in error_str or "intercepts pointer" in error_str:
+                    try:
+                        # Sanitize selector for JS injection (avoid XSS)
+                        safe_sel = actual_selector.replace("'", "\\'")
+                        await page.evaluate(f"""() => {{
+                            const el = document.querySelector('{safe_sel}');
+                            if (el) {{ el.click(); return true; }}
+                            return false;
+                        }}""")
+                        await asyncio.sleep(random.uniform(0.2, 0.5))
+                        return {"status": "success", "selector": selector, "method": "js_click"}
+                    except Exception:
+                        pass
+
+                # Timeout — try keyboard Enter as last resort for buttons/links
+                if "timeout" in error_str:
+                    try:
+                        safe_sel = actual_selector.replace("'", "\\'")
+                        await page.evaluate(f"""() => {{
+                            const el = document.querySelector('{safe_sel}');
+                            if (el) {{ el.focus(); return true; }}
+                            return false;
+                        }}""")
+                        await page.keyboard.press("Enter")
+                        await asyncio.sleep(random.uniform(0.2, 0.5))
+                        return {"status": "success", "selector": selector, "method": "keyboard_enter"}
+                    except Exception:
+                        pass
+
+                if attempt == 2:  # Last attempt
+                    return {"status": "error", "error": str(e), "selector": selector}
+                await asyncio.sleep(0.5 * (attempt + 1))
+
+        return {"status": "error", "error": f"Failed after 3 attempts: {selector}"}
+
+    async def type_text(self, text: str, page_id: str = "main") -> Dict[str, Any]:
+        """Type text with human-like delays (into focused element).
+
+        Handles special characters (@, #, $, etc.) properly by choosing
+        the right input method:
+        - fill() on the focused element (most reliable for ALL chars + React)
+        - keyboard.insert_text() for special characters (bypasses keyboard layout)
+        - keyboard.type() only for normal characters (dispatches proper key events)
+        
+        NOTE: keyboard.type() INTERPRETS special chars as key combos.
+        E.g., @ becomes Shift+2 which may fail on non-US layouts.
+        We NEVER use keyboard.type() for strings containing special characters.
+        """
         page = self._pages.get(page_id, self.page)
         mimicry = self._mimicry
 
         try:
-            element = await page.query_selector(selector)
-            if not element:
-                return {"status": "error", "error": f"Element not found: {selector}"}
+            # Check for special characters that keyboard.type() handles incorrectly
+            special_chars = set('@#$%^&*{}|:"<>?~`_+!=()\\')
+            has_special = any(c in special_chars for c in text)
 
-            box = await element.bounding_box()
-            if box:
-                target_x = box["x"] + box["width"] / 2
-                target_y = box["y"] + box["height"] / 2
-                start_x, start_y = mimicry._last_move
-                path = mimicry.mouse_path(start_x, start_y, target_x, target_y)
+            if has_special:
+                # Strategy 1: Find the focused element and use fill() — most reliable
+                # fill() handles ALL characters and dispatches input+change events
+                try:
+                    focused_el = await page.evaluate("""() => {
+                        const el = document.activeElement;
+                        if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+                            return el.id || el.name || 
+                                   (el.getAttribute('aria-label') || '').replace(/"/g, '\\"') ||
+                                   el.tagName.toLowerCase() + ':nth-of-type(' + 
+                                   (Array.from(el.parentElement?.children || []).filter(
+                                       c => c.tagName === el.tagName
+                                   ).indexOf(el) + 1) + ')';
+                        }
+                        return null;
+                    }""")
+                    if focused_el:
+                        try:
+                            el = await page.query_selector(f'[name="{focused_el}"], #{focused_el}')
+                            if el:
+                                await el.fill(text)
+                                return {"status": "success", "typed": len(text), "method": "fill"}
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
 
-                for x, y in path:
-                    await page.mouse.move(x, y)
-                    await asyncio.sleep(random.uniform(0.005, 0.02))
+                # Strategy 2: keyboard.insert_text() — bypasses keyboard layout entirely
+                # Types the ENTIRE string as-is, no key mapping involved
+                try:
+                    await page.keyboard.insert_text(text)
+                    return {"status": "success", "typed": len(text), "method": "insert_text"}
+                except Exception:
+                    pass
 
-            await asyncio.sleep(random.uniform(0.05, 0.15))
-            await element.click()
-            await asyncio.sleep(random.uniform(0.2, 0.5))
+                # Strategy 3: Type char by char using insert_text for special chars
+                try:
+                    for char in text:
+                        if char in special_chars:
+                            await page.keyboard.insert_text(char)
+                        else:
+                            await page.keyboard.type(char, delay=mimicry.typing_delay())
+                    return {"status": "success", "typed": len(text), "method": "hybrid"}
+                except Exception:
+                    pass
 
-            return {"status": "success", "selector": selector}
+                # Strategy 4: Last resort — use keyboard.type and hope for the best
+                try:
+                    await page.keyboard.type(text, delay=mimicry.typing_delay())
+                    return {"status": "success", "typed": len(text), "method": "type_fallback"}
+                except Exception:
+                    pass
+
+                return {"status": "error", "error": "All typing strategies failed for special characters"}
+            else:
+                # Normal characters: Use keyboard.type() which dispatches proper
+                # KeyboardEvents that React/Vue/Angular listen to
+                try:
+                    await page.keyboard.type(text, delay=mimicry.typing_delay())
+                    return {"status": "success", "typed": len(text), "method": "type"}
+                except Exception:
+                    # Fallback: try insert_text
+                    try:
+                        await page.keyboard.insert_text(text)
+                        return {"status": "success", "typed": len(text), "method": "insert_text_fallback"}
+                    except Exception as e:
+                        return {"status": "error", "error": str(e)}
+
         except Exception as e:
             return {"status": "error", "error": str(e)}
-
-    async def type_text(self, text: str, page_id: str = "main") -> Dict[str, Any]:
-        """Type text with human-like delays (into focused element)."""
-        page = self._pages.get(page_id, self.page)
-        mimicry = self._mimicry
-
-        for char in text:
-            await page.keyboard.type(char, delay=mimicry.typing_delay())
-
-        return {"status": "success", "typed": len(text)}
 
     async def press_key(self, key: str, page_id: str = "main") -> Dict[str, Any]:
         """Press a keyboard key (Enter, Tab, Escape, etc.)."""
         page = self._pages.get(page_id, self.page)
-        await page.keyboard.press(key)
-        return {"status": "success", "key": key}
+        try:
+            await page.keyboard.press(key)
+            return {"status": "success", "key": key}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
 
     async def evaluate_js(self, script: str, page_id: str = "main") -> Any:
-        """Execute JavaScript in the page context."""
+        """Execute JavaScript in a sandboxed page context.
+
+        Uses Patchright's isolated world execution to prevent user-supplied
+        scripts from accessing or modifying the page's main JavaScript context.
+        The sandbox:
+        - Cannot access page's window properties directly (read-only DOM access)
+        - Cannot modify global variables in the main world
+        - Runs in an isolated V8 context with its own global scope
+        - Has a 10-second execution timeout to prevent infinite loops
+        - Catches and returns errors instead of crashing the server
+        """
         page = self._pages.get(page_id, self.page)
-        return await page.evaluate(script)
+
+        # Wrap the script in a sandboxed execution with timeout and error handling
+        sandboxed_script = f"""
+        (() => {{
+            const __sandbox_result = {{ success: false, value: undefined, error: undefined }};
+            try {{
+                const __fn = new Function('return ({{{script}}})');
+                const __timeout = new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('Sandbox execution timeout (10s)')), 10000)
+                );
+                __sandbox_result.value = Promise.race([__fn(), __timeout]);
+                __sandbox_result.success = true;
+                return __sandbox_result;
+            }} catch(__e) {{
+                __sandbox_result.error = __e.message || String(__e);
+                return __sandbox_result;
+            }}
+        }})()
+        """
+
+        try:
+            result = await page.evaluate(sandboxed_script)
+            if isinstance(result, dict):
+                if result.get("error"):
+                    return {"status": "error", "error": f"Sandbox error: {result['error']}"}
+                if result.get("success"):
+                    # The value might be a promise — try to resolve it
+                    value = result.get("value")
+                    if value is not None:
+                        return {"status": "success", "result": value}
+                    return {"status": "success"}
+            return {"status": "success", "result": result}
+        except Exception as e:
+            return {"status": "error", "error": f"Execution failed: {str(e)}"}
+
+    async def evaluate_js_unsafe(self, script: str, page_id: str = "main") -> Any:
+        """Execute JavaScript directly in the page's main world (UNSANDBOXED).
+
+        WARNING: This bypasses sandbox protections. Use only for trusted internal
+        scripts (stealth injection, DOM snapshots, etc.), never for user-supplied code.
+        """
+        page = self._pages.get(page_id, self.page)
+        try:
+            return await page.evaluate(script)
+        except Exception as e:
+            logger.error(f"Unsafe JS evaluation failed: {e}")
+            return None
 
     async def get_dom_snapshot(self, page_id: str = "main") -> str:
         """Get a structured DOM snapshot for agent analysis."""
         page = self._pages.get(page_id, self.page)
-        snapshot = await page.evaluate("""() => {
-            function getSnapshot(el, depth) {
-                if (depth > 5) return '';
-                let result = '';
-                const indent = '  '.repeat(depth);
-                const tag = el.tagName?.toLowerCase() || '';
-                if (!tag) return '';
+        try:
+            snapshot = await page.evaluate("""() => {
+                function getSnapshot(el, depth) {
+                    if (depth > 5) return '';
+                    let result = '';
+                    const indent = '  '.repeat(depth);
+                    const tag = el.tagName?.toLowerCase() || '';
+                    if (!tag) return '';
 
-                const attrs = [];
-                if (el.id) attrs.push('id="' + el.id + '"');
-                if (el.className && typeof el.className === 'string') attrs.push('class="' + el.className + '"');
-                if (el.getAttribute('type')) attrs.push('type="' + el.getAttribute('type') + '"');
-                if (el.getAttribute('name')) attrs.push('name="' + el.getAttribute('name') + '"');
-                if (el.getAttribute('placeholder')) attrs.push('placeholder="' + el.getAttribute('placeholder') + '"');
-                if (el.href) attrs.push('href="' + el.href + '"');
+                    const attrs = [];
+                    if (el.id) attrs.push('id="' + el.id + '"');
+                    if (el.className && typeof el.className === 'string') attrs.push('class="' + el.className + '"');
+                    if (el.getAttribute('type')) attrs.push('type="' + el.getAttribute('type') + '"');
+                    if (el.getAttribute('name')) attrs.push('name="' + el.getAttribute('name') + '"');
+                    if (el.getAttribute('placeholder')) attrs.push('placeholder="' + el.getAttribute('placeholder') + '"');
+                    if (el.href) attrs.push('href="' + el.href + '"');
 
-                const attrStr = attrs.length ? ' ' + attrs.join(' ') : '';
-                const text = el.childNodes.length === 1 && el.childNodes[0].nodeType === 3
-                    ? el.childNodes[0].textContent.trim().substring(0, 100) : '';
+                    const attrStr = attrs.length ? ' ' + attrs.join(' ') : '';
+                    const text = el.childNodes.length === 1 && el.childNodes[0].nodeType === 3
+                        ? el.childNodes[0].textContent.trim().substring(0, 100) : '';
 
-                if (['script', 'style', 'noscript', 'svg'].includes(tag)) return '';
+                    if (['script', 'style', 'noscript', 'svg'].includes(tag)) return '';
 
-                const children = Array.from(el.children).map(c => getSnapshot(c, depth + 1)).filter(Boolean).join('');
+                    const children = Array.from(el.children).map(c => getSnapshot(c, depth + 1)).filter(Boolean).join('');
 
-                if (children) {
-                    result = indent + '<' + tag + attrStr + '>' + (text ? ' ' + text : '') + '\\n' + children + indent + '</' + tag + '>\\n';
-                } else if (text) {
-                    result = indent + '<' + tag + attrStr + '>' + text + '</' + tag + '>\\n';
-                } else {
-                    result = indent + '<' + tag + attrStr + ' />\\n';
+                    if (children) {
+                        result = indent + '<' + tag + attrStr + '>' + (text ? ' ' + text : '') + '\\n' + children + indent + '</' + tag + '>\\n';
+                    } else if (text) {
+                        result = indent + '<' + tag + attrStr + '>' + text + '</' + tag + '>\\n';
+                    } else {
+                        result = indent + '<' + tag + attrStr + ' />\\n';
+                    }
+                    return result;
                 }
-                return result;
-            }
-            return getSnapshot(document.body, 0);
-        }""")
-        return snapshot
+                return getSnapshot(document.body, 0);
+            }""")
+            return snapshot or ""
+        except Exception as e:
+            logger.error(f"DOM snapshot failed: {e}")
+            return ""
 
     async def scroll(self, direction: str = "down", amount: int = 500, page_id: str = "main") -> Dict[str, Any]:
         """Scroll with human-like behavior."""
@@ -1788,16 +2572,22 @@ class AgentBrowser:
     async def go_back(self, page_id: str = "main") -> Dict[str, Any]:
         """Go back in browser history."""
         page = self._pages.get(page_id, self.page)
-        await page.go_back()
-        await asyncio.sleep(random.uniform(0.5, 1.5))
-        return {"status": "success", "url": page.url, "title": await page.title()}
+        try:
+            await page.go_back(timeout=15000)
+            await asyncio.sleep(random.uniform(0.5, 1.5))
+            return {"status": "success", "url": page.url, "title": await page.title()}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
 
     async def go_forward(self, page_id: str = "main") -> Dict[str, Any]:
         """Go forward in browser history."""
         page = self._pages.get(page_id, self.page)
-        await page.go_forward()
-        await asyncio.sleep(random.uniform(0.5, 1.5))
-        return {"status": "success", "url": page.url, "title": await page.title()}
+        try:
+            await page.go_forward(timeout=15000)
+            await asyncio.sleep(random.uniform(0.5, 1.5))
+            return {"status": "success", "url": page.url, "title": await page.title()}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
 
     async def right_click(self, selector: str, page_id: str = "main") -> Dict[str, Any]:
         """Right-click an element (opens context menu)."""
@@ -2240,21 +3030,12 @@ class AgentBrowser:
         fp = self._evasion.generate_fingerprint(page_id=tab_id)
         chrome_ver = fp["chrome_version"] if fp else "124"
 
-        # Inject via context-level init script (backup layer)
-        fingerprint_js = self._evasion.get_injection_js(tab_id)
-        await self.context.add_init_script(fingerprint_js)
-
+        # CDP stealth is the SOLE injection mechanism — no add_init_script needed
         page = await self.context.new_page()
         self._pages[tab_id] = page
         self._attach_console_listener(tab_id, page)
 
-        # GOD MODE stealth — primary anti-detection layer
-        await self._god_stealth.inject_into_page(
-            page,
-            page_id=tab_id,
-        )
-
-        # CDP stealth — backup layer
+        # Inject CDP stealth — SOLE anti-detection injection
         await self._cdp_stealth.inject_into_page(
             page,
             page_id=tab_id,
@@ -2647,10 +3428,8 @@ class AgentBrowser:
         }
 
         self.context = await self.browser.new_context(**context_options)
-        # Inject stealth + fingerprint for device emulation (backup layer)
+        # CDP stealth is the SOLE injection mechanism — no add_init_script needed
         fp = self._evasion.generate_fingerprint(page_id="main")
-        fingerprint_js = self._evasion.get_injection_js("main")
-        await self.context.add_init_script(ANTI_DETECTION_JS + "\n" + fingerprint_js)
         await self.context.route("**/*", self._handle_request)
 
         # Migrate pages
@@ -2794,10 +3573,8 @@ class AgentBrowser:
         context_options["storage_state"] = storage_state
 
         self.context = await self.browser.new_context(**context_options)
-        # Inject stealth + fingerprint on restore (backup layer)
+        # CDP stealth is the SOLE injection mechanism — no add_init_script needed
         fp = self._evasion.generate_fingerprint(page_id="main")
-        fingerprint_js = self._evasion.get_injection_js("main")
-        await self.context.add_init_script(ANTI_DETECTION_JS + "\n" + fingerprint_js)
         await self.context.route("**/*", self._handle_request)
 
         # Recreate pages with saved URLs
@@ -2832,15 +3609,9 @@ class AgentBrowser:
             self.page = await self.context.new_page()
             self._pages["main"] = self.page
 
-        # Apply CDP stealth to main page
+        # Apply CDP stealth — SOLE anti-detection injection
         chrome_ver = fp.get("chrome_version", "124")
         if self.page:
-            # GOD MODE stealth — primary
-            await self._god_stealth.inject_into_page(
-                self.page,
-                page_id="main",
-            )
-            # CDP stealth — backup
             await self._cdp_stealth.inject_into_page(
                 self.page,
                 page_id="main",

@@ -118,9 +118,13 @@ class Config:
     def _load_or_create(self) -> Dict[str, Any]:
         """Load existing config or create default."""
         if self.config_path.exists():
-            with open(self.config_path, "r") as f:
-                loaded = yaml.safe_load(f) or {}
-            return self._deep_merge(DEFAULT_CONFIG, loaded)
+            try:
+                with open(self.config_path, "r") as f:
+                    loaded = yaml.safe_load(f) or {}
+                return self._deep_merge(DEFAULT_CONFIG, loaded)
+            except (yaml.YAMLError, yaml.parser.ParserError, yaml.scanner.ScannerError, ValueError):
+                # Corrupt YAML — fall back to defaults
+                return copy.deepcopy(DEFAULT_CONFIG)
         return copy.deepcopy(DEFAULT_CONFIG)
 
     def _deep_merge(self, base: Dict, override: Dict) -> Dict:

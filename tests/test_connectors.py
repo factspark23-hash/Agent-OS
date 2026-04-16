@@ -2,7 +2,7 @@
 """
 Agent-OS Connector Tests
 Tests MCP, OpenAI, Claude, OpenClaw, and CLI connectors.
-Enforces that ALL connectors expose the same 42 tools.
+Enforces that OpenAI/Claude/OpenClaw expose the same tools, and MCP is a superset.
 
 Run:
     python -m pytest tests/test_connectors.py -v
@@ -20,11 +20,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 AGENT_OS_URL = "http://localhost:8001"
 AGENT_TOKEN = "test-connector-token"
 
-# Canonical 39 tool names (MCP/OpenClaw connectors) — every connector must match exactly
+# Canonical tool names shared by OpenAI/Claude/OpenClaw connectors.
+# MCP may have additional tools (browser_fetch, browser_nav_stats, browser_smart_navigate).
 EXPECTED_TOOLS = sorted([
     # Core navigation & interaction
     "browser_auto_login",
     "browser_back",
+    "browser_classify_query",
     "browser_click",
     "browser_emulate_device",
     "browser_evaluate_js",
@@ -36,6 +38,7 @@ EXPECTED_TOOLS = sorted([
     "browser_get_links",
     "browser_hover",
     "browser_navigate",
+    "browser_needs_web",
     "browser_network_apis",
     "browser_network_get",
     "browser_network_start",
@@ -43,8 +46,10 @@ EXPECTED_TOOLS = sorted([
     "browser_page_summary",
     "browser_page_tables",
     "browser_press",
+    "browser_query_strategy",
     "browser_reload",
     "browser_restore_session",
+    "browser_router_stats",
     "browser_save_credentials",
     "browser_save_session",
     "browser_scan_sensitive",
@@ -64,6 +69,13 @@ EXPECTED_TOOLS = sorted([
     "browser_workflow",
 ])
 
+# Extra tools only present in the MCP connector
+MCP_EXTRA_TOOLS = sorted([
+    "browser_fetch",
+    "browser_nav_stats",
+    "browser_smart_navigate",
+])
+
 
 # ─── MCP Connector ────────────────────────────────────────────
 
@@ -72,11 +84,12 @@ async def test_mcp_tools():
     """Test MCP has all tools with correct names."""
     from connectors.mcp_server import TOOLS
     tool_names = sorted([t.name for t in TOOLS])
-    assert tool_names == EXPECTED_TOOLS, (
-        f"MCP tools mismatch.\n"
-        f"  Missing: {set(EXPECTED_TOOLS) - set(tool_names)}\n"
-        f"  Extra: {set(tool_names) - set(EXPECTED_TOOLS)}"
-    )
+    # MCP must contain at least all shared tools
+    missing = set(EXPECTED_TOOLS) - set(tool_names)
+    assert not missing, f"MCP missing shared tools: {missing}"
+    # MCP may have extra tools beyond the shared set
+    extra = set(tool_names) - set(EXPECTED_TOOLS) - set(MCP_EXTRA_TOOLS)
+    assert not extra, f"MCP has unexpected extra tools: {extra}"
 
 
 # ─── OpenAI Connector ─────────────────────────────────────────
@@ -190,17 +203,18 @@ async def test_mcp_protocol():
 
     tools = await handle_list_tools()
     tool_names = sorted([t.name for t in tools])
-    assert tool_names == EXPECTED_TOOLS, (
-        f"MCP list_tools mismatch.\n"
-        f"  Missing: {set(EXPECTED_TOOLS) - set(tool_names)}\n"
-        f"  Extra: {set(tool_names) - set(EXPECTED_TOOLS)}"
-    )
+    # MCP must contain at least all shared tools
+    missing = set(EXPECTED_TOOLS) - set(tool_names)
+    assert not missing, f"MCP list_tools missing shared tools: {missing}"
+    extra = set(tool_names) - set(EXPECTED_TOOLS) - set(MCP_EXTRA_TOOLS)
+    assert not extra, f"MCP list_tools has unexpected extra tools: {extra}"
 
 
 # ─── Cross-Connector Consistency ──────────────────────────────
 
 def test_all_connectors_match():
-    """Verify all connectors expose the exact same set of tools."""
+    """Verify OpenAI, Claude, and OpenClaw connectors expose the exact same set of tools.
+    MCP may have additional tools beyond the shared set."""
     from connectors.mcp_server import TOOLS as mcp_tools
     from connectors.openai_connector import OPENAI_TOOLS, CLAUDE_TOOLS, get_all_tool_names
     from connectors.openclaw_connector import get_tool_names
@@ -210,17 +224,21 @@ def test_all_connectors_match():
     claude_names = set(t["name"] for t in CLAUDE_TOOLS)
     openclaw_names = set(get_tool_names())
 
-    assert mcp_names == openai_names == claude_names == openclaw_names, (
+    # OpenAI, Claude, and OpenClaw must match exactly
+    assert openai_names == claude_names == openclaw_names, (
         f"Connector tool sets don't match!\n"
-        f"  MCP:      {len(mcp_names)} tools\n"
         f"  OpenAI:   {len(openai_names)} tools\n"
         f"  Claude:   {len(claude_names)} tools\n"
         f"  OpenClaw: {len(openclaw_names)} tools\n"
-        f"  MCP only:      {mcp_names - openai_names}\n"
-        f"  OpenAI only:   {openai_names - mcp_names}\n"
-        f"  Claude only:   {claude_names - mcp_names}\n"
-        f"  OpenClaw only: {openclaw_names - mcp_names}"
+        f"  OpenAI only:   {openai_names - claude_names}\n"
+        f"  Claude only:   {claude_names - openai_names}\n"
+        f"  OpenClaw only: {openclaw_names - openai_names}"
     )
+
+    # MCP must be a superset of the shared tools
+    shared = openai_names
+    missing_from_mcp = shared - mcp_names
+    assert not missing_from_mcp, f"MCP missing shared tools: {missing_from_mcp}"
 
 
 # ─── New Module Imports ───────────────────────────────────────
