@@ -560,7 +560,7 @@ class AgentBrowser:
         # The ONLY way to restore them is via page.evaluate() AFTER page load.
         # This hook runs on every navigation to re-inject these properties.
         # ═══════════════════════════════════════════════════════════
-        self._setup_headless_stealth_hook(self.page)
+        await self._setup_headless_stealth_hook(self.page)
 
         # Initialize Firefox fallback engine if enabled
         if self._firefox_enabled:
@@ -3124,7 +3124,6 @@ class AgentBrowser:
             result = await self._proxy_manager.get_proxy(
                 domain=domain,
                 country=country,
-                exclude=exclude,
                 with_failover=True,
             )
 

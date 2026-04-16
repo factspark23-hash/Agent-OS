@@ -132,10 +132,11 @@ _CHECK_PAGE_READY_JS = """
     const imagesLoaded = images.every(img => img.complete);
     const pendingImages = images.filter(img => !img.complete).length;
 
-    // Font readiness
+    // Font readiness — consider loaded or no fonts as ready
+    // 'loading' state is transient and should not block page_ready
     let fontsReady = true;
-    if (document.fonts && document.fonts.ready) {
-        fontsReady = document.fonts.status === 'loaded' || document.fonts.status === 'loading' ? false : true;
+    if (document.fonts && document.fonts.status) {
+        fontsReady = document.fonts.status === 'loaded' || document.fonts.size === 0;
     }
 
     // Framework-specific checks

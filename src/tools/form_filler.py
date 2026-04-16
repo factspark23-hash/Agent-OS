@@ -56,15 +56,21 @@ class FormFiller:
         # Navigate to the job page
         try:
             nav_result = await self.browser.navigate(url)
-            if nav_result.get("status") != "success":
-                return nav_result
+            # browser.navigate() may return a dict or a string (URL)
+            if isinstance(nav_result, dict):
+                if nav_result.get("status") != "success":
+                    return nav_result
+            elif isinstance(nav_result, str):
+                # navigate() returned a URL string — navigation succeeded
+                pass
+            # If nav_result is None or unexpected, continue anyway
         except Exception as e:
             logger.error(f"Navigation failed for {url}: {e}")
             return {"status": "error", "error": f"Navigation failed: {e}"}
 
         # Detect all form fields
         try:
-            fields = await self.browser.evaluate_js("""() => {
+            raw_result = await self.browser.evaluate_js("""() => {
                 const fields = [];
                 document.querySelectorAll('input, textarea, select').forEach(el => {
                     if (el.type === 'hidden' || el.type === 'submit') return;
@@ -83,6 +89,16 @@ class FormFiller:
                 });
                 return fields;
             }""")
+            
+            # evaluate_js wraps result in {"status": "success", "result": [...]}
+            # Extract the actual fields array from the wrapper
+            if isinstance(raw_result, dict) and "result" in raw_result:
+                fields = raw_result["result"]
+            elif isinstance(raw_result, list):
+                fields = raw_result
+            else:
+                fields = []
+                
         except Exception as e:
             logger.error(f"Field detection failed: {e}")
             return {"status": "error", "error": f"Field detection failed: {e}"}
@@ -108,10 +124,18 @@ class FormFiller:
             logger.error(f"Form filling failed: {e}")
             return {"status": "error", "error": f"Form filling failed: {e}"}
 
+        # Handle both dict and string results from fill_form
+        if isinstance(result, dict):
+            filled_count = len(result.get("filled", []))
+        elif isinstance(result, str):
+            filled_count = len(fill_map)  # Assume all fields were attempted
+        else:
+            filled_count = 0
+
         return {
             "status": "success",
             "fields_detected": len(fields),
-            "fields_filled": len(result.get("filled", [])),
+            "fields_filled": filled_count,
             "fill_map": fill_map,
             "note": "Review before submitting — form filled but NOT submitted automatically"
         }

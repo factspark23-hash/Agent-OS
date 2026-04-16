@@ -475,6 +475,34 @@ Object.defineProperty(window, 'devicePixelRatio', {{
 // 8. WEBGL FINGERPRINT — Real GPU Data
 // ═══════════════════════════════════════════════════════════════
 
+// Override getExtension to return spoofed WEBGL_debug_renderer_info
+const origGetExtension = WebGLRenderingContext.prototype.getExtension;
+WebGLRenderingContext.prototype.getExtension = makeNative(function(name) {{
+    const ext = origGetExtension.call(this, name);
+    if (name === 'WEBGL_debug_renderer_info') {{
+        // Return a fake extension object with our vendor/renderer constants
+        return {{
+            UNMASKED_VENDOR_WEBGL: 37445,
+            UNMASKED_RENDERER_WEBGL: 37446
+        }};
+    }}
+    return ext;
+}}, 'getExtension');
+
+if (typeof WebGL2RenderingContext !== 'undefined' && WebGL2RenderingContext.prototype.getExtension) {{
+    const origGetExtension2 = WebGL2RenderingContext.prototype.getExtension;
+    WebGL2RenderingContext.prototype.getExtension = makeNative(function(name) {{
+        const ext = origGetExtension2.call(this, name);
+        if (name === 'WEBGL_debug_renderer_info') {{
+            return {{
+                UNMASKED_VENDOR_WEBGL: 37445,
+                UNMASKED_RENDERER_WEBGL: 37446
+            }};
+        }}
+        return ext;
+    }}, 'getExtension');
+}}
+
 const origGetParam = WebGLRenderingContext.prototype.getParameter;
 const origGetParam2 = typeof WebGL2RenderingContext !== 'undefined'
     ? WebGL2RenderingContext.prototype.getParameter
