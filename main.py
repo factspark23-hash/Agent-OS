@@ -398,6 +398,7 @@ def parse_args():
     parser.add_argument("--no-json-logs", action="store_true", help="Alias for default behavior (console logging)")
     parser.add_argument("--log-level", type=str, choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="Log level")
     parser.add_argument("--create-tables", action="store_true", help="Create database tables on startup")
+    parser.add_argument("--setup", action="store_true", help="Run interactive setup wizard (optional API keys)")
     return parser.parse_args()
 
 
@@ -407,6 +408,14 @@ async def main():
     # Handle --no-json-logs override
     if args.no_json_logs:
         args.json_logs = False
+
+    # Run setup wizard if requested or first launch
+    if args.setup:
+        from src.setup.wizard import run_setup_if_needed
+        run_setup_if_needed(force=True)
+    else:
+        from src.setup.wizard import run_setup_if_needed
+        run_setup_if_needed(non_interactive=True)
 
     app = AgentOS(args)
 

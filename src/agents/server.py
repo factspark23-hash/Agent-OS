@@ -57,6 +57,7 @@ class AgentServer:
         self._proxy_manager = None
         self._smart_nav = None
         self._web_query_router = None
+        self._web_router = None  # Web-Need Router (lazy init)
         self._login_handoff = None  # Login Handoff Manager (lazy init)
 
         # Agent Swarm (lazy init, thread-safe)
@@ -262,6 +263,9 @@ class AgentServer:
         self._http_app.router.add_get("/status", self._handle_status)
         self._http_app.router.add_get("/health", self._handle_health)
         self._http_app.router.add_get("/commands", self._handle_commands_list)
+
+        # Web-Need Router endpoint (no auth — zero-cost, lightweight)
+        self._http_app.router.add_post("/route", self._handle_route)
 
         # Auth endpoints
         self._http_app.router.add_post("/auth/register", self._handle_register)
@@ -778,6 +782,9 @@ class AgentServer:
         if self.persistent_manager:
             ph = self.persistent_manager.get_health()
             status["persistent_browser"] = ph.get("summary", {})
+        # Web-Need Router stats
+        if self._web_router:
+            status["web_router"] = self._web_router.get_stats()
         return web.json_response(status)
 
     async def _handle_health(self, request: web.Request) -> web.Response:
@@ -1633,6 +1640,10 @@ class AgentServer:
     async def _execute_command(self, command: str, data: Dict, session) -> Dict:
         """Route command to appropriate handler."""
         handlers = {
+            # Web-Need Router
+            "route": self._cmd_route,
+            "route-stats": self._cmd_route_stats,
+            # Navigation
             "navigate": self._cmd_navigate,
             "fetch": self._cmd_fetch,
             "smart-navigate": self._cmd_smart_navigate,
@@ -1706,6 +1717,8 @@ class AgentServer:
             "page-phones": self._cmd_page_phones,
             "page-accessibility": self._cmd_page_accessibility,
             "page-seo": self._cmd_page_seo,
+            # AI-Structured Content
+            "ai-content": self._cmd_ai_content,
             # Proxy
             "set-proxy": self._cmd_set_proxy,
             "get-proxy": self._cmd_get_proxy,
@@ -1888,6 +1901,13 @@ class AgentServer:
 
     # ─── Command Handlers (same as before) ──────────────────
 
+    def _get_web_router(self):
+        """Lazy-init WebNeedRouter."""
+        if self._web_router is None:
+            from src.agents.web_need_router import WebNeedRouter
+            self._web_router = WebNeedRouter(self.config._data if hasattr(self.config, '_data') else {})
+        return self._web_router
+
     def _get_smart_nav(self):
         """Lazy-init SmartNavigator."""
         if self._smart_nav is None:
@@ -1994,6 +2014,50 @@ class AgentServer:
     async def _cmd_router_stats(self, data: Dict, session) -> Dict:
         """Get classification statistics from the Web Query Router."""
         router = self._get_web_query_router()
+        return {"status": "success", **router.stats()}
+
+    # ─── Web-Need Router Command ────────────────────────────
+
+    async def _handle_route(self, request: web.Request) -> web.Response:
+        """POST /route — Decide if a query needs web access. Zero-cost, no auth required."""
+        try:
+            data = await request.json()
+        except Exception:
+            return web.json_response(
+                {"status": "error", "error": "Invalid JSON body"},
+                status=400, headers=self._get_cors_headers(),
+            )
+
+        query = data.get("query", "").strip()
+        if not query:
+            return web.json_response(
+                {"status": "error", "error": "Missing 'query' field"},
+                status=400, headers=self._get_cors_headers(),
+            )
+
+        context = data.get("context", "")
+        router = self._get_web_router()
+        result = router.route(query, context if context else None)
+
+        return web.json_response(
+            {"status": "success", **result.to_dict()},
+            headers=self._get_cors_headers(),
+        )
+
+    async def _cmd_route(self, data: Dict, session) -> Dict:
+        """Command handler for 'route' — decide if query needs web access."""
+        query = data.get("query", "").strip()
+        if not query:
+            return {"status": "error", "error": "Missing 'query'"}
+
+        context = data.get("context", "")
+        router = self._get_web_router()
+        result = router.route(query, context if context else None)
+        return {"status": "success", **result.to_dict()}
+
+    async def _cmd_route_stats(self, data: Dict, session) -> Dict:
+        """Command handler for 'route-stats' — get router statistics."""
+        router = self._get_web_router()
         return {"status": "success", **router.get_stats()}
 
     async def _cmd_navigate(self, data: Dict, session) -> Dict:
@@ -2072,6 +2136,7 @@ class AgentServer:
             url,
             prefer_browser=data.get("prefer_browser", False),
             max_retries=data.get("max_retries", 3),
+            ai_format=data.get("ai_format", False),
         )
 
     async def _cmd_nav_stats(self, data: Dict, session) -> Dict:
@@ -2495,6 +2560,63 @@ class AgentServer:
     async def _cmd_page_seo(self, data: Dict, session) -> Dict:
         from src.tools.page_analyzer import PageAnalyzer
         return await PageAnalyzer(self.browser).seo_audit(page_id=data.get("page_id", "main"))
+
+    # ─── AI-Structured Content ─────────────────────────────
+
+    async def _cmd_ai_content(self, data: Dict, session) -> Dict:
+        """
+        Extract AI-structured content from the current page or a URL.
+
+        Two modes:
+        1. Current page: pass page_id (extracts from browser DOM)
+        2. URL fetch: pass url (smart-navigate + extract in one step)
+
+        Returns symmetrical JSON with:
+        - content_type (article, product, listing, etc.)
+        - main_text (deduplicated clean text)
+        - headings, tables, lists, code_blocks, forms
+        - links, images, emails, phones, prices
+        - schema_org, open_graph, meta
+        - summary (2-3 sentence extractive summary)
+
+        No external AI API needed — pure DOM analysis + heuristics.
+        """
+        from src.tools.ai_content import AIContentExtractor
+
+        extractor = AIContentExtractor()
+
+        # Mode 1: Extract from current browser page
+        page_id = data.get("page_id")
+        if page_id or not data.get("url"):
+            return await extractor.extract_from_browser(
+                self.browser, page_id=page_id or "main"
+            )
+
+        # Mode 2: Fetch URL and extract (smart-navigate + extract)
+        url = data.get("url")
+        if url:
+            smart = self._get_smart_nav()
+            nav_result = await smart.navigate(
+                url,
+                prefer_browser=data.get("prefer_browser", False),
+                max_retries=data.get("max_retries", 3),
+                ai_format=True,
+            )
+            # If ai_content already extracted by smart-navigate, return it
+            if "ai_content" in nav_result:
+                return {
+                    "status": "success",
+                    "data": nav_result["ai_content"],
+                    "strategy_used": nav_result.get("strategy_used"),
+                    "response_time_ms": nav_result.get("response_time_ms"),
+                }
+            # Fallback: if navigation succeeded but no ai_content, extract now
+            if nav_result.get("status") == "success":
+                return await extractor.extract_from_browser(self.browser, page_id="main")
+
+            return nav_result
+
+        return {"status": "error", "error": "Provide either 'url' or 'page_id'"}
 
     # ─── Proxy ─────────────────────────────────────────────
 

@@ -3,6 +3,9 @@ Agent-OS Smart Navigator
 Intelligent URL fetcher that picks the right strategy (HTTP vs browser)
 per domain, retries on failure with escalating delays, and caches
 which approach works for each site.
+
+Supports ai_format=True to return AI-structured data instead of
+raw HTML/text — same symmetrical JSON regardless of fetch strategy.
 """
 import asyncio
 import logging
@@ -67,6 +70,7 @@ class SmartNavigator:
     def __init__(self, browser: AgentBrowser) -> None:
         self._browser = browser
         self._tls_client = TLSClient()
+        self._ai_extractor = None  # Lazy init
         # Cache: domain -> "http" | "browser" (with TTL and cap)
         self._strategy_cache: Dict[str, str] = {}
         self._strategy_cache_times: Dict[str, float] = {}
@@ -161,7 +165,8 @@ class SmartNavigator:
             else:
                 self._stats[domain]["http_fail"] += 1
 
-            return {
+            # Build base response
+            response = {
                 "status": "success" if ok else "error",
                 "url": result.get("url", url),
                 "strategy_used": "http",
@@ -175,6 +180,22 @@ class SmartNavigator:
                 "curl_cffi": self._tls_client.available,
                 "error": result.get("error"),
             }
+
+            # If ai_format requested, transform raw content into structured JSON
+            if ok and getattr(self, '_ai_format', False) and result.get("text"):
+                try:
+                    extractor = self._get_ai_extractor()
+                    ai_result = await extractor.extract_from_html(
+                        result.get("html", ""), url=result.get("url", url)
+                    )
+                    if ai_result.get("status") == "success":
+                        response["ai_content"] = ai_result["data"]
+                        # Replace raw content with clean main_text
+                        response["content"] = ai_result["data"].get("main_text", response["content"])
+                except Exception as exc:
+                    logger.warning("AI content extraction failed for %s: %s", url, exc)
+
+            return response
 
         except Exception as exc:
             elapsed_ms = (time.monotonic() - start_ms) * 1000.0
@@ -241,7 +262,8 @@ class SmartNavigator:
             text = content_result.get("text", "") if isinstance(content_result, dict) else ""
             title = content_result.get("title", "") if isinstance(content_result, dict) else ""
 
-            return {
+            # Build base response
+            response = {
                 "status": "success" if (nav_ok and not blocked) else "error",
                 "url": nav_result.get("url", url),
                 "strategy_used": "browser",
@@ -254,6 +276,19 @@ class SmartNavigator:
                 "block_report": nav_result.get("block_report"),
                 "error": nav_result.get("error"),
             }
+
+            # If ai_format requested, extract structured data from browser DOM
+            if nav_ok and not blocked and getattr(self, '_ai_format', False):
+                try:
+                    extractor = self._get_ai_extractor()
+                    ai_result = await extractor.extract_from_browser(self._browser, page_id="main")
+                    if ai_result.get("status") == "success":
+                        response["ai_content"] = ai_result["data"]
+                        response["content"] = ai_result["data"].get("main_text", text)
+                except Exception as exc:
+                    logger.warning("AI content extraction failed for %s: %s", url, exc)
+
+            return response
 
         except Exception as exc:
             elapsed_ms = (time.monotonic() - start_ms) * 1000.0
@@ -302,11 +337,19 @@ class SmartNavigator:
 
     # ── Main Entry Point ───────────────────────────────────────
 
+    def _get_ai_extractor(self):
+        """Lazy-initialize AI content extractor."""
+        if self._ai_extractor is None:
+            from src.tools.ai_content import AIContentExtractor
+            self._ai_extractor = AIContentExtractor()
+        return self._ai_extractor
+
     async def navigate(
         self,
         url: str,
         prefer_browser: bool = False,
         max_retries: int = 3,
+        ai_format: bool = False,
     ) -> Dict[str, Any]:
         """
         Smart navigate with automatic fallback and retry.
@@ -323,7 +366,15 @@ class SmartNavigator:
         - On 403 with browser: add 3s delay, retry once
         - On success: cache the winning strategy
         - After max_retries: return last response with blocked=True
+
+        Args:
+            url: Target URL to navigate to
+            prefer_browser: Force browser strategy on first attempt
+            max_retries: Maximum retry attempts (default: 3)
+            ai_format: Return AI-structured data instead of raw text
+                       (symmetrical JSON with deduplicated, typed content)
         """
+        self._ai_format = ai_format  # Store for use in _try_* methods
         self._total_navigations += 1
         domain = self._get_domain(url)
         strategy = self._pick_initial_strategy(url, prefer_browser)

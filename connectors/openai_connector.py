@@ -28,9 +28,32 @@ AGENT_TOKEN = os.environ.get("AGENT_OS_TOKEN", "openai-connector-default")
 # Single source of truth. Both OpenAI and Claude formats are generated from this.
 
 _TOOL_DEFS = [
+    # ─── Web-Need Router (use first before any browser tool!) ────
+    {
+        "name": "browser_route",
+        "description": (
+            "Decide whether a query needs web/browser access or can be answered from your own knowledge. "
+            "USE THIS FIRST before any browser tool to avoid unnecessary web requests. "
+            "Returns: needs_web (bool), action (answer_from_knowledge|search|browse|hybrid), "
+            "confidence, reason, suggested_commands, search_queries. "
+            "Rule-based, zero-cost, sub-millisecond."
+        ),
+        "params": {
+            "query": {"type": "string", "description": "The user question or task to analyze"},
+            "context": {"type": "string", "description": "Optional conversation context"},
+        },
+        "required": ["query"],
+    },
     {
         "name": "browser_navigate",
-        "description": "Navigate to a URL. Built-in anti-detection bypasses CAPTCHAs, reCAPTCHA, hCaptcha, Cloudflare Turnstile, and other bot protection.",
+        "description": (
+            "Navigate to a URL using a real Chromium browser with anti-detection. "
+            "USE WHEN: (1) Site requires login or JavaScript rendering, "
+            "(2) You need to click, fill forms, or interact, "
+            "(3) Site blocks simple HTTP requests (Instagram, Facebook, etc.). "
+            "DO NOT USE WHEN: (1) You only need to read a static article (use browser_fetch), "
+            "(2) The question is factual and answerable from knowledge (no browser needed)."
+        ),
         "params": {"url": {"type": "string", "description": "URL to navigate to"}},
         "required": ["url"],
     },
@@ -362,6 +385,7 @@ _TOOL_DEFS = [
 
 # Command map: tool name → (API command name, param keys)
 _COMMAND_MAP = {
+    "browser_route": ("route", ["query", "context"]),
     "browser_navigate": ("navigate", ["url"]),
     "browser_get_content": ("get-content", []),
     "browser_get_dom": ("get-dom", []),
@@ -484,7 +508,7 @@ def get_tools(format: str = "openai") -> List[Dict]:
 
 
 def get_all_tool_names() -> List[str]:
-    """Return the names of all 38 available tools."""
+    """Return the names of all available tools."""
     return [t["name"] for t in _TOOL_DEFS]
 
 

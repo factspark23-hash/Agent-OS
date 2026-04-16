@@ -32,9 +32,35 @@ server = Server("agent-os")
 # ─── Tool Definitions ─────────────────────────────────────────
 
 TOOLS = [
+    # ─── Web-Need Router (always available, use first!) ────────
+    Tool(
+        name="browser_route",
+        description=(
+            "Decide whether a query needs web/browser access or can be answered from your own knowledge. "
+            "USE THIS FIRST before any browser tool to avoid unnecessary web requests. "
+            "Returns: needs_web (bool), action (answer_from_knowledge|search|browse|hybrid), "
+            "confidence, reason, suggested_commands, search_queries. "
+            "Rule-based, zero-cost, sub-millisecond."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "The user's question or task to analyze"},
+                "context": {"type": "string", "description": "Optional conversation context for better routing"}
+            },
+            "required": ["query"]
+        }
+    ),
     Tool(
         name="browser_navigate",
-        description="Navigate to a URL. The browser has built-in anti-detection to bypass CAPTCHAs and bot protection.",
+        description=(
+            "Navigate to a URL using a real Chromium browser with anti-detection. "
+            "USE WHEN: (1) Site requires login or JavaScript rendering, "
+            "(2) You need to click, fill forms, or interact, "
+            "(3) Site blocks simple HTTP requests (Instagram, Facebook, etc.). "
+            "DO NOT USE WHEN: (1) You only need to read a static article (use browser_fetch), "
+            "(2) The question is factual and answerable from knowledge (no browser needed)."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
@@ -45,8 +71,14 @@ TOOLS = [
     ),
     Tool(
         name="browser_fetch",
-        description="Fetch a URL using Chrome-impersonating HTTP client. "
-        "Bypasses TLS fingerprinting. Returns page title and text.",
+        description=(
+            "Fetch a URL using a fast Chrome-impersonating HTTP client (no browser launched). "
+            "Bypasses TLS fingerprinting. Returns page title and text. "
+            "USE WHEN: (1) You need to read a webpage's content (article, docs, blog), "
+            "(2) The page is mostly static text, (3) Speed matters and no interaction needed. "
+            "DO NOT USE WHEN: (1) Site requires JavaScript rendering, "
+            "(2) You need to log in or interact, (3) Site has bot detection."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
@@ -57,9 +89,12 @@ TOOLS = [
     ),
     Tool(
         name="browser_smart_navigate",
-        description="Smart navigate with automatic strategy selection. "
-        "Tries HTTP first (fast), falls back to browser for JS-heavy or blocked sites. "
-        "Retries with delays on rate limits. Returns strategy used and response time.",
+        description=(
+            "Smart navigate with automatic strategy selection. "
+            "Tries HTTP first (fast), falls back to browser for JS-heavy or blocked sites. "
+            "Retries with delays on rate limits. Returns strategy used and response time. "
+            "PREFER THIS over browser_navigate when you're unsure whether a site needs a real browser."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
@@ -534,6 +569,7 @@ async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[TextCon
     logger.info(f"Tool call: {name}({json.dumps(arguments)[:200]})")
 
     command_map = {
+        "browser_route": ("route", ["query", "context"]),
         "browser_navigate": ("navigate", ["url"]),
         "browser_fetch": ("fetch", ["url"]),
         "browser_smart_navigate": ("smart-navigate", ["url", "prefer_browser", "max_retries"]),
