@@ -226,8 +226,24 @@ class AgentServer:
             except Exception as e:
                 logger.error(f"Rate limit cleanup error: {e}")
 
+    # Default allowed CORS origins: localhost variants for development.
+    # In production, set server.cors_allowed_origins to specific domains.
+    _DEFAULT_CORS_ORIGINS = {
+        "http://localhost", "http://localhost:3000", "http://localhost:8080",
+        "http://localhost:8001", "http://localhost:8002", "http://localhost:5173",
+        "http://127.0.0.1", "http://127.0.0.1:3000", "http://127.0.0.1:8080",
+        "http://127.0.0.1:8001", "http://127.0.0.1:8002", "http://127.0.0.1:5173",
+        "http://0.0.0.0:8001", "http://0.0.0.0:8002",
+    }
+
     def _get_cors_headers(self, request=None) -> Dict[str, str]:
-        """Return CORS headers for API responses. Uses configured allowed origins."""
+        """Return CORS headers for API responses. Uses configured allowed origins.
+
+        Priority:
+        1. Explicit server.cors_allowed_origins list (production)
+        2. Explicit server.cors_origin string (single origin)
+        3. Default localhost development origins
+        """
         allowed_origins = self.config.get("server.cors_allowed_origins", [])
         cors_origin = self.config.get("server.cors_origin", "")
 
@@ -238,9 +254,15 @@ class AgentServer:
                 cors_origin = origin
             else:
                 cors_origin = ""  # Reject — no CORS header set
-        elif not cors_origin:
-            # Default: deny cross-origin if nothing configured
-            cors_origin = ""
+        elif cors_origin:
+            # Single origin configured — use as-is
+            pass
+        elif request:
+            # No explicit config — allow localhost development origins
+            origin = request.headers.get("Origin", "")
+            if origin in self._DEFAULT_CORS_ORIGINS:
+                cors_origin = origin
+            # Non-localhost origins without config: no CORS header (secure default)
 
         headers = {
             "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
@@ -1861,6 +1883,8 @@ class AgentServer:
             "login-handoff-list": self._cmd_login_handoff_list,
             "login-handoff-history": self._cmd_login_handoff_history,
             "login-handoff-stats": self._cmd_login_handoff_stats,
+            # Status
+            "health": self._cmd_health,
         }
 
         handler = handlers.get(command)
@@ -3499,6 +3523,62 @@ class AgentServer:
         """Get handoff statistics (success rate, per-domain stats)."""
         handoff = self._get_login_handoff()
         return {"status": "success", **handoff.get_stats()}
+
+    # ─── Health Check (command-level) ─────────────────────────
+
+    async def _cmd_health(self, data: Dict, session) -> Dict:
+        """Deep health check — server, browser, database, redis, sessions."""
+        checks = {"server": "healthy"}
+        uptime = time.time() - self._start_time
+
+        # Database health
+        try:
+            from src.infra.database import get_db
+            db = get_db()
+            db_health = await db.health_check()
+            checks["database"] = db_health["status"]
+        except Exception:
+            checks["database"] = "not_configured"
+
+        # Redis health
+        if self.redis:
+            redis_health = await self.redis.health_check()
+            checks["redis"] = redis_health["status"]
+            checks["redis_mode"] = redis_health.get("mode", "unknown")
+        else:
+            checks["redis"] = "not_configured"
+
+        # Browser health
+        if self.browser.browser:
+            try:
+                if self.browser.page:
+                    await self.browser.page.title()
+                checks["browser"] = "healthy"
+            except Exception as e:
+                checks["browser"] = f"degraded: {e}"
+        else:
+            checks["browser"] = "not_running"
+
+        # Sessions
+        active_sessions = len(self.session_manager._sessions) if hasattr(self.session_manager, '_sessions') else 0
+        ws_clients = len(self._ws_clients)
+
+        overall = "healthy" if all(
+            v in ("healthy", "not_configured") for v in checks.values()
+        ) else "degraded"
+
+        return {
+            "status": overall,
+            "version": __version__,
+            "uptime_seconds": round(uptime, 1),
+            "checks": checks,
+            "sessions": {
+                "active": active_sessions,
+                "ws_clients": ws_clients,
+            },
+            "browser_engine": "patchright",
+            "timestamp": time.time(),
+        }
 
     # ─── Login Handoff REST API Handlers ──────────────────────
 

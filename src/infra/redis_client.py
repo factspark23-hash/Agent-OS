@@ -117,6 +117,11 @@ class RedisClient:
         self._fallback_on_failure = fallback_on_failure
         self._connected = False
 
+    @property
+    def is_fallback(self) -> bool:
+        """True if using in-memory fallback instead of real Redis."""
+        return self._use_fallback
+
     async def connect(self):
         """Connect to Redis, fall back to in-memory if unavailable."""
         try:
@@ -135,7 +140,12 @@ class RedisClient:
             logger.info(f"Connected to Redis: {self.url}")
         except Exception as e:
             if self._fallback_on_failure:
-                logger.warning(f"Redis unavailable ({e}), using in-memory fallback")
+                logger.warning(
+                    f"Redis unavailable ({e}). "
+                    f"Using in-memory fallback — rate limiting and distributed features "
+                    f"will work per-process only (not shared across instances). "
+                    f"For production multi-instance deployments, configure Redis."
+                )
                 self._use_fallback = True
                 self._connected = True
             else:
