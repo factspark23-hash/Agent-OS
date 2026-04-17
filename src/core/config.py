@@ -103,6 +103,42 @@ DEFAULT_CONFIG = {
         "output_format": "json",
         "max_results": 10,
     },
+    "captcha_preempt": {
+        "enabled": True,
+        "mode": "moderate",  # aggressive, moderate, passive
+        "shutdown_timeout_ms": 2000,
+        "data_rescue": True,
+        "monitor_interval_ms": 500,
+        "preflight_check": True,
+    },
+    "llm_provider": {
+        "enabled": True,
+        "provider": "auto",  # auto, openai, anthropic, google, xai, mistral, deepseek, groq, together, ollama, azure, bedrock
+        "model": None,
+        "api_key": None,
+        "base_url": None,
+        "max_retries": 3,
+        "timeout": 30.0,
+        "cache_size": 1024,
+        "compression_aggression": 0.5,  # 0.0 (none) to 1.0 (maximum)
+    },
+    "token_budget": {
+        "enabled": True,
+        "max_total_tokens": 1_000_000,
+        "warning_threshold": 0.8,  # Warn at 80% usage
+        "auto_truncate": True,
+        "save_cache_hits": True,
+        "save_compression": True,
+    },
+    "ai_structured_output": {
+        "enabled": True,
+        "auto_normalize": True,
+        "auto_deduplicate": True,
+        "generate_schema": True,
+        "cross_page_dedup": True,
+        "merge_threshold": 0.85,  # Similarity threshold for near-duplicate merging
+        "output_format": "json",  # json, markdown, csv, xml, flat_dict
+    },
     "transcription": {
         "model": "tiny",
         "language": "auto"

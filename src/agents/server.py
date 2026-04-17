@@ -1719,6 +1719,26 @@ class AgentServer:
             "page-seo": self._cmd_page_seo,
             # AI-Structured Content
             "ai-content": self._cmd_ai_content,
+            # Captcha Preemption
+            "captcha-assess": self._cmd_captcha_assess,
+            "captcha-preflight": self._cmd_captcha_preflight,
+            "captcha-monitor-start": self._cmd_captcha_monitor_start,
+            "captcha-monitor-stop": self._cmd_captcha_monitor_stop,
+            "captcha-health": self._cmd_captcha_health,
+            "captcha-shutdown": self._cmd_captcha_shutdown,
+            # LLM Provider
+            "llm-complete": self._cmd_llm_complete,
+            "llm-classify": self._cmd_llm_classify,
+            "llm-extract": self._cmd_llm_extract,
+            "llm-summarize": self._cmd_llm_summarize,
+            "llm-provider-set": self._cmd_llm_provider_set,
+            "llm-token-usage": self._cmd_llm_token_usage,
+            "llm-cache-clear": self._cmd_llm_cache_clear,
+            # AI Structured Output
+            "structured-extract": self._cmd_structured_extract,
+            "structured-deduplicate": self._cmd_structured_deduplicate,
+            "structured-schema": self._cmd_structured_schema,
+            "structured-format": self._cmd_structured_format,
             # Proxy
             "set-proxy": self._cmd_set_proxy,
             "get-proxy": self._cmd_get_proxy,
@@ -2616,6 +2636,259 @@ class AgentServer:
 
         return {"status": "error", "error": "Provide either 'url' or 'page_id'"}
 
+    # ─── Captcha Preemption ─────────────────────────────────
+    async def _cmd_captcha_assess(self, data: Dict, session) -> Dict:
+        """Assess URL risk for captcha/bot detection before navigation."""
+        url = data.get("url")
+        if not url:
+            return {"status": "error", "error": "Missing 'url' parameter"}
+        try:
+            from src.security.captcha_preempt import CaptchaPreemptor
+            preemptor = CaptchaPreemptor(self.browser, config=self.config)
+            result = await preemptor.assess_url_risk(url)
+            return {"status": "success", "data": result}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def _cmd_captcha_preflight(self, data: Dict, session) -> Dict:
+        """Run pre-flight check for automation artifacts on current page."""
+        try:
+            from src.security.captcha_preempt import CaptchaPreemptor
+            preemptor = CaptchaPreemptor(self.browser, config=self.config)
+            result = await preemptor.preflight_check()
+            return {"status": "success", "data": result}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def _cmd_captcha_monitor_start(self, data: Dict, session) -> Dict:
+        """Start real-time captcha detection monitoring on current page."""
+        try:
+            from src.security.captcha_preempt import CaptchaPreemptor
+            preemptor = CaptchaPreemptor(self.browser, config=self.config)
+            mode = data.get("mode", "moderate")
+            result = await preemptor.start_monitoring(mode=mode)
+            return {"status": "success", "data": result}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def _cmd_captcha_monitor_stop(self, data: Dict, session) -> Dict:
+        """Stop captcha detection monitoring."""
+        try:
+            from src.security.captcha_preempt import CaptchaPreemptor
+            preemptor = CaptchaPreemptor(self.browser, config=self.config)
+            result = await preemptor.stop_monitoring()
+            return {"status": "success", "data": result}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def _cmd_captcha_health(self, data: Dict, session) -> Dict:
+        """Check current page health for captcha/bot detection indicators."""
+        try:
+            from src.security.captcha_preempt import CaptchaPreemptor
+            preemptor = CaptchaPreemptor(self.browser, config=self.config)
+            result = await preemptor.check_page_health()
+            return {"status": "success", "data": result}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def _cmd_captcha_shutdown(self, data: Dict, session) -> Dict:
+        """Emergency shutdown current page — rescue data, disable network, navigate to about:blank."""
+        try:
+            from src.security.captcha_preempt import CaptchaPreemptor
+            preemptor = CaptchaPreemptor(self.browser, config=self.config)
+            result = await preemptor.shutdown_page(reason=data.get("reason", "manual"))
+            return {"status": "success", "data": result}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    # ─── LLM Provider ───────────────────────────────────────
+    async def _cmd_llm_complete(self, data: Dict, session) -> Dict:
+        """Complete text using LLM with token saving."""
+        prompt = data.get("prompt")
+        if not prompt:
+            return {"status": "error", "error": "Missing 'prompt' parameter"}
+        try:
+            from src.core.llm_provider import get_llm
+            llm = get_llm()
+            result = await llm.complete(
+                prompt,
+                system_prompt=data.get("system_prompt"),
+                max_tokens=data.get("max_tokens", 1000),
+                temperature=data.get("temperature", 0.7),
+            )
+            return result
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def _cmd_llm_classify(self, data: Dict, session) -> Dict:
+        """Classify text using LLM with token saving."""
+        text = data.get("text")
+        categories = data.get("categories", [])
+        if not text:
+            return {"status": "error", "error": "Missing 'text' parameter"}
+        try:
+            from src.core.llm_provider import get_llm
+            llm = get_llm()
+            result = await llm.classify(text, categories)
+            return result
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def _cmd_llm_extract(self, data: Dict, session) -> Dict:
+        """Extract structured data using LLM with token saving."""
+        text = data.get("text")
+        schema = data.get("schema", {})
+        if not text:
+            return {"status": "error", "error": "Missing 'text' parameter"}
+        try:
+            from src.core.llm_provider import get_llm
+            llm = get_llm()
+            result = await llm.extract(text, schema)
+            return result
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def _cmd_llm_summarize(self, data: Dict, session) -> Dict:
+        """Summarize text using LLM with token saving."""
+        text = data.get("text")
+        if not text:
+            return {"status": "error", "error": "Missing 'text' parameter"}
+        try:
+            from src.core.llm_provider import get_llm
+            llm = get_llm()
+            result = await llm.summarize(
+                text,
+                max_length=data.get("max_length", 500),
+                style=data.get("style", "concise"),
+            )
+            return result
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def _cmd_llm_provider_set(self, data: Dict, session) -> Dict:
+        """Switch LLM provider at runtime."""
+        provider = data.get("provider")
+        if not provider:
+            return {"status": "error", "error": "Missing 'provider' parameter"}
+        try:
+            from src.core.llm_provider import get_llm
+            llm = get_llm()
+            llm.set_provider(
+                provider=provider,
+                api_key=data.get("api_key"),
+                base_url=data.get("base_url"),
+                model=data.get("model"),
+            )
+            return {"status": "success", "provider": provider, "model": llm.model}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def _cmd_llm_token_usage(self, data: Dict, session) -> Dict:
+        """Get LLM token usage statistics."""
+        try:
+            from src.core.llm_provider import get_llm
+            llm = get_llm()
+            return {"status": "success", "data": llm.get_token_usage()}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def _cmd_llm_cache_clear(self, data: Dict, session) -> Dict:
+        """Clear LLM response cache."""
+        try:
+            from src.core.llm_provider import get_llm
+            llm = get_llm()
+            llm.cache.clear()
+            return {"status": "success", "message": "LLM cache cleared"}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    # ─── AI Structured Output ────────────────────────────────
+    async def _cmd_structured_extract(self, data: Dict, session) -> Dict:
+        """Extract and normalize structured data from page or text."""
+        try:
+            from src.tools.ai_content import AIStructuredOutput
+            text = data.get("text")
+            url = data.get("url")
+            if text:
+                from src.tools.ai_content import AIContentExtractor
+                extractor = AIContentExtractor()
+                content_result = await extractor.extract_from_html(text)
+                if content_result.get("status") != "success":
+                    return content_result
+                ai_content = content_result.get("data")
+            elif url:
+                nav_result = await self.browser.navigate(url)
+                from src.tools.ai_content import AIContentExtractor
+                extractor = AIContentExtractor()
+                content_result = await extractor.extract_from_browser(self.browser)
+                if content_result.get("status") != "success":
+                    return content_result
+                ai_content = content_result.get("data")
+            else:
+                from src.tools.ai_content import AIContentExtractor
+                extractor = AIContentExtractor()
+                content_result = await extractor.extract_from_browser(self.browser)
+                if content_result.get("status") != "success":
+                    return content_result
+                ai_content = content_result.get("data")
+
+            structured = AIStructuredOutput()
+            result = structured.process(ai_content)
+            return {"status": "success", "data": result}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def _cmd_structured_deduplicate(self, data: Dict, session) -> Dict:
+        """Deduplicate structured data across pages."""
+        try:
+            from src.tools.ai_content import CrossPageDeduplicator
+            pages = data.get("pages", [])
+            if not pages:
+                return {"status": "error", "error": "Missing 'pages' parameter (list of page data)"}
+            dedup = CrossPageDeduplicator()
+            for i, page_data in enumerate(pages):
+                dedup.add_page(f"page_{i}", page_data)
+            result = dedup.get_deduplicated()
+            conflicts = dedup.get_conflicts()
+            return {"status": "success", "data": result, "conflicts": conflicts}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def _cmd_structured_schema(self, data: Dict, session) -> Dict:
+        """Generate schema.org structured data from content."""
+        try:
+            from src.tools.ai_content import AIStructuredOutput
+            content = data.get("content", {})
+            schema_type = data.get("schema_type", "auto")
+            structured = AIStructuredOutput()
+            result = structured.generate_schema(content, schema_type=schema_type)
+            return {"status": "success", "data": result}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def _cmd_structured_format(self, data: Dict, session) -> Dict:
+        """Format structured data in various output formats."""
+        try:
+            from src.tools.ai_content import OutputFormatter
+            data_content = data.get("data", {})
+            output_format = data.get("format", "json")
+            formatter = OutputFormatter()
+            if output_format == "json":
+                result = formatter.to_json(data_content, pretty=data.get("pretty", True))
+            elif output_format == "markdown":
+                result = formatter.to_markdown(data_content)
+            elif output_format == "csv":
+                result = formatter.to_csv(data_content)
+            elif output_format == "xml":
+                result = formatter.to_xml(data_content)
+            elif output_format == "flat_dict":
+                result = formatter.to_flat_dict(data_content)
+            else:
+                return {"status": "error", "error": f"Unknown format: {output_format}"}
+            return {"status": "success", "data": result, "format": output_format}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
     # ─── Proxy ─────────────────────────────────────────────
 
     async def _cmd_set_proxy(self, data: Dict, session) -> Dict:
@@ -3361,4 +3634,21 @@ class AgentServer:
             "login-handoff-list": {"params": {"state": "string", "user_id": "string"}, "description": "List all handoff sessions"},
             "login-handoff-history": {"params": {"limit": "int"}, "description": "Get completed handoff history"},
             "login-handoff-stats": {"params": {}, "description": "Get handoff statistics (success rate, per-domain stats)"},
+            "captcha-assess": {"params": {"url": "string"}, "description": "Assess URL risk for captcha/bot detection before navigation"},
+            "captcha-preflight": {"params": {}, "description": "Run pre-flight check for automation artifacts on current page"},
+            "captcha-monitor-start": {"params": {"mode": "aggressive|moderate|passive"}, "description": "Start real-time captcha detection monitoring"},
+            "captcha-monitor-stop": {"params": {}, "description": "Stop captcha detection monitoring"},
+            "captcha-health": {"params": {}, "description": "Check page health for captcha/bot detection indicators"},
+            "captcha-shutdown": {"params": {"reason": "string"}, "description": "Emergency shutdown page — rescue data, disable network, navigate to about:blank"},
+            "llm-complete": {"params": {"prompt": "string", "system_prompt": "string", "max_tokens": "int", "temperature": "float"}, "description": "Complete text using LLM with token saving"},
+            "llm-classify": {"params": {"text": "string", "categories": "list"}, "description": "Classify text using LLM with token saving"},
+            "llm-extract": {"params": {"text": "string", "schema": "dict"}, "description": "Extract structured data using LLM with token saving"},
+            "llm-summarize": {"params": {"text": "string", "max_length": "int", "style": "concise|detailed"}, "description": "Summarize text using LLM with token saving"},
+            "llm-provider-set": {"params": {"provider": "string", "api_key": "string", "base_url": "string", "model": "string"}, "description": "Switch LLM provider at runtime"},
+            "llm-token-usage": {"params": {}, "description": "Get LLM token usage statistics"},
+            "llm-cache-clear": {"params": {}, "description": "Clear LLM response cache"},
+            "structured-extract": {"params": {"text": "string", "url": "string"}, "description": "Extract and normalize structured data from page or text"},
+            "structured-deduplicate": {"params": {"pages": "list"}, "description": "Deduplicate structured data across pages"},
+            "structured-schema": {"params": {"content": "dict", "schema_type": "string"}, "description": "Generate schema.org structured data"},
+            "structured-format": {"params": {"data": "dict", "format": "json|markdown|csv|xml|flat_dict"}, "description": "Format structured data in various output formats"},
         }
