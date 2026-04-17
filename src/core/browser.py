@@ -2078,6 +2078,28 @@ class AgentBrowser:
             el.value = value;
         }
 
+        // React __reactEventHandlers onChange dispatch
+        // For React controlled components, dispatch onChange via internal handlers
+        // so React updates its internal state and doesn't overwrite our value
+        try {
+            const reactKey = Object.keys(el).find(k => k.startsWith('__reactEventHandlers') || k.startsWith('__reactFiber$'));
+            if (reactKey) {
+                const handlers = el[reactKey];
+                const onChange = handlers?.onChange || handlers?.onChangeCapture;
+                if (typeof onChange === 'function') {
+                    const syntheticEvent = {
+                        target: el, currentTarget: el, type: 'change',
+                        bubbles: true, cancelable: true, defaultPrevented: false,
+                        preventDefault() { this.defaultPrevented = true; },
+                        stopPropagation() {},
+                        nativeEvent: new Event('change', { bubbles: true }),
+                        persist() {},
+                    };
+                    onChange(syntheticEvent);
+                }
+            }
+        } catch(_) {}
+
         // Full event chain: input -> change -> blur -> focus
         el.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: value }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -2138,7 +2160,43 @@ class AgentBrowser:
             return { ok: true, actual: el.value, expected: expectedValue, method: 'direct_value' };
         }
 
-        // Strategy 3: Object.defineProperty nuclear override + events
+        // Strategy 3: React __reactEventHandlers onChange dispatch
+        // React controlled components intercept onChange via internal event handlers
+        // stored in __reactEventHandlers or __reactFiber properties. Dispatching
+        // a synthetic change event through these handlers tells React to update
+        // its internal state, preventing it from overwriting our value on re-render.
+        try {
+            const reactKey = Object.keys(el).find(k => k.startsWith('__reactEventHandlers') || k.startsWith('__reactFiber$'));
+            if (reactKey) {
+                const handlers = el[reactKey];
+                const onChange = handlers?.onChange || handlers?.onChangeCapture;
+                if (typeof onChange === 'function') {
+                    // Create a synthetic event object that React's onChange handler expects
+                    const syntheticEvent = {
+                        target: el,
+                        currentTarget: el,
+                        type: 'change',
+                        bubbles: true,
+                        cancelable: true,
+                        defaultPrevented: false,
+                        preventDefault() { this.defaultPrevented = true; },
+                        stopPropagation() {},
+                        nativeEvent: new Event('change', { bubbles: true }),
+                        persist() {},
+                    };
+                    el.value = expectedValue;
+                    onChange(syntheticEvent);
+                    // Also fire standard events for any non-React listeners
+                    el.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: expectedValue }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                    if (el.value === expectedValue) {
+                        return { ok: true, actual: el.value, expected: expectedValue, method: 'react_onchange' };
+                    }
+                }
+            }
+        } catch(_) {}
+
+        // Strategy 4: Object.defineProperty nuclear override + events
         try {
             Object.defineProperty(el, 'value', { value: expectedValue, writable: true, configurable: true });
             el.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: expectedValue }));

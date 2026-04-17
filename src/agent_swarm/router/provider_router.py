@@ -3,6 +3,12 @@
 Uses the SAME provider the user has configured (OpenAI, Anthropic, Google, etc.)
 for query classification. No separate LLM needed — the user's provider IS the brain.
 
+Now powered by UniversalProvider from src.core.llm_provider for:
+- Unified LLM access across all providers
+- Token saving (compression, caching, smart truncation)
+- Automatic fallback chain
+- Streaming support
+
 Production features:
 - LRU cache for repeated queries (512 entries)
 - Retry with exponential backoff (3 attempts)
@@ -10,8 +16,10 @@ Production features:
 - Graceful degradation when no provider configured
 - Thread-safe client creation
 - Only activates when user has explicitly configured a provider
+- Uses UniversalProvider for token-saving LLM calls
 """
 
+import asyncio
 import json
 import logging
 import hashlib
@@ -94,6 +102,7 @@ def _sanitize_query(query: str) -> str:
 
 # ─── Provider Detection ────────────────────────────────────────
 # Map provider names to their OpenAI-compatible base URLs and default models
+# Kept for backward compatibility; primary detection now uses UniversalProvider
 
 PROVIDER_CONFIGS = {
     "openai": {
@@ -142,12 +151,26 @@ PROVIDER_CONFIGS = {
 def _auto_detect_provider() -> Optional[dict]:
     """Auto-detect which provider the user has configured.
 
-    Checks environment variables for API keys. Returns the first
-    provider that has a valid key configured. If none found, returns None
-    (Tier 2 will be disabled, Tier 1 + Tier 3 still work fine).
-
-    This ensures we use the user's EXISTING provider — no extra setup needed.
+    Delegates to UniversalProvider's auto_detect_provider for expanded
+    provider support (Ollama, Azure, Bedrock, etc.). Falls back to
+    local PROVIDER_CONFIGS if UniversalProvider import fails.
     """
+    # Try UniversalProvider's expanded detection first
+    try:
+        from src.core.llm_provider import auto_detect_provider as universal_detect
+        detected = universal_detect()
+        if detected:
+            return {
+                "provider": detected.get("provider", "custom"),
+                "api_key": detected.get("api_key", ""),
+                "base_url": detected.get("base_url", ""),
+                "model": detected.get("model", ""),
+                "default_model": detected.get("model", ""),
+            }
+    except ImportError:
+        logger.debug("UniversalProvider not available, using local provider detection")
+
+    # Fallback to local detection
     for provider_name, config in PROVIDER_CONFIGS.items():
         api_key = _get_env_key(config["env_key"])
         if api_key:
@@ -157,6 +180,7 @@ def _auto_detect_provider() -> Optional[dict]:
                 "api_key": api_key,
                 "base_url": config["base_url"],
                 "model": config["default_model"],
+                "default_model": config["default_model"],
             }
     return None
 
@@ -175,6 +199,13 @@ class ProviderRouter:
     has already configured. If the user selected OpenAI, OpenAI is the brain.
     If they selected Anthropic, Claude is the brain. No extra LLM needed.
 
+    Now delegates LLM calls to UniversalProvider for token-saving benefits:
+    - Prompt compression
+    - Response caching (exact + similarity matching)
+    - Smart truncation
+    - Fallback chain
+    - Token budget tracking
+
     The router only activates when:
     1. User has an API key configured (via env vars or explicit config), OR
     2. User has explicitly set a provider via SWARM_PROVIDER_* env vars
@@ -188,7 +219,17 @@ class ProviderRouter:
     - Prompt injection protection
     - Thread-safe client creation
     - Auto-detection of user's configured provider from env vars
+    - UniversalProvider integration for token saving
     """
+
+    # Classification categories for the swarm router
+    CLASSIFICATION_CATEGORIES = [
+        "needs_web",
+        "needs_knowledge",
+        "needs_calculation",
+        "needs_code",
+        "ambiguous",
+    ]
 
     def __init__(
         self,
@@ -239,7 +280,7 @@ class ProviderRouter:
                         self.provider = detected["provider"]
                     logger.info(
                         f"Auto-detected provider: {detected['provider']} "
-                        f"(model: {detected['default_model']})"
+                        f"(model: {detected.get('default_model', detected.get('model', 'unknown'))})"
                     )
 
         # If we still don't have credentials, Tier 2 will be unavailable
@@ -250,7 +291,27 @@ class ProviderRouter:
                 "Tier 1 (rule-based) + Tier 3 (conservative) will handle all routing."
             )
 
-        # Initialize cache
+        # Initialize UniversalProvider for token-saving LLM calls
+        self._universal_provider = None
+        try:
+            from src.core.llm_provider import UniversalProvider, TokenBudget
+            self._universal_provider = UniversalProvider(
+                provider=self.provider,
+                api_key=self.api_key,
+                base_url=self.base_url,
+                model=self.model,
+                max_retries=max_retries,
+                timeout=timeout,
+                budget=TokenBudget(max_total_tokens=500_000),
+                cache_size=cache_size,
+                compression_aggression=0.3,  # Light compression for classification prompts
+            )
+            if self._universal_provider.is_available:
+                logger.info("ProviderRouter using UniversalProvider for token-saving classification")
+        except ImportError:
+            logger.debug("UniversalProvider not available, using direct OpenAI client")
+
+        # Initialize local cache (still used for sync classify method)
         self._cache = LRUCache(maxsize=cache_size)
 
         # Classification metrics
@@ -264,6 +325,11 @@ class ProviderRouter:
         Available only when user has explicitly configured an API key.
         We never auto-install or require a separate provider service.
         """
+        # Check UniversalProvider first
+        if self._universal_provider and self._universal_provider.is_available:
+            return True
+
+        # Fall back to direct client check
         if not self.api_key or not self.api_key.strip():
             return False
         if not self.base_url or not self.base_url.strip():
@@ -275,6 +341,8 @@ class ProviderRouter:
 
         Uses the openai library which is compatible with most providers
         (OpenAI, Anthropic via proxy, Google, Groq, Together, etc.)
+
+        This is now a fallback — UniversalProvider is preferred.
         """
         if self._client is not None:
             return self._client
@@ -303,6 +371,9 @@ class ProviderRouter:
 
         With caching, retries, and injection protection.
         Returns QueryClassification or None if provider is unavailable.
+
+        Tries UniversalProvider first (async via event loop), then
+        falls back to direct OpenAI client for backward compatibility.
         """
         if not self.is_available():
             return None
@@ -315,14 +386,22 @@ class ProviderRouter:
             logger.debug(f"Provider router cache hit for query: '{query[:40]}...'")
             return cached[0]
 
-        client = self._get_client()
-        if client is None:
-            return None
-
         # Sanitize query for injection protection
         safe_query = _sanitize_query(query)
 
         self._total_calls += 1
+
+        # Try UniversalProvider (async) first
+        if self._universal_provider and self._universal_provider.is_available:
+            result = self._classify_via_universal(safe_query)
+            if result is not None:
+                self._cache.put(cache_key, (result,))
+                return result
+
+        # Fallback to direct OpenAI client
+        client = self._get_client()
+        if client is None:
+            return None
 
         # Retry with exponential backoff
         last_error = None
@@ -338,7 +417,6 @@ class ProviderRouter:
                 if attempt < self.max_retries - 1:
                     wait_time = 0.5 * (2 ** attempt)  # 0.5s, 1s, 2s
                     logger.debug(f"Provider retry {attempt + 1}/{self.max_retries} after error: {e}")
-                    import asyncio
                     try:
                         loop = asyncio.get_running_loop()
                         loop.create_task(asyncio.sleep(wait_time))
@@ -349,8 +427,139 @@ class ProviderRouter:
         logger.warning(f"Provider classification failed after {self.max_retries} retries: {last_error}")
         return None
 
+    def _classify_via_universal(self, query: str) -> Optional["QueryClassification"]:  # type: ignore[name-defined]
+        """Classify using UniversalProvider with token saving.
+
+        Runs the async UniversalProvider.classify() in a sync context
+        by trying to use the existing event loop or creating a new one.
+        """
+        from src.agent_swarm.router.rule_based import QueryCategory, QueryClassification
+
+        try:
+            # Try to run in existing event loop
+            loop = asyncio.get_running_loop()
+            # We're inside an async context — schedule the coroutine
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(
+                    asyncio.run,
+                    self._universal_provider.classify(
+                        query, self.CLASSIFICATION_CATEGORIES
+                    )
+                )
+                result = future.result(timeout=self.timeout + 5)
+        except RuntimeError:
+            # No running event loop — safe to use asyncio.run()
+            try:
+                result = asyncio.run(
+                    self._universal_provider.classify(
+                        query, self.CLASSIFICATION_CATEGORIES
+                    )
+                )
+            except Exception as e:
+                logger.debug(f"UniversalProvider classify failed: {e}")
+                return None
+        except Exception as e:
+            logger.debug(f"UniversalProvider classify failed: {e}")
+            return None
+
+        if result.get("status") != "success":
+            logger.debug(f"UniversalProvider returned error: {result.get('error')}")
+            return None
+
+        # Convert UniversalProvider result to QueryClassification
+        category_str = result.get("category", "ambiguous")
+        try:
+            category = QueryCategory(category_str)
+        except ValueError:
+            category = QueryCategory.AMBIGUOUS
+
+        return QueryClassification(
+            category=category,
+            confidence=float(result.get("confidence", 0.5)),
+            reason=result.get("reasoning", "universal_provider_classification"),
+            source="provider_router",
+        )
+
+    async def async_classify(self, query: str) -> Optional["QueryClassification"]:  # type: ignore[name-defined]
+        """Async version of classify — preferred when in async context.
+
+        Uses UniversalProvider directly for optimal token saving.
+        Falls back to direct client if UniversalProvider is unavailable.
+        """
+        if not self.is_available():
+            return None
+
+        # Check cache first
+        cache_key = hashlib.sha256(query.encode()).hexdigest()[:16]
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            self._cache_hits += 1
+            logger.debug(f"Provider router cache hit for query: '{query[:40]}...'")
+            return cached[0]
+
+        # Sanitize query
+        safe_query = _sanitize_query(query)
+        self._total_calls += 1
+
+        # Use UniversalProvider directly (async-native)
+        if self._universal_provider and self._universal_provider.is_available:
+            from src.agent_swarm.router.rule_based import QueryCategory, QueryClassification
+
+            try:
+                result = await self._universal_provider.classify(
+                    safe_query, self.CLASSIFICATION_CATEGORIES
+                )
+
+                if result.get("status") == "success":
+                    category_str = result.get("category", "ambiguous")
+                    try:
+                        category = QueryCategory(category_str)
+                    except ValueError:
+                        category = QueryCategory.AMBIGUOUS
+
+                    classification = QueryClassification(
+                        category=category,
+                        confidence=float(result.get("confidence", 0.5)),
+                        reason=result.get("reasoning", "universal_provider_classification"),
+                        source="provider_router",
+                    )
+                    self._cache.put(cache_key, (classification,))
+                    return classification
+            except Exception as e:
+                logger.debug(f"UniversalProvider async classify failed: {e}")
+
+        # Fallback: run sync _call_provider in executor
+        client = self._get_client()
+        if client is None:
+            return None
+
+        loop = asyncio.get_running_loop()
+        last_error = None
+
+        for attempt in range(self.max_retries):
+            try:
+                result = await loop.run_in_executor(
+                    None, self._call_provider, client, safe_query
+                )
+                if result is not None:
+                    self._cache.put(cache_key, (result,))
+                    return result
+            except Exception as e:
+                last_error = e
+                if attempt < self.max_retries - 1:
+                    wait_time = 0.5 * (2 ** attempt)
+                    await asyncio.sleep(wait_time)
+
+        self._failures += 1
+        logger.warning(f"Provider classification failed after {self.max_retries} retries: {last_error}")
+        return None
+
     def _call_provider(self, client, query: str) -> Optional["QueryClassification"]:  # type: ignore[name-defined]
-        """Make a single provider classification call using user's provider."""
+        """Make a single provider classification call using user's provider.
+
+        This is the legacy fallback when UniversalProvider is unavailable.
+        """
         from src.agent_swarm.router.rule_based import QueryCategory, QueryClassification
 
         prompt = f"""Classify this search query into exactly one category:
@@ -406,7 +615,7 @@ Respond with ONLY a JSON object:
     @property
     def stats(self) -> dict:
         """Return router statistics."""
-        return {
+        base_stats = {
             "total_calls": self._total_calls,
             "cache_hits": self._cache_hits,
             "cache_hit_rate": (self._cache_hits / max(self._total_calls, 1)) * 100,
@@ -416,16 +625,29 @@ Respond with ONLY a JSON object:
             "base_url": self.base_url,
             "provider": self.provider,
             "available": self.is_available(),
+            "using_universal_provider": self._universal_provider is not None and self._universal_provider.is_available,
         }
+
+        # Add UniversalProvider token stats if available
+        if self._universal_provider:
+            token_stats = self._universal_provider.get_token_usage()
+            base_stats["token_budget"] = token_stats.get("budget", {})
+            base_stats["token_cache"] = token_stats.get("cache", {})
+
+        return base_stats
 
     def clear_cache(self):
         """Clear the classification cache."""
         self._cache.clear()
+        if self._universal_provider:
+            self._universal_provider.cache.clear()
 
     def reset_client(self):
         """Force recreation of the provider client on next call."""
         with self._client_lock:
             self._client = None
+        if self._universal_provider:
+            self._universal_provider._reset_clients()
 
 
 __all__ = ["ProviderRouter"]
