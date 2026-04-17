@@ -14,6 +14,8 @@ import websockets
 
 logger = logging.getLogger("agent-os.server")
 
+AGENT_OS_VERSION = "3.2.0"
+
 
 class AgentServer:
     """
@@ -3569,7 +3571,7 @@ class AgentServer:
 
         return {
             "status": overall,
-            "version": __version__,
+            "version": AGENT_OS_VERSION,
             "uptime_seconds": round(uptime, 1),
             "checks": checks,
             "sessions": {
