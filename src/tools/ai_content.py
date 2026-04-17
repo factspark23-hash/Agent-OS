@@ -1326,6 +1326,7 @@ class AIStructuredOutput:
         raise TypeError(f"Expected AIContent or dict, got {type(content).__name__}")
 
 
+
     def process(self, content: AIContent) -> Dict[str, Any]:
         """
         Main processing pipeline: normalize → deduplicate → extract relationships → generate schema.
@@ -1610,7 +1611,7 @@ class AIStructuredOutput:
                 logger.warning(f"LLM merge failed, falling back to heuristic: {exc}")
 
         # Fallback to heuristic for large sets or LLM errors
-        return self._merge_similar_items_heuristic(items, similarity_threshold)
+        return self.merge_similar_items.__wrapped__(self, items, similarity_threshold) if hasattr(self.merge_similar_items, '__wrapped__') else self._merge_similar_items_heuristic(items, similarity_threshold)
 
     def _merge_similar_items_heuristic(self, items: list, similarity_threshold: float) -> list:
         """Heuristic fallback for merging similar items."""
