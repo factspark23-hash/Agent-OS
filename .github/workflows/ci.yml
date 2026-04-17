@@ -197,10 +197,23 @@ jobs:
   build-web:
     name: Build Web UI
     runs-on: ubuntu-latest
+    # Only run if web/ directory exists
+    if: "github.event.head_commit.modified != null || true"
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check if web directory exists
+        id: check-web
+        run: |
+          if [ -d "web" ] && [ -f "web/package.json" ]; then
+            echo "web_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "web_exists=false" >> $GITHUB_OUTPUT
+            echo "Skipping — web/ directory not found"
+          fi
+
       - name: Set up Node.js
+        if: steps.check-web.outputs.web_exists == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -208,13 +221,16 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Install dependencies
+        if: steps.check-web.outputs.web_exists == 'true'
         working-directory: web
         run: npm ci
 
       - name: Build
+        if: steps.check-web.outputs.web_exists == 'true'
         working-directory: web
         run: npm run build
 
       - name: Type check
+        if: steps.check-web.outputs.web_exists == 'true'
         working-directory: web
         run: npx tsc --noEmit 2>/dev/null || echo "TypeScript check completed with warnings"
