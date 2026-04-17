@@ -204,10 +204,22 @@ class Config:
         if save:
             self.save()
 
-    def generate_agent_token(self, agent_name: str) -> str:
-        """Generate a secure agent token."""
+    def generate_agent_token(self, agent_name: str, save: bool = True) -> str:
+        """Generate a secure agent token and store it in config.
+        
+        Args:
+            agent_name: Name prefix for the token.
+            save: If True, persist the token to the YAML config file.
+        
+        Returns:
+            The generated token string.
+        """
         random_suffix = secrets.token_hex(16)
-        return f"{agent_name}-{random_suffix}"
+        token = f"{agent_name}-{random_suffix}"
+        self.set("server.agent_token", token)
+        if save:
+            self.save()
+        return token
 
     def hash_token(self, token: str) -> str:
         """Hash token for secure storage."""

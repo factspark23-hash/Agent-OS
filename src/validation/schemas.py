@@ -96,12 +96,9 @@ def sanitize_string(value: str, max_length: int = 10000, field_name: str = "valu
     # Strip null bytes
     value = value.replace("\x00", "")
 
-    # Truncate
+    # Truncate to max_length (safe truncation, no crash)
     if len(value) > max_length:
-        raise ValidationError(
-            f"{field_name} exceeds maximum length of {max_length} characters",
-            field_name
-        )
+        value = value[:max_length]
 
     return value
 

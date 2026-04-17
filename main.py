@@ -124,8 +124,6 @@ class AgentOS:
                 self.auth_middleware.add_legacy_token(args.agent_token)
         elif not self.config.get("server.agent_token") and not self.jwt_handler:
             auto_token = self.config.generate_agent_token("agent")
-            self.config.set("server.agent_token", auto_token)
-            self.config.save()  # Only save when auto-generating a new token
             if self.auth_middleware:
                 self.auth_middleware.add_legacy_token(auto_token)
             self.logger.info("Auto-generated legacy agent token")

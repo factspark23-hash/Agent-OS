@@ -199,16 +199,23 @@ class APIKeyManager:
                 "requests_per_day": key_data["requests_per_day"],
             }
 
-    async def revoke_key(self, key_prefix: str, user_id: str) -> bool:
-        """Revoke (deactivate) an API key."""
+    async def revoke_key(self, key_id_or_prefix: str, user_id: str) -> bool:
+        """Revoke (deactivate) an API key.
+        
+        Accepts either the key's `id` or `key_prefix` for flexibility,
+        since list_keys() returns `id` but the HTTP route uses `key_prefix`.
+        """
         if self._db_factory:
             from src.infra.models import APIKey as APIKeyModel
-            from sqlalchemy import update
+            from sqlalchemy import update, or_
             async with self._db_factory() as session:
                 result = await session.execute(
                     update(APIKeyModel)
                     .where(
-                        APIKeyModel.key_prefix == key_prefix,
+                        or_(
+                            APIKeyModel.key_prefix == key_id_or_prefix,
+                            APIKeyModel.id == key_id_or_prefix,
+                        ),
                         APIKeyModel.user_id == user_id,
                     )
                     .values(is_active=False)
@@ -216,7 +223,14 @@ class APIKeyManager:
                 await session.commit()
                 return result.rowcount > 0
         else:
-            key_data = self._memory_store.get(key_prefix)
+            # Try lookup by key_prefix first
+            key_data = self._memory_store.get(key_id_or_prefix)
+            # If not found, search by id
+            if not key_data:
+                for stored_key, data in self._memory_store.items():
+                    if data.get("id") == key_id_or_prefix:
+                        key_data = data
+                        break
             if key_data and key_data["user_id"] == user_id:
                 key_data["is_active"] = False
                 return True
