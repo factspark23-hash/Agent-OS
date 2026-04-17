@@ -197,6 +197,14 @@ class ProxiedResponse:
     tls_profile: str
     error: Optional[str] = None
 
+    @property
+    def text(self) -> str:
+        """Decode body bytes to string."""
+        try:
+            return self.body.decode("utf-8")
+        except (UnicodeDecodeError, AttributeError):
+            return self.body.decode("latin-1") if isinstance(self.body, bytes) else str(self.body)
+
 
 # ═══════════════════════════════════════════════════════════════
 # TLS Session Pool — Reusable curl_cffi Sessions

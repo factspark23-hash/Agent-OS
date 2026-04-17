@@ -214,6 +214,9 @@ class EventMessage:
     timestamp: float = field(default_factory=time.time)
     ttl_seconds: float = 300  # 5 min default
 
+    def is_expired(self) -> bool:
+        return self.ttl_seconds > 0 and time.time() > (self.timestamp + self.ttl_seconds)
+
 
 # ─── Shared Memory ──────────────────────────────────────────
 

@@ -2060,7 +2060,7 @@ class AgentServer:
     async def _cmd_router_stats(self, data: Dict, session) -> Dict:
         """Get classification statistics from the Web Query Router."""
         router = self._get_web_query_router()
-        return {"status": "success", **router.stats()}
+        return {"status": "success", **router.get_stats()}
 
     # ─── Web-Need Router Command ────────────────────────────
 
@@ -2711,9 +2711,16 @@ class AgentServer:
         """Check current page health for captcha/bot detection indicators."""
         try:
             from src.security.captcha_preempt import CaptchaPreemptor
-            preemptor = CaptchaPreemptor(self.browser, config=self.config)
-            result = await preemptor.check_page_health()
-            return {"status": "success", "data": result}
+            from src.security.captcha_bypass import CaptchaBypass
+            bypass = CaptchaBypass()
+            preemptor = CaptchaPreemptor(captcha_bypass=bypass)
+            page = self.browser.page
+            if not page:
+                return {"status": "error", "error": "No active browser page"}
+            health = await preemptor.check_page_health(page)
+            result = health.to_dict() if hasattr(health, 'to_dict') else {"healthy": bool(health)}
+            result["status"] = "success"
+            return result
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
@@ -2865,12 +2872,16 @@ class AgentServer:
             return {"status": "error", "error": str(e)}
 
     async def _cmd_structured_deduplicate(self, data: Dict, session) -> Dict:
-        """Deduplicate structured data across pages."""
+        """Deduplicate structured data across pages or within a flat list."""
         try:
             from src.tools.ai_content import CrossPageDeduplicator
             pages = data.get("pages", [])
-            if not pages:
-                return {"status": "error", "error": "Missing 'pages' parameter (list of page data)"}
+            flat_data = data.get("data", [])
+            if not pages and not flat_data:
+                return {"status": "error", "error": "Missing 'pages' or 'data' parameter"}
+            # Support flat list input by wrapping in pages
+            if not pages and flat_data:
+                pages = [flat_data] if not isinstance(flat_data[0], list) else flat_data
             dedup = CrossPageDeduplicator()
             for i, page_data in enumerate(pages):
                 dedup.add_page(f"page_{i}", page_data)
@@ -2900,7 +2911,7 @@ class AgentServer:
             output_format = data.get("format", "json")
             formatter = OutputFormatter()
             if output_format == "json":
-                result = formatter.to_json(data_content, pretty=data.get("pretty", True))
+                result = formatter.to_json(data_content, compact=not data.get("pretty", True))
             elif output_format == "markdown":
                 result = formatter.to_markdown(data_content)
             elif output_format == "csv":
@@ -3113,7 +3124,7 @@ class AgentServer:
         return self._get_auto_retry().get_stats()
 
     async def _cmd_retry_health(self, data: Dict, session) -> Dict:
-        return self._get_auto_retry().get_health()
+        return {"status": "success", **self._get_auto_retry().get_health()}
 
     async def _cmd_retry_circuit_breakers(self, data: Dict, session) -> Dict:
         return {"status": "success", "circuit_breakers": self._get_auto_retry().get_circuit_breakers()}
@@ -3290,10 +3301,11 @@ class AgentServer:
         return self._get_agent_hub().get_tasks(status=data.get("status"), assigned_to=data.get("assigned_to"), tags=data.get("tags"), limit=data.get("limit", 50))
 
     async def _cmd_hub_broadcast(self, data: Dict, session) -> Dict:
-        sid, topic = data.get("sender_id"), data.get("topic")
+        sid = data.get("sender_id") or data.get("agent_id")
+        topic = data.get("topic")
         if not sid or not topic:
-            return {"status": "error", "error": "Missing 'sender_id' or 'topic'"}
-        return await self._get_agent_hub().broadcast(sender_id=sid, topic=topic, payload=data.get("payload", {}), ttl_seconds=data.get("ttl_seconds"))
+            return {"status": "error", "error": "Missing 'agent_id'/'sender_id' or 'topic'"}
+        return await self._get_agent_hub().broadcast(sender_id=sid, topic=topic, payload=data.get("payload", data.get("message", {})), ttl_seconds=data.get("ttl_seconds"))
 
     async def _cmd_hub_events(self, data: Dict, session) -> Dict:
         aid = data.get("agent_id")

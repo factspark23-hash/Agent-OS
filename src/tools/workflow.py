@@ -32,9 +32,9 @@ class WorkflowEngine:
             "description": "Search Google and get first result",
             "steps": [
                 {"command": "navigate", "url": "https://google.com"},
-                {"command": "fill-form", "fields": {"input[name='q']": "{{query}}"}},
+                {"command": "smart-fill", "label": "Search", "value": "{{query}}"},
                 {"command": "press", "key": "Enter"},
-                {"command": "wait", "selector": "#search"},
+                {"command": "wait", "selector": "#search", "timeout": 5000},
                 {"command": "get-content"},
             ],
             "variables": {"query": "search term"},
