@@ -64,3 +64,52 @@ structlog==25.5.0
 
 # OpenAI-compatible LLM client (for Tier 2 routing fallback)
 openai>=1.30.0
+
+# ─── Open-Source Stealth & Anti-Detection ─────────────────────
+
+# Camoufox: Firefox-based anti-detect browser with C++ fingerprint injection
+# Wraps Playwright API — drop-in alternative for high-stealth sessions
+# License: GPL-3.0 (library wrapper is MIT-compatible via pip)
+camoufox>=0.4.0
+
+# Playwright stealth: JavaScript evasion patches for Playwright browsers
+# Supplements CDP stealth with additional navigator/webgl/canvas patches
+# License: MIT
+playwright-stealth>=2.0.0
+
+# ─── Free CAPTCHA Solving (No Paid Services) ──────────────────
+
+# ddddocr: Offline deep-learning OCR for text/simple captchas
+# No API key needed — runs locally, trained on common captcha styles
+# License: Apache-2.0
+ddddocr>=1.5.0
+
+# pytesseract: Python wrapper for Google Tesseract OCR engine
+# Best-in-class open-source OCR for text captchas, requires tesseract binary
+# License: Apache-2.0
+pytesseract>=0.3.10
+
+# Pillow: Image processing for captcha preprocessing (resize, threshold, denoise)
+# Required by both ddddocr and pytesseract for image manipulation
+# License: HPND (MIT-compatible)
+Pillow>=10.0.0
+
+# ─── Data Extraction ──────────────────────────────────────────
+
+# trafilatura: State-of-the-art web text extraction (beats BeautifulSoup)
+# Metadata-aware, handles boilerplate removal, extracts clean article text
+# License: Apache-2.0
+trafilatura>=1.8.0
+
+# readability-lxml: Article main-content extraction (Mozilla Readability port)
+# Extracts just the article body + title from noisy HTML pages
+# License: Apache-2.0
+readability-lxml>=0.8.1
+
+# ─── Browser Automation Alternatives ─────────────────────────
+
+# DrissionPage: Python browser automation combining driver + session modes
+# Can switch between browser control and HTTP requests seamlessly
+# Useful as fallback when Playwright fails on certain sites
+# License: MIT
+DrissionPage>=4.1.0

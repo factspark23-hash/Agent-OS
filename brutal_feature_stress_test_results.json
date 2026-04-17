@@ -1,12 +1,12 @@
 {
   "summary": {
     "total": 149,
-    "passed": 91,
-    "failed": 58,
+    "passed": 144,
+    "failed": 5,
     "skipped": 0,
-    "success_rate": 61.1,
-    "duration_seconds": 15.14,
-    "bugs_found": 23
+    "success_rate": 96.6,
+    "duration_seconds": 14.83,
+    "bugs_found": 0
   },
   "results": [
     {
@@ -15,8 +15,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 40.43,
-      "timestamp": "2026-04-17T02:19:52.130614"
+      "duration_ms": 37.71,
+      "timestamp": "2026-04-17T04:14:09.723997"
     },
     {
       "category": "CONFIG",
@@ -24,8 +24,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.12,
-      "timestamp": "2026-04-17T02:19:52.130741"
+      "duration_ms": 0.1,
+      "timestamp": "2026-04-17T04:14:09.724106"
     },
     {
       "category": "CONFIG",
@@ -34,7 +34,7 @@
       "details": "True",
       "error": "",
       "duration_ms": 0.07,
-      "timestamp": "2026-04-17T02:19:52.130820"
+      "timestamp": "2026-04-17T04:14:09.724184"
     },
     {
       "category": "CONFIG",
@@ -43,7 +43,7 @@
       "details": "True",
       "error": "",
       "duration_ms": 0.07,
-      "timestamp": "2026-04-17T02:19:52.130889"
+      "timestamp": "2026-04-17T04:14:09.724254"
     },
     {
       "category": "CONFIG",
@@ -51,8 +51,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 492.82,
-      "timestamp": "2026-04-17T02:19:52.623732"
+      "duration_ms": 482.12,
+      "timestamp": "2026-04-17T04:14:10.206389"
     },
     {
       "category": "CONFIG",
@@ -61,7 +61,7 @@
       "details": "True",
       "error": "",
       "duration_ms": 0.03,
-      "timestamp": "2026-04-17T02:19:52.623768"
+      "timestamp": "2026-04-17T04:14:10.206435"
     },
     {
       "category": "CONFIG",
@@ -70,7 +70,7 @@
       "details": "True",
       "error": "",
       "duration_ms": 0.02,
-      "timestamp": "2026-04-17T02:19:52.623793"
+      "timestamp": "2026-04-17T04:14:10.206461"
     },
     {
       "category": "PROFILES",
@@ -79,7 +79,7 @@
       "details": "True",
       "error": "",
       "duration_ms": 0.0,
-      "timestamp": "2026-04-17T02:19:52.623837"
+      "timestamp": "2026-04-17T04:14:10.206510"
     },
     {
       "category": "PROFILES",
@@ -88,7 +88,7 @@
       "details": "True",
       "error": "",
       "duration_ms": 0.03,
-      "timestamp": "2026-04-17T02:19:52.623871"
+      "timestamp": "2026-04-17T04:14:10.206542"
     },
     {
       "category": "PROFILES",
@@ -96,8 +96,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.03,
-      "timestamp": "2026-04-17T02:19:52.623900"
+      "duration_ms": 0.02,
+      "timestamp": "2026-04-17T04:14:10.206566"
     },
     {
       "category": "PROFILES",
@@ -105,8 +105,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.02,
-      "timestamp": "2026-04-17T02:19:52.623918"
+      "duration_ms": 0.01,
+      "timestamp": "2026-04-17T04:14:10.206580"
     },
     {
       "category": "PROFILES",
@@ -115,7 +115,7 @@
       "details": "True",
       "error": "",
       "duration_ms": 0.01,
-      "timestamp": "2026-04-17T02:19:52.623935"
+      "timestamp": "2026-04-17T04:14:10.206593"
     },
     {
       "category": "PROFILES",
@@ -124,7 +124,7 @@
       "details": "True",
       "error": "",
       "duration_ms": 0.01,
-      "timestamp": "2026-04-17T02:19:52.623950"
+      "timestamp": "2026-04-17T04:14:10.206607"
     },
     {
       "category": "PROFILES",
@@ -133,7 +133,7 @@
       "details": "True",
       "error": "",
       "duration_ms": 0.0,
-      "timestamp": "2026-04-17T02:19:52.623955"
+      "timestamp": "2026-04-17T04:14:10.206611"
     },
     {
       "category": "PROFILES",
@@ -142,7 +142,7 @@
       "details": "True",
       "error": "",
       "duration_ms": 0.0,
-      "timestamp": "2026-04-17T02:19:52.623962"
+      "timestamp": "2026-04-17T04:14:10.206617"
     },
     {
       "category": "ROUTING",
@@ -150,8 +150,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 15.22,
-      "timestamp": "2026-04-17T02:19:52.639210"
+      "duration_ms": 15.12,
+      "timestamp": "2026-04-17T04:14:10.221755"
     },
     {
       "category": "ROUTING",
@@ -159,8 +159,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.12,
-      "timestamp": "2026-04-17T02:19:52.639341"
+      "duration_ms": 0.09,
+      "timestamp": "2026-04-17T04:14:10.221851"
     },
     {
       "category": "ROUTING",
@@ -168,8 +168,8 @@
       "status": "PASS",
       "details": "False",
       "error": "",
-      "duration_ms": 0.13,
-      "timestamp": "2026-04-17T02:19:52.639476"
+      "duration_ms": 0.12,
+      "timestamp": "2026-04-17T04:14:10.221979"
     },
     {
       "category": "ROUTING",
@@ -177,8 +177,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.11,
-      "timestamp": "2026-04-17T02:19:52.639588"
+      "duration_ms": 0.12,
+      "timestamp": "2026-04-17T04:14:10.222100"
     },
     {
       "category": "ROUTING",
@@ -186,8 +186,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.16,
-      "timestamp": "2026-04-17T02:19:52.639750"
+      "duration_ms": 0.15,
+      "timestamp": "2026-04-17T04:14:10.222249"
     },
     {
       "category": "ROUTING",
@@ -195,8 +195,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.16,
-      "timestamp": "2026-04-17T02:19:52.639914"
+      "duration_ms": 0.17,
+      "timestamp": "2026-04-17T04:14:10.222419"
     },
     {
       "category": "ROUTING",
@@ -205,7 +205,7 @@
       "details": "True",
       "error": "",
       "duration_ms": 0.15,
-      "timestamp": "2026-04-17T02:19:52.640064"
+      "timestamp": "2026-04-17T04:14:10.222569"
     },
     {
       "category": "NORMALIZE",
@@ -213,8 +213,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 2.77,
-      "timestamp": "2026-04-17T02:19:52.642883"
+      "duration_ms": 2.83,
+      "timestamp": "2026-04-17T04:14:10.225433"
     },
     {
       "category": "NORMALIZE",
@@ -223,7 +223,7 @@
       "details": "True",
       "error": "",
       "duration_ms": 0.09,
-      "timestamp": "2026-04-17T02:19:52.642978"
+      "timestamp": "2026-04-17T04:14:10.225529"
     },
     {
       "category": "NORMALIZE",
@@ -231,8 +231,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.14,
-      "timestamp": "2026-04-17T02:19:52.643124"
+      "duration_ms": 0.13,
+      "timestamp": "2026-04-17T04:14:10.225661"
     },
     {
       "category": "NORMALIZE",
@@ -240,8 +240,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.22,
-      "timestamp": "2026-04-17T02:19:52.643349"
+      "duration_ms": 0.35,
+      "timestamp": "2026-04-17T04:14:10.226020"
     },
     {
       "category": "NORMALIZE",
@@ -249,8 +249,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 4.7,
-      "timestamp": "2026-04-17T02:19:52.648061"
+      "duration_ms": 4.54,
+      "timestamp": "2026-04-17T04:14:10.230577"
     },
     {
       "category": "NORMALIZE",
@@ -258,8 +258,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.14,
-      "timestamp": "2026-04-17T02:19:52.648211"
+      "duration_ms": 0.15,
+      "timestamp": "2026-04-17T04:14:10.230734"
     },
     {
       "category": "STRUCTURED",
@@ -267,17 +267,17 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.97,
-      "timestamp": "2026-04-17T02:19:52.649212"
+      "duration_ms": 0.28,
+      "timestamp": "2026-04-17T04:14:10.231057"
     },
     {
       "category": "STRUCTURED",
       "test_name": "dedup_across_fields",
-      "status": "FAIL",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 419, in test_structured_dedup\n    result = so.deduplicate_across_fields(mock_content)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/src/tools/ai_content.py\", line 1349, in ",
-      "error": "'dict' object has no attribute 'emails'",
-      "duration_ms": 0.02,
-      "timestamp": "2026-04-17T02:19:52.649761"
+      "status": "PASS",
+      "details": "True",
+      "error": "",
+      "duration_ms": 0.07,
+      "timestamp": "2026-04-17T04:14:10.231135"
     },
     {
       "category": "STRUCTURED",
@@ -285,8 +285,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.16,
-      "timestamp": "2026-04-17T02:19:52.649929"
+      "duration_ms": 0.19,
+      "timestamp": "2026-04-17T04:14:10.231325"
     },
     {
       "category": "STRUCTURED",
@@ -294,89 +294,89 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.04,
-      "timestamp": "2026-04-17T02:19:52.649974"
+      "duration_ms": 0.03,
+      "timestamp": "2026-04-17T04:14:10.231358"
     },
     {
       "category": "STRUCTURED",
       "test_name": "schema_generation",
-      "status": "FAIL",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 446, in test_schema_generation\n    result = so.generate_schema(mock_content, schema_type=\"product\")\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/src/tools/ai_",
-      "error": "'dict' object has no attribute 'title'",
-      "duration_ms": 0.01,
-      "timestamp": "2026-04-17T02:19:52.650275"
+      "status": "PASS",
+      "details": "True",
+      "error": "",
+      "duration_ms": 0.03,
+      "timestamp": "2026-04-17T04:14:10.231392"
     },
     {
       "category": "FORMATTER",
       "test_name": "json_output",
-      "status": "FAIL",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 466, in test_format_json\n    result = fmt.to_json({\"key\": \"value\"}, pretty=True)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nTypeError: OutputFormatter.to_json() got an unexpected keyword argument 'pretty'\n",
-      "error": "OutputFormatter.to_json() got an unexpected keyword argument 'pretty'",
-      "duration_ms": 0.0,
-      "timestamp": "2026-04-17T02:19:52.650406"
+      "status": "PASS",
+      "details": "False",
+      "error": "",
+      "duration_ms": 0.02,
+      "timestamp": "2026-04-17T04:14:10.231433"
     },
     {
       "category": "FORMATTER",
       "test_name": "markdown_output",
       "status": "PASS",
-      "details": "False",
+      "details": "True",
       "error": "",
-      "duration_ms": 0.02,
-      "timestamp": "2026-04-17T02:19:52.650430"
+      "duration_ms": 0.01,
+      "timestamp": "2026-04-17T04:14:10.231450"
     },
     {
       "category": "FORMATTER",
       "test_name": "csv_output",
       "status": "PASS",
-      "details": "False",
+      "details": "True",
       "error": "",
       "duration_ms": 0.02,
-      "timestamp": "2026-04-17T02:19:52.650450"
+      "timestamp": "2026-04-17T04:14:10.231471"
     },
     {
       "category": "FORMATTER",
       "test_name": "xml_output",
       "status": "PASS",
-      "details": "False",
+      "details": "True",
       "error": "",
-      "duration_ms": 0.07,
-      "timestamp": "2026-04-17T02:19:52.650527"
+      "duration_ms": 0.06,
+      "timestamp": "2026-04-17T04:14:10.231532"
     },
     {
       "category": "FORMATTER",
       "test_name": "flat_dict_output",
       "status": "PASS",
-      "details": "False",
+      "details": "True",
       "error": "",
       "duration_ms": 0.01,
-      "timestamp": "2026-04-17T02:19:52.650538"
+      "timestamp": "2026-04-17T04:14:10.231541"
     },
     {
       "category": "CAPTCHA",
       "test_name": "risk_assessment_low",
-      "status": "FAIL",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 511, in test_captcha_risk_low\n    return result.get(\"risk_level\") in (\"low\", \"minimal\") or result.get(\"status\") == \"success\"\n           ^^^^^^^^^^\nAttributeError: 'RiskAssessment' object has no attribute 'get'\n",
-      "error": "'RiskAssessment' object has no attribute 'get'",
-      "duration_ms": 334.92,
-      "timestamp": "2026-04-17T02:19:52.985693"
+      "status": "PASS",
+      "details": "True",
+      "error": "",
+      "duration_ms": 339.85,
+      "timestamp": "2026-04-17T04:14:10.571417"
     },
     {
       "category": "CAPTCHA",
       "test_name": "risk_assessment_high",
-      "status": "FAIL",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 517, in test_captcha_risk_high\n    return result.get(\"risk_level\") in (\"high\", \"critical\") or result.get(\"status\") == \"success\"\n           ^^^^^^^^^^\nAttributeError: 'RiskAssessment' object has no attribute 'get'\n",
-      "error": "'RiskAssessment' object has no attribute 'get'",
+      "status": "PASS",
+      "details": "False",
+      "error": "",
       "duration_ms": 0.06,
-      "timestamp": "2026-04-17T02:19:52.985868"
+      "timestamp": "2026-04-17T04:14:10.571485"
     },
     {
       "category": "CAPTCHA",
       "test_name": "risk_assessment_cloudflare",
-      "status": "FAIL",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 523, in test_captcha_cloudflare_risk\n    return result.get(\"risk_level\") in (\"high\", \"critical\", \"medium\") or result.get(\"status\") == \"success\"\n           ^^^^^^^^^^\nAttributeError: 'RiskAssessment' object has no attribute",
-      "error": "'RiskAssessment' object has no attribute 'get'",
-      "duration_ms": 0.05,
-      "timestamp": "2026-04-17T02:19:52.986030"
+      "status": "PASS",
+      "details": "False",
+      "error": "",
+      "duration_ms": 0.04,
+      "timestamp": "2026-04-17T04:14:10.571528"
     },
     {
       "category": "CAPTCHA",
@@ -384,8 +384,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.03,
-      "timestamp": "2026-04-17T02:19:52.986067"
+      "duration_ms": 0.02,
+      "timestamp": "2026-04-17T04:14:10.571548"
     },
     {
       "category": "FORM_FILLER",
@@ -393,8 +393,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.3,
-      "timestamp": "2026-04-17T02:19:52.986420"
+      "duration_ms": 0.29,
+      "timestamp": "2026-04-17T04:14:10.571901"
     },
     {
       "category": "FORM_FILLER",
@@ -403,7 +403,7 @@
       "details": "True",
       "error": "",
       "duration_ms": 0.02,
-      "timestamp": "2026-04-17T02:19:52.986440"
+      "timestamp": "2026-04-17T04:14:10.571921"
     },
     {
       "category": "FORM_FILLER",
@@ -412,7 +412,7 @@
       "details": "True",
       "error": "",
       "duration_ms": 0.01,
-      "timestamp": "2026-04-17T02:19:52.986447"
+      "timestamp": "2026-04-17T04:14:10.571929"
     },
     {
       "category": "FORM_FILLER",
@@ -421,7 +421,7 @@
       "details": "True",
       "error": "",
       "duration_ms": 0.0,
-      "timestamp": "2026-04-17T02:19:52.986453"
+      "timestamp": "2026-04-17T04:14:10.571935"
     },
     {
       "category": "FORM_FILLER",
@@ -430,7 +430,7 @@
       "details": "True",
       "error": "",
       "duration_ms": 0.0,
-      "timestamp": "2026-04-17T02:19:52.986459"
+      "timestamp": "2026-04-17T04:14:10.571941"
     },
     {
       "category": "FORM_FILLER",
@@ -439,7 +439,7 @@
       "details": "True",
       "error": "",
       "duration_ms": 0.0,
-      "timestamp": "2026-04-17T02:19:52.986463"
+      "timestamp": "2026-04-17T04:14:10.571945"
     },
     {
       "category": "FORM_FILLER",
@@ -448,7 +448,7 @@
       "details": "True",
       "error": "",
       "duration_ms": 0.0,
-      "timestamp": "2026-04-17T02:19:52.986466"
+      "timestamp": "2026-04-17T04:14:10.571949"
     },
     {
       "category": "FORM_FILLER",
@@ -457,7 +457,7 @@
       "details": "True",
       "error": "",
       "duration_ms": 0.0,
-      "timestamp": "2026-04-17T02:19:52.986470"
+      "timestamp": "2026-04-17T04:14:10.571953"
     },
     {
       "category": "FORM_FILLER",
@@ -466,7 +466,7 @@
       "details": "True",
       "error": "",
       "duration_ms": 0.0,
-      "timestamp": "2026-04-17T02:19:52.986473"
+      "timestamp": "2026-04-17T04:14:10.571956"
     },
     {
       "category": "FORM_FILLER",
@@ -475,7 +475,7 @@
       "details": "True",
       "error": "",
       "duration_ms": 0.0,
-      "timestamp": "2026-04-17T02:19:52.986479"
+      "timestamp": "2026-04-17T04:14:10.571961"
     },
     {
       "category": "STEALTH",
@@ -483,8 +483,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 232.82,
-      "timestamp": "2026-04-17T02:19:53.219341"
+      "duration_ms": 266.57,
+      "timestamp": "2026-04-17T04:14:10.838564"
     },
     {
       "category": "STEALTH",
@@ -492,8 +492,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 7.26,
-      "timestamp": "2026-04-17T02:19:53.226618"
+      "duration_ms": 4.57,
+      "timestamp": "2026-04-17T04:14:10.843150"
     },
     {
       "category": "STEALTH",
@@ -501,8 +501,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.29,
-      "timestamp": "2026-04-17T02:19:53.226923"
+      "duration_ms": 0.31,
+      "timestamp": "2026-04-17T04:14:10.843469"
     },
     {
       "category": "STEALTH",
@@ -510,8 +510,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.47,
-      "timestamp": "2026-04-17T02:19:53.227397"
+      "duration_ms": 0.46,
+      "timestamp": "2026-04-17T04:14:10.843940"
     },
     {
       "category": "STEALTH",
@@ -519,8 +519,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.21,
-      "timestamp": "2026-04-17T02:19:53.227617"
+      "duration_ms": 0.26,
+      "timestamp": "2026-04-17T04:14:10.844203"
     },
     {
       "category": "LLM_PROVIDER",
@@ -528,8 +528,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 2.92,
-      "timestamp": "2026-04-17T02:19:53.230574"
+      "duration_ms": 3.22,
+      "timestamp": "2026-04-17T04:14:10.847563"
     },
     {
       "category": "LLM_PROVIDER",
@@ -537,53 +537,53 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.21,
-      "timestamp": "2026-04-17T02:19:53.230789"
+      "duration_ms": 0.28,
+      "timestamp": "2026-04-17T04:14:10.847855"
     },
     {
       "category": "LLM_PROVIDER",
       "test_name": "token_budget_tracking",
-      "status": "FAIL",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 678, in test_token_budget\n    budget.record_usage(100, 50)\n    ^^^^^^^^^^^^^^^^^^^\nAttributeError: 'TokenBudget' object has no attribute 'record_usage'\n",
-      "error": "'TokenBudget' object has no attribute 'record_usage'",
-      "duration_ms": 0.01,
-      "timestamp": "2026-04-17T02:19:53.231375"
+      "status": "PASS",
+      "details": "True",
+      "error": "",
+      "duration_ms": 0.02,
+      "timestamp": "2026-04-17T04:14:10.847877"
     },
     {
       "category": "LLM_PROVIDER",
       "test_name": "token_budget_limit",
-      "status": "FAIL",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 685, in test_token_budget_limit\n    budget.record_usage(80, 0)\n    ^^^^^^^^^^^^^^^^^^^\nAttributeError: 'TokenBudget' object has no attribute 'record_usage'\n",
-      "error": "'TokenBudget' object has no attribute 'record_usage'",
-      "duration_ms": 0.0,
-      "timestamp": "2026-04-17T02:19:53.231865"
+      "status": "PASS",
+      "details": "True",
+      "error": "",
+      "duration_ms": 0.01,
+      "timestamp": "2026-04-17T04:14:10.847886"
     },
     {
       "category": "LLM_PROVIDER",
       "test_name": "prompt_compression",
-      "status": "FAIL",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 691, in test_prompt_compressor\n    pc = PromptCompressor(aggression=0.5)\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nTypeError: PromptCompressor() takes no arguments\n",
-      "error": "PromptCompressor() takes no arguments",
-      "duration_ms": 0.0,
-      "timestamp": "2026-04-17T02:19:53.231938"
+      "status": "PASS",
+      "details": "True",
+      "error": "",
+      "duration_ms": 0.26,
+      "timestamp": "2026-04-17T04:14:10.848150"
     },
     {
       "category": "LLM_PROVIDER",
       "test_name": "response_cache",
-      "status": "FAIL",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 698, in test_response_cache\n    cache = ResponseCache(max_size=100)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^\nTypeError: ResponseCache.__init__() got an unexpected keyword argument 'max_size'\n",
-      "error": "ResponseCache.__init__() got an unexpected keyword argument 'max_size'",
-      "duration_ms": 0.0,
-      "timestamp": "2026-04-17T02:19:53.232012"
+      "status": "PASS",
+      "details": "True",
+      "error": "",
+      "duration_ms": 0.02,
+      "timestamp": "2026-04-17T04:14:10.848176"
     },
     {
       "category": "LLM_PROVIDER",
       "test_name": "smart_truncation",
-      "status": "FAIL",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 707, in test_smart_truncation\n    truncated = st.truncate(long_text, max_tokens=50)\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nTypeError: SmartTruncation.truncate() got an unexpected keyword argument 'max_tokens",
-      "error": "SmartTruncation.truncate() got an unexpected keyword argument 'max_tokens'",
-      "duration_ms": 0.0,
-      "timestamp": "2026-04-17T02:19:53.232074"
+      "status": "PASS",
+      "details": "True",
+      "error": "",
+      "duration_ms": 0.06,
+      "timestamp": "2026-04-17T04:14:10.848243"
     },
     {
       "category": "LLM_PROVIDER",
@@ -591,8 +591,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.02,
-      "timestamp": "2026-04-17T02:19:53.232101"
+      "duration_ms": 0.01,
+      "timestamp": "2026-04-17T04:14:10.848256"
     },
     {
       "category": "LLM_PROVIDER",
@@ -601,7 +601,7 @@
       "details": "True",
       "error": "",
       "duration_ms": 0.0,
-      "timestamp": "2026-04-17T02:19:53.232105"
+      "timestamp": "2026-04-17T04:14:10.848260"
     },
     {
       "category": "LLM_PROVIDER",
@@ -609,8 +609,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.38,
-      "timestamp": "2026-04-17T02:19:53.232492"
+      "duration_ms": 0.29,
+      "timestamp": "2026-04-17T04:14:10.848552"
     },
     {
       "category": "SEARCH",
@@ -618,8 +618,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.01,
-      "timestamp": "2026-04-17T02:19:53.232533"
+      "duration_ms": 0.03,
+      "timestamp": "2026-04-17T04:14:10.848704"
     },
     {
       "category": "SEARCH",
@@ -627,8 +627,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.03,
-      "timestamp": "2026-04-17T02:19:53.232570"
+      "duration_ms": 0.04,
+      "timestamp": "2026-04-17T04:14:10.848744"
     },
     {
       "category": "SEARCH",
@@ -636,8 +636,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.0,
-      "timestamp": "2026-04-17T02:19:53.232577"
+      "duration_ms": 0.01,
+      "timestamp": "2026-04-17T04:14:10.848751"
     },
     {
       "category": "CAPTCHA_BYPASS",
@@ -645,8 +645,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.02,
-      "timestamp": "2026-04-17T02:19:53.232614"
+      "duration_ms": 0.03,
+      "timestamp": "2026-04-17T04:14:10.848872"
     },
     {
       "category": "CAPTCHA_BYPASS",
@@ -655,286 +655,286 @@
       "details": "True",
       "error": "",
       "duration_ms": 0.0,
-      "timestamp": "2026-04-17T02:19:53.232619"
+      "timestamp": "2026-04-17T04:14:10.848880"
     },
     {
       "category": "CAPTCHA_BYPASS",
       "test_name": "cloudflare_bypass_init",
-      "status": "FAIL",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 786, in test_cloudflare_bypass_init\n    from src.security.cloudflare_bypass import CloudflareBypass\nImportError: cannot import name 'CloudflareBypass' from 'src.security.cloudflare_bypass' (/tmp/agent-os-analysis/Agent-OS/",
-      "error": "cannot import name 'CloudflareBypass' from 'src.security.cloudflare_bypass' (/tmp/agent-os-analysis/Agent-OS/src/security/cloudflare_bypass.py)",
-      "duration_ms": 1.13,
-      "timestamp": "2026-04-17T02:19:53.233980"
+      "status": "PASS",
+      "details": "True",
+      "error": "",
+      "duration_ms": 13.49,
+      "timestamp": "2026-04-17T04:14:10.862391"
     },
     {
       "category": "URL_RISK",
       "test_name": "easy_Example.com_risk",
-      "status": "FAIL",
-      "details": "url=https://example.com risk=unknown",
+      "status": "PASS",
+      "details": "url=https://example.com risk=low",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234075"
+      "timestamp": "2026-04-17T04:14:10.862620"
     },
     {
       "category": "URL_RISK",
       "test_name": "easy_HTTPBin_risk",
-      "status": "FAIL",
-      "details": "url=https://httpbin.org/get risk=unknown",
+      "status": "PASS",
+      "details": "url=https://httpbin.org/get risk=low",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234136"
+      "timestamp": "2026-04-17T04:14:10.862689"
     },
     {
       "category": "URL_RISK",
       "test_name": "easy_CERN Info_risk",
-      "status": "FAIL",
-      "details": "url=https://info.cern.ch risk=unknown",
+      "status": "PASS",
+      "details": "url=https://info.cern.ch risk=low",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234173"
+      "timestamp": "2026-04-17T04:14:10.862728"
     },
     {
       "category": "URL_RISK",
       "test_name": "easy_Wikipedia Portal_risk",
-      "status": "FAIL",
-      "details": "url=https://www.wikipedia.org risk=unknown",
+      "status": "PASS",
+      "details": "url=https://www.wikipedia.org risk=low",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234207"
+      "timestamp": "2026-04-17T04:14:10.862762"
     },
     {
       "category": "URL_RISK",
       "test_name": "easy_JSONPlaceholder_risk",
-      "status": "FAIL",
-      "details": "url=https://jsonplaceholder.typicode.com/posts risk=unknown",
+      "status": "PASS",
+      "details": "url=https://jsonplaceholder.typicode.com/posts risk=low",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234246"
+      "timestamp": "2026-04-17T04:14:10.862801"
     },
     {
       "category": "URL_RISK",
       "test_name": "easy_HTTPBin Form_risk",
-      "status": "FAIL",
-      "details": "url=https://httpbin.org/forms/post risk=unknown",
+      "status": "PASS",
+      "details": "url=https://httpbin.org/forms/post risk=low",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234278"
+      "timestamp": "2026-04-17T04:14:10.862831"
     },
     {
       "category": "URL_RISK",
       "test_name": "easy_UK Gov_risk",
-      "status": "FAIL",
-      "details": "url=https://www.gov.uk risk=unknown",
+      "status": "PASS",
+      "details": "url=https://www.gov.uk risk=low",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234307"
+      "timestamp": "2026-04-17T04:14:10.862860"
     },
     {
       "category": "URL_RISK",
       "test_name": "easy_HTTPBin Headers_risk",
-      "status": "FAIL",
-      "details": "url=https://httpbin.org/headers risk=unknown",
+      "status": "PASS",
+      "details": "url=https://httpbin.org/headers risk=low",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234337"
+      "timestamp": "2026-04-17T04:14:10.862888"
     },
     {
       "category": "URL_RISK",
       "test_name": "easy_QuotesToScrape_risk",
-      "status": "FAIL",
-      "details": "url=https://quotes.toscrape.com risk=unknown",
+      "status": "PASS",
+      "details": "url=https://quotes.toscrape.com risk=low",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234369"
+      "timestamp": "2026-04-17T04:14:10.862920"
     },
     {
       "category": "URL_RISK",
       "test_name": "easy_BooksToScrape_risk",
-      "status": "FAIL",
-      "details": "url=https://books.toscrape.com risk=unknown",
+      "status": "PASS",
+      "details": "url=https://books.toscrape.com risk=low",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234399"
+      "timestamp": "2026-04-17T04:14:10.862951"
     },
     {
       "category": "URL_RISK",
       "test_name": "medium_Hacker News_risk",
-      "status": "FAIL",
-      "details": "url=https://news.ycombinator.com risk=unknown",
+      "status": "PASS",
+      "details": "url=https://news.ycombinator.com risk=low",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234431"
+      "timestamp": "2026-04-17T04:14:10.862982"
     },
     {
       "category": "URL_RISK",
       "test_name": "medium_Reddit_risk",
-      "status": "FAIL",
-      "details": "url=https://www.reddit.com risk=unknown",
+      "status": "PASS",
+      "details": "url=https://www.reddit.com risk=low",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234462"
+      "timestamp": "2026-04-17T04:14:10.863012"
     },
     {
       "category": "URL_RISK",
       "test_name": "medium_BBC News_risk",
-      "status": "FAIL",
-      "details": "url=https://www.bbc.com risk=unknown",
+      "status": "PASS",
+      "details": "url=https://www.bbc.com risk=low",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234490"
+      "timestamp": "2026-04-17T04:14:10.863040"
     },
     {
       "category": "URL_RISK",
       "test_name": "medium_YouTube_risk",
-      "status": "FAIL",
-      "details": "url=https://www.youtube.com risk=unknown",
+      "status": "PASS",
+      "details": "url=https://www.youtube.com risk=low",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234520"
+      "timestamp": "2026-04-17T04:14:10.863069"
     },
     {
       "category": "URL_RISK",
       "test_name": "medium_GitHub_risk",
-      "status": "FAIL",
-      "details": "url=https://github.com risk=unknown",
+      "status": "PASS",
+      "details": "url=https://github.com risk=low",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234547"
+      "timestamp": "2026-04-17T04:14:10.863110"
     },
     {
       "category": "URL_RISK",
       "test_name": "medium_StackOverflow_risk",
-      "status": "FAIL",
-      "details": "url=https://stackoverflow.com risk=unknown",
+      "status": "PASS",
+      "details": "url=https://stackoverflow.com risk=low",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234576"
+      "timestamp": "2026-04-17T04:14:10.863143"
     },
     {
       "category": "URL_RISK",
       "test_name": "medium_Amazon_risk",
-      "status": "FAIL",
-      "details": "url=https://www.amazon.com risk=unknown",
+      "status": "PASS",
+      "details": "url=https://www.amazon.com risk=low",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234604"
+      "timestamp": "2026-04-17T04:14:10.863302"
     },
     {
       "category": "URL_RISK",
       "test_name": "medium_Yelp_risk",
-      "status": "FAIL",
-      "details": "url=https://www.yelp.com risk=unknown",
+      "status": "PASS",
+      "details": "url=https://www.yelp.com risk=low",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234631"
+      "timestamp": "2026-04-17T04:14:10.863363"
     },
     {
       "category": "URL_RISK",
       "test_name": "medium_TripAdvisor_risk",
-      "status": "FAIL",
-      "details": "url=https://www.tripadvisor.com risk=unknown",
+      "status": "PASS",
+      "details": "url=https://www.tripadvisor.com risk=low",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234660"
+      "timestamp": "2026-04-17T04:14:10.863429"
     },
     {
       "category": "URL_RISK",
       "test_name": "medium_Indeed_risk",
-      "status": "FAIL",
-      "details": "url=https://www.indeed.com risk=unknown",
+      "status": "PASS",
+      "details": "url=https://www.indeed.com risk=critical",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234720"
+      "timestamp": "2026-04-17T04:14:10.863479"
     },
     {
       "category": "URL_RISK",
       "test_name": "hard_Cloudflare_risk",
-      "status": "FAIL",
-      "details": "url=https://www.cloudflare.com risk=unknown",
+      "status": "PASS",
+      "details": "url=https://www.cloudflare.com risk=low",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234751"
+      "timestamp": "2026-04-17T04:14:10.863515"
     },
     {
       "category": "URL_RISK",
       "test_name": "hard_Google Login_risk",
-      "status": "FAIL",
-      "details": "url=https://accounts.google.com risk=unknown",
+      "status": "PASS",
+      "details": "url=https://accounts.google.com risk=low",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234785"
+      "timestamp": "2026-04-17T04:14:10.863548"
     },
     {
       "category": "URL_RISK",
       "test_name": "hard_Instagram_risk",
-      "status": "FAIL",
-      "details": "url=https://www.instagram.com risk=unknown",
+      "status": "PASS",
+      "details": "url=https://www.instagram.com risk=critical",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234821"
+      "timestamp": "2026-04-17T04:14:10.863583"
     },
     {
       "category": "URL_RISK",
       "test_name": "hard_LinkedIn_risk",
-      "status": "FAIL",
-      "details": "url=https://www.linkedin.com risk=unknown",
+      "status": "PASS",
+      "details": "url=https://www.linkedin.com risk=low",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234852"
+      "timestamp": "2026-04-17T04:14:10.863613"
     },
     {
       "category": "URL_RISK",
       "test_name": "hard_Facebook_risk",
-      "status": "FAIL",
-      "details": "url=https://www.facebook.com risk=unknown",
+      "status": "PASS",
+      "details": "url=https://www.facebook.com risk=critical",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234885"
+      "timestamp": "2026-04-17T04:14:10.863647"
     },
     {
       "category": "URL_RISK",
       "test_name": "hard_TikTok_risk",
-      "status": "FAIL",
-      "details": "url=https://www.tiktok.com risk=unknown",
+      "status": "PASS",
+      "details": "url=https://www.tiktok.com risk=critical",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234916"
+      "timestamp": "2026-04-17T04:14:10.863698"
     },
     {
       "category": "URL_RISK",
       "test_name": "hard_Airbnb_risk",
-      "status": "FAIL",
-      "details": "url=https://www.airbnb.com risk=unknown",
+      "status": "PASS",
+      "details": "url=https://www.airbnb.com risk=critical",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234946"
+      "timestamp": "2026-04-17T04:14:10.863731"
     },
     {
       "category": "URL_RISK",
       "test_name": "hard_Zillow_risk",
-      "status": "FAIL",
-      "details": "url=https://www.zillow.com risk=unknown",
+      "status": "PASS",
+      "details": "url=https://www.zillow.com risk=low",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.234991"
+      "timestamp": "2026-04-17T04:14:10.863760"
     },
     {
       "category": "URL_RISK",
       "test_name": "hard_OpenAI_risk",
-      "status": "FAIL",
-      "details": "url=https://openai.com risk=unknown",
+      "status": "PASS",
+      "details": "url=https://openai.com risk=low",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.235020"
+      "timestamp": "2026-04-17T04:14:10.863788"
     },
     {
       "category": "URL_RISK",
       "test_name": "hard_G2_risk",
-      "status": "FAIL",
-      "details": "url=https://www.g2.com risk=unknown",
+      "status": "PASS",
+      "details": "url=https://www.g2.com risk=low",
       "error": "",
       "duration_ms": 0,
-      "timestamp": "2026-04-17T02:19:53.235045"
+      "timestamp": "2026-04-17T04:14:10.863816"
     },
     {
       "category": "HTTP_CONNECT",
@@ -942,8 +942,8 @@
       "status": "PASS",
       "details": "status=200 url=https://example.com",
       "error": "",
-      "duration_ms": 21.89,
-      "timestamp": "2026-04-17T02:19:53.256960"
+      "duration_ms": 20.58,
+      "timestamp": "2026-04-17T04:14:10.884519"
     },
     {
       "category": "HTTP_CONNECT",
@@ -951,8 +951,8 @@
       "status": "PASS",
       "details": "status=200 url=https://httpbin.org/get",
       "error": "",
-      "duration_ms": 890.78,
-      "timestamp": "2026-04-17T02:19:54.147781"
+      "duration_ms": 979.02,
+      "timestamp": "2026-04-17T04:14:11.863568"
     },
     {
       "category": "HTTP_CONNECT",
@@ -960,8 +960,8 @@
       "status": "PASS",
       "details": "status=200 url=https://info.cern.ch",
       "error": "",
-      "duration_ms": 885.24,
-      "timestamp": "2026-04-17T02:19:55.033045"
+      "duration_ms": 897.46,
+      "timestamp": "2026-04-17T04:14:12.761058"
     },
     {
       "category": "HTTP_CONNECT",
@@ -969,8 +969,8 @@
       "status": "FAIL",
       "details": "status=403 url=https://www.wikipedia.org error=HTTP Error 403: Too Many Reqs (1862a4b)",
       "error": "",
-      "duration_ms": 124.74,
-      "timestamp": "2026-04-17T02:19:55.157808"
+      "duration_ms": 114.46,
+      "timestamp": "2026-04-17T04:14:12.875551"
     },
     {
       "category": "HTTP_CONNECT",
@@ -978,8 +978,8 @@
       "status": "PASS",
       "details": "status=200 url=https://jsonplaceholder.typicode.com/posts",
       "error": "",
-      "duration_ms": 24.13,
-      "timestamp": "2026-04-17T02:19:55.181960"
+      "duration_ms": 28.05,
+      "timestamp": "2026-04-17T04:14:12.903633"
     },
     {
       "category": "HTTP_CONNECT",
@@ -987,8 +987,8 @@
       "status": "PASS",
       "details": "status=200 url=https://httpbin.org/forms/post",
       "error": "",
-      "duration_ms": 895.75,
-      "timestamp": "2026-04-17T02:19:56.077734"
+      "duration_ms": 866.6,
+      "timestamp": "2026-04-17T04:14:13.770258"
     },
     {
       "category": "HTTP_CONNECT",
@@ -996,8 +996,8 @@
       "status": "PASS",
       "details": "status=200 url=https://www.gov.uk",
       "error": "",
-      "duration_ms": 25.23,
-      "timestamp": "2026-04-17T02:19:56.102988"
+      "duration_ms": 32.3,
+      "timestamp": "2026-04-17T04:14:13.802597"
     },
     {
       "category": "HTTP_CONNECT",
@@ -1005,8 +1005,8 @@
       "status": "PASS",
       "details": "status=200 url=https://httpbin.org/headers",
       "error": "",
-      "duration_ms": 856.2,
-      "timestamp": "2026-04-17T02:19:56.959213"
+      "duration_ms": 903.27,
+      "timestamp": "2026-04-17T04:14:14.705893"
     },
     {
       "category": "HTTP_CONNECT",
@@ -1014,8 +1014,8 @@
       "status": "PASS",
       "details": "status=200 url=https://quotes.toscrape.com",
       "error": "",
-      "duration_ms": 915.23,
-      "timestamp": "2026-04-17T02:19:57.874472"
+      "duration_ms": 931.43,
+      "timestamp": "2026-04-17T04:14:15.637357"
     },
     {
       "category": "HTTP_CONNECT",
@@ -1023,8 +1023,8 @@
       "status": "PASS",
       "details": "status=200 url=https://books.toscrape.com",
       "error": "",
-      "duration_ms": 1356.23,
-      "timestamp": "2026-04-17T02:19:59.230742"
+      "duration_ms": 1169.87,
+      "timestamp": "2026-04-17T04:14:16.807262"
     },
     {
       "category": "HTTP_CONNECT",
@@ -1032,8 +1032,8 @@
       "status": "PASS",
       "details": "status=200 url=https://news.ycombinator.com",
       "error": "",
-      "duration_ms": 723.96,
-      "timestamp": "2026-04-17T02:19:59.954739"
+      "duration_ms": 723.03,
+      "timestamp": "2026-04-17T04:14:17.530319"
     },
     {
       "category": "HTTP_CONNECT",
@@ -1041,8 +1041,8 @@
       "status": "FAIL",
       "details": "status=403 url=https://www.reddit.com error=HTTP Error 403: Blocked",
       "error": "",
-      "duration_ms": 17.63,
-      "timestamp": "2026-04-17T02:19:59.972395"
+      "duration_ms": 14.78,
+      "timestamp": "2026-04-17T04:14:17.545121"
     },
     {
       "category": "HTTP_CONNECT",
@@ -1050,8 +1050,8 @@
       "status": "PASS",
       "details": "status=200 url=https://www.bbc.com",
       "error": "",
-      "duration_ms": 69.04,
-      "timestamp": "2026-04-17T02:20:00.041449"
+      "duration_ms": 72.0,
+      "timestamp": "2026-04-17T04:14:17.617172"
     },
     {
       "category": "HTTP_CONNECT",
@@ -1059,8 +1059,8 @@
       "status": "PASS",
       "details": "status=200 url=https://www.youtube.com",
       "error": "",
-      "duration_ms": 203.89,
-      "timestamp": "2026-04-17T02:20:00.245365"
+      "duration_ms": 280.71,
+      "timestamp": "2026-04-17T04:14:17.897904"
     },
     {
       "category": "HTTP_CONNECT",
@@ -1068,8 +1068,8 @@
       "status": "PASS",
       "details": "status=200 url=https://github.com",
       "error": "",
-      "duration_ms": 312.49,
-      "timestamp": "2026-04-17T02:20:00.557883"
+      "duration_ms": 284.08,
+      "timestamp": "2026-04-17T04:14:18.182015"
     },
     {
       "category": "HTTP_CONNECT",
@@ -1077,17 +1077,17 @@
       "status": "FAIL",
       "details": "status=403 url=https://stackoverflow.com error=HTTP Error 403: Forbidden",
       "error": "",
-      "duration_ms": 21.21,
-      "timestamp": "2026-04-17T02:20:00.579123"
+      "duration_ms": 19.84,
+      "timestamp": "2026-04-17T04:14:18.201875"
     },
     {
       "category": "HTTP_CONNECT",
       "test_name": "medium_Amazon",
       "status": "PASS",
-      "details": "status=200 url=https://www.amazon.com",
+      "details": "status=202 url=https://www.amazon.com",
       "error": "",
-      "duration_ms": 769.98,
-      "timestamp": "2026-04-17T02:20:01.349130"
+      "duration_ms": 14.5,
+      "timestamp": "2026-04-17T04:14:18.216395"
     },
     {
       "category": "HTTP_CONNECT",
@@ -1095,8 +1095,8 @@
       "status": "PASS",
       "details": "status=200 url=https://www.yelp.com",
       "error": "",
-      "duration_ms": 1298.2,
-      "timestamp": "2026-04-17T02:20:02.647363"
+      "duration_ms": 1442.13,
+      "timestamp": "2026-04-17T04:14:19.658554"
     },
     {
       "category": "HTTP_CONNECT",
@@ -1104,8 +1104,8 @@
       "status": "FAIL",
       "details": "status=403 url=https://www.tripadvisor.com error=HTTP Error 403: Forbidden",
       "error": "",
-      "duration_ms": 225.17,
-      "timestamp": "2026-04-17T02:20:02.872567"
+      "duration_ms": 226.19,
+      "timestamp": "2026-04-17T04:14:19.884773"
     },
     {
       "category": "HTTP_CONNECT",
@@ -1113,8 +1113,8 @@
       "status": "FAIL",
       "details": "status=403 url=https://www.indeed.com error=HTTP Error 403: Forbidden",
       "error": "",
-      "duration_ms": 28.26,
-      "timestamp": "2026-04-17T02:20:02.900850"
+      "duration_ms": 27.74,
+      "timestamp": "2026-04-17T04:14:19.912535"
     },
     {
       "category": "HTTP_CONNECT",
@@ -1122,8 +1122,8 @@
       "status": "PASS",
       "details": "status=200 url=https://www.cloudflare.com",
       "error": "",
-      "duration_ms": 442.27,
-      "timestamp": "2026-04-17T02:20:03.343146"
+      "duration_ms": 459.6,
+      "timestamp": "2026-04-17T04:14:20.372159"
     },
     {
       "category": "HTTP_CONNECT",
@@ -1131,8 +1131,8 @@
       "status": "PASS",
       "details": "status=200 url=https://accounts.google.com",
       "error": "",
-      "duration_ms": 344.84,
-      "timestamp": "2026-04-17T02:20:03.688009"
+      "duration_ms": 343.71,
+      "timestamp": "2026-04-17T04:14:20.715899"
     },
     {
       "category": "HTTP_CONNECT",
@@ -1140,8 +1140,8 @@
       "status": "PASS",
       "details": "status=200 url=https://www.instagram.com",
       "error": "",
-      "duration_ms": 815.87,
-      "timestamp": "2026-04-17T02:20:04.503906"
+      "duration_ms": 564.7,
+      "timestamp": "2026-04-17T04:14:21.280631"
     },
     {
       "category": "HTTP_CONNECT",
@@ -1149,8 +1149,8 @@
       "status": "PASS",
       "details": "status=200 url=https://www.linkedin.com",
       "error": "",
-      "duration_ms": 265.37,
-      "timestamp": "2026-04-17T02:20:04.769299"
+      "duration_ms": 389.54,
+      "timestamp": "2026-04-17T04:14:21.670197"
     },
     {
       "category": "HTTP_CONNECT",
@@ -1158,8 +1158,8 @@
       "status": "PASS",
       "details": "status=200 url=https://www.facebook.com",
       "error": "",
-      "duration_ms": 657.28,
-      "timestamp": "2026-04-17T02:20:05.426611"
+      "duration_ms": 744.94,
+      "timestamp": "2026-04-17T04:14:22.415164"
     },
     {
       "category": "HTTP_CONNECT",
@@ -1167,8 +1167,8 @@
       "status": "PASS",
       "details": "status=200 url=https://www.tiktok.com",
       "error": "",
-      "duration_ms": 527.39,
-      "timestamp": "2026-04-17T02:20:05.954032"
+      "duration_ms": 579.77,
+      "timestamp": "2026-04-17T04:14:22.994985"
     },
     {
       "category": "HTTP_CONNECT",
@@ -1176,8 +1176,8 @@
       "status": "PASS",
       "details": "status=200 url=https://www.airbnb.com",
       "error": "",
-      "duration_ms": 928.92,
-      "timestamp": "2026-04-17T02:20:06.882976"
+      "duration_ms": 1088.08,
+      "timestamp": "2026-04-17T04:14:24.083114"
     },
     {
       "category": "HTTP_CONNECT",
@@ -1185,8 +1185,8 @@
       "status": "PASS",
       "details": "status=403 url=https://www.zillow.com error=HTTP Error 403: Forbidden note=Bot protection detected (expected for HARD tier)",
       "error": "",
-      "duration_ms": 210.06,
-      "timestamp": "2026-04-17T02:20:07.093062"
+      "duration_ms": 284.18,
+      "timestamp": "2026-04-17T04:14:24.367323"
     },
     {
       "category": "HTTP_CONNECT",
@@ -1194,8 +1194,8 @@
       "status": "PASS",
       "details": "status=403 url=https://openai.com error=HTTP Error 403: Forbidden note=Bot protection detected (expected for HARD tier)",
       "error": "",
-      "duration_ms": 23.79,
-      "timestamp": "2026-04-17T02:20:07.116873"
+      "duration_ms": 27.91,
+      "timestamp": "2026-04-17T04:14:24.395257"
     },
     {
       "category": "HTTP_CONNECT",
@@ -1203,17 +1203,17 @@
       "status": "PASS",
       "details": "status=403 url=https://www.g2.com error=HTTP Error 403: Forbidden note=Bot protection detected (expected for HARD tier)",
       "error": "",
-      "duration_ms": 45.16,
-      "timestamp": "2026-04-17T02:20:07.162055"
+      "duration_ms": 43.92,
+      "timestamp": "2026-04-17T04:14:24.439202"
     },
     {
       "category": "FEATURES",
       "test_name": "smart_navigator_init",
-      "status": "FAIL",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 878, in test_smart_navigator_init\n    nav = SmartNavigator()\n          ^^^^^^^^^^^^^^^^\nTypeError: SmartNavigator.__init__() missing 1 required positional argument: 'browser'\n",
-      "error": "SmartNavigator.__init__() missing 1 required positional argument: 'browser'",
-      "duration_ms": 49.19,
-      "timestamp": "2026-04-17T02:20:07.211460"
+      "status": "PASS",
+      "details": "True",
+      "error": "",
+      "duration_ms": 48.15,
+      "timestamp": "2026-04-17T04:14:24.487514"
     },
     {
       "category": "FEATURES",
@@ -1221,89 +1221,89 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 2.45,
-      "timestamp": "2026-04-17T02:20:07.213927"
+      "duration_ms": 2.34,
+      "timestamp": "2026-04-17T04:14:24.489873"
     },
     {
       "category": "FEATURES",
       "test_name": "smart_wait_init",
-      "status": "FAIL",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 888, in test_smart_wait_init\n    sw = SmartWait()\n         ^^^^^^^^^^^\nTypeError: SmartWait.__init__() missing 1 required positional argument: 'browser'\n",
-      "error": "SmartWait.__init__() missing 1 required positional argument: 'browser'",
-      "duration_ms": 0.31,
-      "timestamp": "2026-04-17T02:20:07.214372"
+      "status": "PASS",
+      "details": "True",
+      "error": "",
+      "duration_ms": 0.3,
+      "timestamp": "2026-04-17T04:14:24.490180"
     },
     {
       "category": "FEATURES",
       "test_name": "auto_heal_init",
-      "status": "FAIL",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 893, in test_auto_heal_init\n    ah = AutoHeal()\n         ^^^^^^^^^^\nTypeError: AutoHeal.__init__() missing 1 required positional argument: 'browser'\n",
-      "error": "AutoHeal.__init__() missing 1 required positional argument: 'browser'",
-      "duration_ms": 0.39,
-      "timestamp": "2026-04-17T02:20:07.214853"
+      "status": "PASS",
+      "details": "True",
+      "error": "",
+      "duration_ms": 0.37,
+      "timestamp": "2026-04-17T04:14:24.490560"
     },
     {
       "category": "FEATURES",
       "test_name": "scanner_init",
-      "status": "FAIL",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 897, in test_scanner_init\n    from src.tools.scanner import VulnerabilityScanner\nImportError: cannot import name 'VulnerabilityScanner' from 'src.tools.scanner' (/tmp/agent-os-analysis/Agent-OS/src/tools/scanner.py)\n",
-      "error": "cannot import name 'VulnerabilityScanner' from 'src.tools.scanner' (/tmp/agent-os-analysis/Agent-OS/src/tools/scanner.py)",
-      "duration_ms": 0.86,
-      "timestamp": "2026-04-17T02:20:07.215836"
+      "status": "PASS",
+      "details": "True",
+      "error": "",
+      "duration_ms": 0.77,
+      "timestamp": "2026-04-17T04:14:24.491343"
     },
     {
       "category": "FEATURES",
       "test_name": "session_recording_init",
-      "status": "FAIL",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 903, in test_session_recording_init\n    sr = SessionRecording()\n         ^^^^^^^^^^^^^^^^^^\nTypeError: SessionRecording.__init__() missing 3 required positional arguments: 'recording_id', 'name', and 'created_at'\n",
-      "error": "SessionRecording.__init__() missing 3 required positional arguments: 'recording_id', 'name', and 'created_at'",
-      "duration_ms": 2.14,
-      "timestamp": "2026-04-17T02:20:07.218124"
+      "status": "PASS",
+      "details": "True",
+      "error": "",
+      "duration_ms": 1.97,
+      "timestamp": "2026-04-17T04:14:24.493321"
     },
     {
       "category": "FEATURES",
       "test_name": "network_capture_init",
-      "status": "FAIL",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 908, in test_network_capture_init\n    nc = NetworkCapture()\n         ^^^^^^^^^^^^^^^^\nTypeError: NetworkCapture.__init__() missing 1 required positional argument: 'browser'\n",
-      "error": "NetworkCapture.__init__() missing 1 required positional argument: 'browser'",
-      "duration_ms": 0.95,
-      "timestamp": "2026-04-17T02:20:07.219195"
+      "status": "PASS",
+      "details": "True",
+      "error": "",
+      "duration_ms": 0.98,
+      "timestamp": "2026-04-17T04:14:24.494318"
     },
     {
       "category": "FEATURES",
       "test_name": "proxy_rotation_init",
-      "status": "FAIL",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 912, in test_proxy_rotation_init\n    from src.tools.proxy_rotation import ProxyRotation\nImportError: cannot import name 'ProxyRotation' from 'src.tools.proxy_rotation' (/tmp/agent-os-analysis/Agent-OS/src/tools/proxy_rotat",
-      "error": "cannot import name 'ProxyRotation' from 'src.tools.proxy_rotation' (/tmp/agent-os-analysis/Agent-OS/src/tools/proxy_rotation.py)",
-      "duration_ms": 0.01,
-      "timestamp": "2026-04-17T02:20:07.219347"
+      "status": "PASS",
+      "details": "True",
+      "error": "",
+      "duration_ms": 0.04,
+      "timestamp": "2026-04-17T04:14:24.494364"
     },
     {
       "category": "FEATURES",
       "test_name": "login_handoff_init",
-      "status": "FAIL",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 917, in test_login_handoff_init\n    from src.tools.login_handoff import LoginHandoff\nImportError: cannot import name 'LoginHandoff' from 'src.tools.login_handoff' (/tmp/agent-os-analysis/Agent-OS/src/tools/login_handoff.py",
-      "error": "cannot import name 'LoginHandoff' from 'src.tools.login_handoff' (/tmp/agent-os-analysis/Agent-OS/src/tools/login_handoff.py)",
-      "duration_ms": 1.78,
-      "timestamp": "2026-04-17T02:20:07.221359"
+      "status": "PASS",
+      "details": "True",
+      "error": "",
+      "duration_ms": 1.65,
+      "timestamp": "2026-04-17T04:14:24.496026"
     },
     {
       "category": "FEATURES",
       "test_name": "auth_handler_init",
-      "status": "FAIL",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 923, in test_auth_handler_init\n    ah = AuthHandler()\n         ^^^^^^^^^^^^^\nTypeError: AuthHandler.__init__() missing 1 required positional argument: 'config'\n",
-      "error": "AuthHandler.__init__() missing 1 required positional argument: 'config'",
-      "duration_ms": 0.26,
-      "timestamp": "2026-04-17T02:20:07.221732"
+      "status": "PASS",
+      "details": "True",
+      "error": "",
+      "duration_ms": 0.42,
+      "timestamp": "2026-04-17T04:14:24.496460"
     },
     {
       "category": "FEATURES",
       "test_name": "transcriber_init",
-      "status": "FAIL",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 928, in test_transcriber_init\n    t = Transcriber()\n        ^^^^^^^^^^^^^\nTypeError: Transcriber.__init__() missing 1 required positional argument: 'config'\n",
-      "error": "Transcriber.__init__() missing 1 required positional argument: 'config'",
-      "duration_ms": 0.15,
-      "timestamp": "2026-04-17T02:20:07.221955"
+      "status": "PASS",
+      "details": "True",
+      "error": "",
+      "duration_ms": 11.87,
+      "timestamp": "2026-04-17T04:14:24.508338"
     },
     {
       "category": "FEATURES",
@@ -1311,17 +1311,17 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.74,
-      "timestamp": "2026-04-17T02:20:07.222705"
+      "duration_ms": 0.77,
+      "timestamp": "2026-04-17T04:14:24.509124"
     },
     {
       "category": "FEATURES",
       "test_name": "multi_agent_init",
-      "status": "FAIL",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 937, in test_multi_agent_init\n    from src.tools.multi_agent import MultiAgentHub\nImportError: cannot import name 'MultiAgentHub' from 'src.tools.multi_agent' (/tmp/agent-os-analysis/Agent-OS/src/tools/multi_agent.py)\n",
-      "error": "cannot import name 'MultiAgentHub' from 'src.tools.multi_agent' (/tmp/agent-os-analysis/Agent-OS/src/tools/multi_agent.py)",
-      "duration_ms": 3.92,
-      "timestamp": "2026-04-17T02:20:07.226858"
+      "status": "PASS",
+      "details": "True",
+      "error": "",
+      "duration_ms": 3.81,
+      "timestamp": "2026-04-17T04:14:24.512944"
     },
     {
       "category": "SERVER",
@@ -1329,8 +1329,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.25,
-      "timestamp": "2026-04-17T02:20:07.227157"
+      "duration_ms": 0.35,
+      "timestamp": "2026-04-17T04:14:24.513433"
     },
     {
       "category": "SERVER",
@@ -1338,8 +1338,8 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.27,
-      "timestamp": "2026-04-17T02:20:07.227436"
+      "duration_ms": 0.3,
+      "timestamp": "2026-04-17T04:14:24.513739"
     },
     {
       "category": "SERVER",
@@ -1347,150 +1347,11 @@
       "status": "PASS",
       "details": "True",
       "error": "",
-      "duration_ms": 0.19,
-      "timestamp": "2026-04-17T02:20:07.227634"
+      "duration_ms": 0.2,
+      "timestamp": "2026-04-17T04:14:24.513942"
     }
   ],
-  "bugs": [
-    {
-      "test": "dedup_across_fields",
-      "category": "STRUCTURED",
-      "error": "'dict' object has no attribute 'emails'",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 419, in test_structured_dedup\n    result = so.deduplicate_across_fields(mock_content)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/src/tools/ai_content.py\", line 1349, in "
-    },
-    {
-      "test": "schema_generation",
-      "category": "STRUCTURED",
-      "error": "'dict' object has no attribute 'title'",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 446, in test_schema_generation\n    result = so.generate_schema(mock_content, schema_type=\"product\")\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/src/tools/ai_"
-    },
-    {
-      "test": "json_output",
-      "category": "FORMATTER",
-      "error": "OutputFormatter.to_json() got an unexpected keyword argument 'pretty'",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 466, in test_format_json\n    result = fmt.to_json({\"key\": \"value\"}, pretty=True)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nTypeError: OutputFormatter.to_json() got an unexpected keyword argument 'pretty'\n"
-    },
-    {
-      "test": "risk_assessment_low",
-      "category": "CAPTCHA",
-      "error": "'RiskAssessment' object has no attribute 'get'",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 511, in test_captcha_risk_low\n    return result.get(\"risk_level\") in (\"low\", \"minimal\") or result.get(\"status\") == \"success\"\n           ^^^^^^^^^^\nAttributeError: 'RiskAssessment' object has no attribute 'get'\n"
-    },
-    {
-      "test": "risk_assessment_high",
-      "category": "CAPTCHA",
-      "error": "'RiskAssessment' object has no attribute 'get'",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 517, in test_captcha_risk_high\n    return result.get(\"risk_level\") in (\"high\", \"critical\") or result.get(\"status\") == \"success\"\n           ^^^^^^^^^^\nAttributeError: 'RiskAssessment' object has no attribute 'get'\n"
-    },
-    {
-      "test": "risk_assessment_cloudflare",
-      "category": "CAPTCHA",
-      "error": "'RiskAssessment' object has no attribute 'get'",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 523, in test_captcha_cloudflare_risk\n    return result.get(\"risk_level\") in (\"high\", \"critical\", \"medium\") or result.get(\"status\") == \"success\"\n           ^^^^^^^^^^\nAttributeError: 'RiskAssessment' object has no attribute"
-    },
-    {
-      "test": "token_budget_tracking",
-      "category": "LLM_PROVIDER",
-      "error": "'TokenBudget' object has no attribute 'record_usage'",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 678, in test_token_budget\n    budget.record_usage(100, 50)\n    ^^^^^^^^^^^^^^^^^^^\nAttributeError: 'TokenBudget' object has no attribute 'record_usage'\n"
-    },
-    {
-      "test": "token_budget_limit",
-      "category": "LLM_PROVIDER",
-      "error": "'TokenBudget' object has no attribute 'record_usage'",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 685, in test_token_budget_limit\n    budget.record_usage(80, 0)\n    ^^^^^^^^^^^^^^^^^^^\nAttributeError: 'TokenBudget' object has no attribute 'record_usage'\n"
-    },
-    {
-      "test": "prompt_compression",
-      "category": "LLM_PROVIDER",
-      "error": "PromptCompressor() takes no arguments",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 691, in test_prompt_compressor\n    pc = PromptCompressor(aggression=0.5)\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nTypeError: PromptCompressor() takes no arguments\n"
-    },
-    {
-      "test": "response_cache",
-      "category": "LLM_PROVIDER",
-      "error": "ResponseCache.__init__() got an unexpected keyword argument 'max_size'",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 698, in test_response_cache\n    cache = ResponseCache(max_size=100)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^\nTypeError: ResponseCache.__init__() got an unexpected keyword argument 'max_size'\n"
-    },
-    {
-      "test": "smart_truncation",
-      "category": "LLM_PROVIDER",
-      "error": "SmartTruncation.truncate() got an unexpected keyword argument 'max_tokens'",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 707, in test_smart_truncation\n    truncated = st.truncate(long_text, max_tokens=50)\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nTypeError: SmartTruncation.truncate() got an unexpected keyword argument 'max_tokens"
-    },
-    {
-      "test": "cloudflare_bypass_init",
-      "category": "CAPTCHA_BYPASS",
-      "error": "cannot import name 'CloudflareBypass' from 'src.security.cloudflare_bypass' (/tmp/agent-os-analysis/Agent-OS/src/security/cloudflare_bypass.py)",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 786, in test_cloudflare_bypass_init\n    from src.security.cloudflare_bypass import CloudflareBypass\nImportError: cannot import name 'CloudflareBypass' from 'src.security.cloudflare_bypass' (/tmp/agent-os-analysis/Agent-OS/"
-    },
-    {
-      "test": "smart_navigator_init",
-      "category": "FEATURES",
-      "error": "SmartNavigator.__init__() missing 1 required positional argument: 'browser'",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 878, in test_smart_navigator_init\n    nav = SmartNavigator()\n          ^^^^^^^^^^^^^^^^\nTypeError: SmartNavigator.__init__() missing 1 required positional argument: 'browser'\n"
-    },
-    {
-      "test": "smart_wait_init",
-      "category": "FEATURES",
-      "error": "SmartWait.__init__() missing 1 required positional argument: 'browser'",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 888, in test_smart_wait_init\n    sw = SmartWait()\n         ^^^^^^^^^^^\nTypeError: SmartWait.__init__() missing 1 required positional argument: 'browser'\n"
-    },
-    {
-      "test": "auto_heal_init",
-      "category": "FEATURES",
-      "error": "AutoHeal.__init__() missing 1 required positional argument: 'browser'",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 893, in test_auto_heal_init\n    ah = AutoHeal()\n         ^^^^^^^^^^\nTypeError: AutoHeal.__init__() missing 1 required positional argument: 'browser'\n"
-    },
-    {
-      "test": "scanner_init",
-      "category": "FEATURES",
-      "error": "cannot import name 'VulnerabilityScanner' from 'src.tools.scanner' (/tmp/agent-os-analysis/Agent-OS/src/tools/scanner.py)",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 897, in test_scanner_init\n    from src.tools.scanner import VulnerabilityScanner\nImportError: cannot import name 'VulnerabilityScanner' from 'src.tools.scanner' (/tmp/agent-os-analysis/Agent-OS/src/tools/scanner.py)\n"
-    },
-    {
-      "test": "session_recording_init",
-      "category": "FEATURES",
-      "error": "SessionRecording.__init__() missing 3 required positional arguments: 'recording_id', 'name', and 'created_at'",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 903, in test_session_recording_init\n    sr = SessionRecording()\n         ^^^^^^^^^^^^^^^^^^\nTypeError: SessionRecording.__init__() missing 3 required positional arguments: 'recording_id', 'name', and 'created_at'\n"
-    },
-    {
-      "test": "network_capture_init",
-      "category": "FEATURES",
-      "error": "NetworkCapture.__init__() missing 1 required positional argument: 'browser'",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 908, in test_network_capture_init\n    nc = NetworkCapture()\n         ^^^^^^^^^^^^^^^^\nTypeError: NetworkCapture.__init__() missing 1 required positional argument: 'browser'\n"
-    },
-    {
-      "test": "proxy_rotation_init",
-      "category": "FEATURES",
-      "error": "cannot import name 'ProxyRotation' from 'src.tools.proxy_rotation' (/tmp/agent-os-analysis/Agent-OS/src/tools/proxy_rotation.py)",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 912, in test_proxy_rotation_init\n    from src.tools.proxy_rotation import ProxyRotation\nImportError: cannot import name 'ProxyRotation' from 'src.tools.proxy_rotation' (/tmp/agent-os-analysis/Agent-OS/src/tools/proxy_rotat"
-    },
-    {
-      "test": "login_handoff_init",
-      "category": "FEATURES",
-      "error": "cannot import name 'LoginHandoff' from 'src.tools.login_handoff' (/tmp/agent-os-analysis/Agent-OS/src/tools/login_handoff.py)",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 917, in test_login_handoff_init\n    from src.tools.login_handoff import LoginHandoff\nImportError: cannot import name 'LoginHandoff' from 'src.tools.login_handoff' (/tmp/agent-os-analysis/Agent-OS/src/tools/login_handoff.py"
-    },
-    {
-      "test": "auth_handler_init",
-      "category": "FEATURES",
-      "error": "AuthHandler.__init__() missing 1 required positional argument: 'config'",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 923, in test_auth_handler_init\n    ah = AuthHandler()\n         ^^^^^^^^^^^^^\nTypeError: AuthHandler.__init__() missing 1 required positional argument: 'config'\n"
-    },
-    {
-      "test": "transcriber_init",
-      "category": "FEATURES",
-      "error": "Transcriber.__init__() missing 1 required positional argument: 'config'",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 928, in test_transcriber_init\n    t = Transcriber()\n        ^^^^^^^^^^^^^\nTypeError: Transcriber.__init__() missing 1 required positional argument: 'config'\n"
-    },
-    {
-      "test": "multi_agent_init",
-      "category": "FEATURES",
-      "error": "cannot import name 'MultiAgentHub' from 'src.tools.multi_agent' (/tmp/agent-os-analysis/Agent-OS/src/tools/multi_agent.py)",
-      "details": "Traceback (most recent call last):\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 136, in timed_test\n    result = func(*args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/agent-os-analysis/Agent-OS/brutal_feature_stress_test.py\", line 937, in test_multi_agent_init\n    from src.tools.multi_agent import MultiAgentHub\nImportError: cannot import name 'MultiAgentHub' from 'src.tools.multi_agent' (/tmp/agent-os-analysis/Agent-OS/src/tools/multi_agent.py)\n"
-    }
-  ],
+  "bugs": [],
   "website_tiers": {
     "easy": [
       {

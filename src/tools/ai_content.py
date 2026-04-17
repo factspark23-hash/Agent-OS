@@ -1286,6 +1286,45 @@ class AIStructuredOutput:
         """
         self.llm_provider = llm_provider
         self.normalizer = DataNormalizer()
+    @staticmethod
+    def _to_ai_content(content):
+        """Convert a dict or AIContent to AIContent object.
+        
+        Handles the common case where a raw dict is passed instead of
+        an AIContent object. Maps dict keys to AIContent fields.
+        """
+        if isinstance(content, AIContent):
+            return content
+        if isinstance(content, dict):
+            return AIContent(
+                content_type=content.get("content_type", "unknown"),
+                url=content.get("url", ""),
+                title=content.get("title", ""),
+                domain=content.get("domain", ""),
+                language=content.get("language", ""),
+                summary=content.get("summary", ""),
+                main_text=content.get("main_text", content.get("text", "")),
+                headings=content.get("headings", []),
+                paragraphs=content.get("paragraphs", []),
+                tables=content.get("tables", []),
+                lists=content.get("lists", []),
+                code_blocks=content.get("code_blocks", []),
+                forms=content.get("forms", []),
+                links=content.get("links", []),
+                images=content.get("images", []),
+                emails=content.get("emails", []),
+                phones=content.get("phones", []),
+                prices=content.get("prices", []),
+                dates=content.get("dates", []),
+                schema_org=content.get("schema_org", []),
+                open_graph=content.get("open_graph", {}),
+                meta=content.get("meta", {}),
+                word_count=content.get("word_count", 0),
+                confidence=content.get("confidence", 0.0),
+                extraction_method=content.get("extraction_method", ""),
+            )
+        raise TypeError(f"Expected AIContent or dict, got {type(content).__name__}")
+
 
     def process(self, content: AIContent) -> Dict[str, Any]:
         """
@@ -1297,6 +1336,7 @@ class AIStructuredOutput:
         Returns:
             Dict with status and StructuredOutput data
         """
+        content = self._to_ai_content(content)
         try:
             # Step 1: Normalize entities
             content = self.normalize_entities(content)
@@ -1342,6 +1382,7 @@ class AIStructuredOutput:
         E.g., same email in main_text AND emails list,
         same phone in summary AND phones list.
         """
+        content = self._to_ai_content(content)
         content = copy.deepcopy(content)
 
         # Build canonical sets of entities already in structured fields
@@ -1808,6 +1849,7 @@ class AIStructuredOutput:
         Returns:
             Dict matching schema.org or custom schema format
         """
+        content = self._to_ai_content(content)
         if schema_type == "auto":
             schema_type = self._detect_schema_type(content)
 
