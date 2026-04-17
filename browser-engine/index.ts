@@ -1,9 +1,12 @@
 /**
- * index.ts — Browser Engine Mini Service v2.1
+ * index.ts — Browser Engine Mini Service v3.0
  * Anti-detection browser engine powering social media automation.
  * Features: CDP Connection, Smart Browser Modes (Full/Light/Ghost),
- * Dual-Layer State Persistence, Handoff Controller, Auto Tab Management,
- * Rate Limiting, Request Validation, Graceful Shutdown.
+ * Dual-Layer State Persistence, Enforced Handover, Auto CAPTCHA Detection,
+ * Human-like Form Filling, Multi-page Forms, AI Content Extraction & Summarization,
+ * LLM-powered Agent Swarm, Auto Tab Management, Rate Limiting, Graceful Shutdown.
+ *
+ * Uses user's connected tool's LLM (z-ai-web-dev-sdk) — no separate LLM added.
  *
  * HTTP + WebSocket server on port 3003.
  */
@@ -42,6 +45,17 @@ import * as instagramAdapter from "./platforms/instagram";
 import * as twitterAdapter from "./platforms/twitter";
 import * as linkedinAdapter from "./platforms/linkedin";
 import * as facebookAdapter from "./platforms/facebook";
+import {
+  complete as llmComplete,
+  classify as llmClassify,
+  extract as llmExtract,
+  summarize as llmSummarize,
+  reasonAboutPage as llmReasonAboutPage,
+  planFormFill as llmPlanFormFill,
+  planSwarmQuery as llmPlanSwarmQuery,
+  isLLMAvailable,
+  getLLMStatus,
+} from "./llm-bridge";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -518,6 +532,193 @@ async function fillByRef(page: any, ref: string, value: string): Promise<void> {
   throw new Error(`Could not find input element with ref: ${ref}`);
 }
 
+// ─── Human-like Typing ───────────────────────────────────────────────────────
+
+/**
+ * Type text with human-like delays between keystrokes.
+ * Mimics natural typing patterns: variable speed, occasional pauses,
+ * faster on common patterns, slight acceleration mid-word.
+ */
+async function humanType(page: any, ref: string, value: string, options?: {
+  baseDelay?: number;   // Base delay in ms between keystrokes (default: 50)
+  variance?: number;    // Random variance ±ms (default: 30)
+  wordPause?: number;   // Extra pause between words in ms (default: 150)
+  mistakeChance?: number; // Probability of typo + correction per char (default: 0.02)
+}): Promise<void> {
+  const baseDelay = options?.baseDelay ?? 50;
+  const variance = options?.variance ?? 30;
+  const wordPause = options?.wordPause ?? 150;
+  const mistakeChance = options?.mistakeChance ?? 0.02;
+
+  // First, click on the element to focus it
+  await clickByRef(page, ref);
+
+  // Clear existing content
+  await page.keyboard.press("Control+a");
+  await page.keyboard.press("Backspace");
+
+  // Type character by character with human-like delays
+  for (let i = 0; i < value.length; i++) {
+    const char = value[i];
+
+    // Simulate occasional typo + correction
+    if (Math.random() < mistakeChance && i > 0 && /[a-z]/i.test(char)) {
+      // Type a nearby key instead (QWERTY keyboard adjacent keys)
+      const nearbyKeys: Record<string, string> = {
+        a: "s", b: "v", c: "x", d: "s", e: "w", f: "g", g: "h", h: "j",
+        i: "u", j: "k", k: "l", l: "k", m: "n", n: "m", o: "p", p: "o",
+        q: "w", r: "e", s: "a", t: "r", u: "y", v: "c", w: "q", x: "z",
+        y: "t", z: "x",
+      };
+      const wrongChar = nearbyKeys[char.toLowerCase()] || "a";
+      await page.keyboard.type(wrongChar, { delay: 0 });
+      // Pause as if "realizing" the mistake
+      await new Promise((r) => setTimeout(r, baseDelay + Math.random() * 200));
+      // Correct the typo
+      await page.keyboard.press("Backspace");
+      await new Promise((r) => setTimeout(r, baseDelay * 0.5 + Math.random() * 50));
+    }
+
+    // Type the actual character
+    await page.keyboard.type(char, { delay: 0 });
+
+    // Calculate delay for next character
+    let delay = baseDelay + (Math.random() * variance * 2 - variance);
+
+    // Extra pause after spaces (word boundaries)
+    if (char === " ") {
+      delay += wordPause;
+    }
+
+    // Slight acceleration for common patterns (like "ing", "tion", "the")
+    if (i >= 2) {
+      const last3 = value.substring(i - 2, i + 1).toLowerCase();
+      const commonPatterns = ["the", "ing", "tion", "and", "ent", "ion", "thi", "tha"];
+      if (commonPatterns.includes(last3)) {
+        delay *= 0.8; // Type common patterns slightly faster
+      }
+    }
+
+    // Slight deceleration at punctuation
+    if (/[.,!?;:]/.test(char)) {
+      delay += 100 + Math.random() * 200;
+    }
+
+    // Ensure delay is non-negative
+    delay = Math.max(10, delay);
+
+    await new Promise((r) => setTimeout(r, delay));
+  }
+}
+
+/**
+ * Fill a form field with human-like typing instead of instant fill.
+ * Uses the same multi-strategy element finding as fillByRef,
+ * but types character-by-character instead of using .fill().
+ */
+async function humanFillByRef(
+  page: any,
+  ref: string,
+  value: string,
+  options?: { baseDelay?: number; variance?: number; wordPause?: number; mistakeChance?: number }
+): Promise<void> {
+  await humanType(page, ref, value, options);
+}
+
+/**
+ * Smart form filling that handles multi-page forms.
+ * Detects when a form spans multiple pages (e.g., signup wizards)
+ * and waits for page transitions between steps.
+ */
+async function smartFormFill(
+  page: any,
+  fields: Array<{ ref: string; value: string }>,
+  options?: {
+    humanLike?: boolean;
+    submitAfterFill?: boolean;
+    waitForNavigation?: boolean;
+    navigationTimeout?: number;
+    multiPage?: boolean;
+    maxPages?: number;
+  }
+): Promise<{
+  filled: number;
+  errors: Array<{ ref: string; error: string }>;
+  pagesFilled: number;
+  finalUrl: string;
+}> {
+  const humanLike = options?.humanLike ?? true;
+  const submitAfterFill = options?.submitAfterFill ?? true;
+  const waitForNavigation = options?.waitForNavigation ?? true;
+  const navigationTimeout = options?.navigationTimeout ?? 10000;
+  const multiPage = options?.multiPage ?? false;
+  const maxPages = options?.maxPages ?? 10;
+
+  let filled = 0;
+  const errors: Array<{ ref: string; error: string }> = [];
+  let pagesFilled = 1;
+  const initialUrl = page.url();
+
+  // Fill all current-page fields
+  for (const field of fields) {
+    try {
+      if (humanLike) {
+        await humanFillByRef(page, field.ref, field.value);
+      } else {
+        await fillByRef(page, field.ref, field.value);
+      }
+      filled++;
+    } catch (err: any) {
+      errors.push({ ref: field.ref, error: err.message || String(err) });
+    }
+  }
+
+  // Submit the form if requested
+  if (submitAfterFill) {
+    try {
+      // Try multiple submit strategies
+      const submitStrategies = [
+        () => page.getByRole("button", { name: /submit|next|continue|save|send|sign up|register|go/i }).first().click({ timeout: 3000 }),
+        () => page.getByRole("button", { name: /submit|next|continue/i }).first().click({ timeout: 2000 }),
+        () => page.locator('button[type="submit"]').first().click({ timeout: 2000 }),
+        () => page.locator('input[type="submit"]').first().click({ timeout: 2000 }),
+        () => page.keyboard.press("Enter"),
+      ];
+
+      let submitted = false;
+      for (const strategy of submitStrategies) {
+        try {
+          await strategy();
+          submitted = true;
+          break;
+        } catch (err: any) {
+          console.debug(`[BrowserEngine] smartFormFill: submit strategy failed:`, err.message);
+        }
+      }
+
+      if (submitted && waitForNavigation) {
+        // Wait for page navigation or URL change
+        try {
+          await page.waitForURL((url: URL) => url.toString() !== initialUrl, { timeout: navigationTimeout });
+          pagesFilled++;
+        } catch (navErr: any) {
+          // Navigation timeout is OK — form might submit via AJAX
+          console.debug(`[BrowserEngine] smartFormFill: no navigation after submit (might be AJAX):`, navErr.message);
+        }
+      }
+    } catch (err: any) {
+      errors.push({ ref: "__submit__", error: `Submit failed: ${err.message}` });
+    }
+  }
+
+  return {
+    filled,
+    errors,
+    pagesFilled,
+    finalUrl: page.url(),
+  };
+}
+
 // ─── Screenshot Helper ───────────────────────────────────────────────────────
 
 async function takeScreenshot(session: SmartSession | LegacyBrowserSession): Promise<string> {
@@ -586,6 +787,225 @@ function getSessionHandover(sessionId: string) {
   const legacy = legacySessions.get(sessionId);
   if (legacy) return legacy.handover;
   return null;
+}
+
+/**
+ * Check if a session's handover is active, which should block automation endpoints.
+ * Returns { blocked: true, handover } if automation should be paused,
+ * or { blocked: false, handover: null } if automation can proceed.
+ */
+function checkHandoverBlock(sessionId: string): { blocked: boolean; handover: any } {
+  const handover = getSessionHandover(sessionId);
+  if (handover && handover.active) {
+    return { blocked: true, handover };
+  }
+  return { blocked: false, handover: null };
+}
+
+// ─── Enforced Handover Pause System ──────────────────────────────────────────
+
+interface PauseLock {
+  promise: Promise<void>;
+  resolve: () => void;
+  active: boolean;
+}
+
+const pauseLocks = new Map<string, PauseLock>();
+
+function getOrCreatePauseLock(sessionId: string): PauseLock {
+  let lock = pauseLocks.get(sessionId);
+  if (!lock || !lock.active) {
+    // Create a resolved (unlocked) promise by default
+    let resolveFunc: () => void = () => {};
+    const promise = new Promise<void>((resolve) => {
+      resolveFunc = resolve;
+      resolve(); // Start resolved (not paused)
+    });
+    lock = { promise, resolve: resolveFunc, active: false };
+    pauseLocks.set(sessionId, lock);
+  }
+  return lock;
+}
+
+function enforcePause(sessionId: string): void {
+  let lock = pauseLocks.get(sessionId);
+  if (!lock) {
+    // Create lock if it doesn't exist yet
+    let resolveFunc: () => void = () => {};
+    const promise = new Promise<void>((resolve) => { resolveFunc = resolve; });
+    lock = { promise, resolve: resolveFunc, active: true };
+    pauseLocks.set(sessionId, lock);
+  } else {
+    // Create a new unresolved promise — all waitWhilePaused() callers will block
+    let resolveFunc: () => void = () => {};
+    const promise = new Promise<void>((resolve) => { resolveFunc = resolve; });
+    lock.promise = promise;
+    lock.resolve = resolveFunc;
+    lock.active = true;
+  }
+  console.log(`[BrowserEngine] Enforced pause for session ${sessionId}`);
+}
+
+function releasePause(sessionId: string): void {
+  const lock = pauseLocks.get(sessionId);
+  if (!lock) return;
+  // Resolve the blocking promise — all waitWhilePaused() callers unblock
+  lock.resolve();
+  lock.active = false;
+  // Create fresh resolved lock for next time
+  let newResolve: () => void = () => {};
+  const newPromise = new Promise<void>((resolve) => { newResolve = resolve; resolve(); });
+  lock.promise = newPromise;
+  lock.resolve = newResolve;
+  console.log(`[BrowserEngine] Released pause for session ${sessionId}`);
+}
+
+async function waitWhilePaused(sessionId: string): Promise<void> {
+  const lock = pauseLocks.get(sessionId);
+  if (!lock || !lock.active) return;
+  console.log(`[BrowserEngine] Session ${sessionId} waiting for pause to release...`);
+  await lock.promise;
+  console.log(`[BrowserEngine] Session ${sessionId} pause released, continuing...`);
+}
+
+function cleanupPauseLock(sessionId: string): void {
+  const lock = pauseLocks.get(sessionId);
+  if (lock && lock.active) {
+    lock.resolve(); // Unblock any waiters
+  }
+  pauseLocks.delete(sessionId);
+}
+
+// ─── Auto CAPTCHA/Auth Detection ─────────────────────────────────────────────
+
+interface CaptchaDetectionResult {
+  detected: boolean;
+  type: string; // "recaptcha" | "hcaptcha" | "turnstile" | "auth_redirect" | "verification" | "unknown_captcha" | ""
+  confidence: number; // 0-1
+  reason: string;
+}
+
+async function detectCaptchaOrAuth(page: any): Promise<CaptchaDetectionResult> {
+  try {
+    const detection = await page.evaluate(() => {
+      const result: { detected: boolean; type: string; confidence: number; reason: string } = {
+        detected: false, type: "", confidence: 0, reason: ""
+      };
+
+      // 1. reCAPTCHA v2/v3 detection
+      const recaptchaIframes = document.querySelectorAll('iframe[src*="recaptcha"], iframe[src*="google.com/recaptcha"]');
+      if (recaptchaIframes.length > 0) {
+        result.detected = true;
+        result.type = "recaptcha";
+        result.confidence = 0.95;
+        result.reason = `Found ${recaptchaIframes.length} reCAPTCHA iframe(s)`;
+        return result;
+      }
+
+      // 2. reCAPTCHA callback/div detection
+      const recaptchaDivs = document.querySelectorAll('.g-recaptcha, [data-sitekey]');
+      if (recaptchaDivs.length > 0) {
+        result.detected = true;
+        result.type = "recaptcha";
+        result.confidence = 0.9;
+        result.reason = `Found reCAPTCHA div with data-sitekey`;
+        return result;
+      }
+
+      // 3. hCaptcha detection
+      const hcaptchaIframes = document.querySelectorAll('iframe[src*="hcaptcha"], iframe[src*="challenges.cloudflare.com"]');
+      if (hcaptchaIframes.length > 0) {
+        result.detected = true;
+        result.type = "hcaptcha";
+        result.confidence = 0.95;
+        result.reason = `Found ${hcaptchaIframes.length} hCaptcha iframe(s)`;
+        return result;
+      }
+
+      // 4. hCaptcha div detection
+      const hcaptchaDivs = document.querySelectorAll('.h-captcha, [data-hcaptcha-site-key]');
+      if (hcaptchaDivs.length > 0) {
+        result.detected = true;
+        result.type = "hcaptcha";
+        result.confidence = 0.9;
+        result.reason = `Found hCaptcha div`;
+        return result;
+      }
+
+      // 5. Cloudflare Turnstile detection
+      const turnstileIframes = document.querySelectorAll('iframe[src*="challenges.cloudflare.com/turnstile"]');
+      const turnstileDivs = document.querySelectorAll('.cf-turnstile, [data-turnstile-site-key]');
+      if (turnstileIframes.length > 0 || turnstileDivs.length > 0) {
+        result.detected = true;
+        result.type = "turnstile";
+        result.confidence = 0.9;
+        result.reason = `Found Cloudflare Turnstile challenge`;
+        return result;
+      }
+
+      // 6. Cloudflare "checking your browser" page
+      const bodyText = document.body?.innerText?.toLowerCase() || '';
+      if (bodyText.includes('checking your browser') || bodyText.includes('please wait while we check your browser')) {
+        result.detected = true;
+        result.type = "turnstile";
+        result.confidence = 0.95;
+        result.reason = `Cloudflare browser check page detected`;
+        return result;
+      }
+
+      // 7. Verification/auth redirect detection
+      const verifyPatterns = [
+        'verify your identity', 'verify your account', "verify it's you",
+        'security check', "prove you're human", 'are you a robot',
+        'human verification', 'bot detection', 'confirm your identity',
+        'two-factor authentication', 'enter the code', 'verification code',
+      ];
+      for (const pattern of verifyPatterns) {
+        if (bodyText.includes(pattern)) {
+          result.detected = true;
+          result.type = "verification";
+          result.confidence = 0.8;
+          result.reason = `Page contains verification pattern: "${pattern}"`;
+          return result;
+        }
+      }
+
+      // 8. Auth redirect detection (URL-based)
+      const url = window.location.href.toLowerCase();
+      const authUrlPatterns = ['/login', '/signin', '/auth/', '/challenge', '/verify', '/2fa', '/mfa', '/otp'];
+      for (const pattern of authUrlPatterns) {
+        if (url.includes(pattern)) {
+          result.detected = true;
+          result.type = "auth_redirect";
+          result.confidence = 0.7;
+          result.reason = `URL contains auth pattern: "${pattern}"`;
+          return result;
+        }
+      }
+
+      // 9. Login form detection
+      const passwordInputs = document.querySelectorAll('input[type="password"]');
+      const hasLoginForm = passwordInputs.length > 0 && (
+        document.querySelector('input[type="email"]') !== null ||
+        document.querySelector('input[name*="user"]') !== null ||
+        document.querySelector('input[name*="login"]') !== null
+      );
+      if (hasLoginForm) {
+        result.detected = true;
+        result.type = "auth_redirect";
+        result.confidence = 0.75;
+        result.reason = `Login form detected with password + email/username fields`;
+        return result;
+      }
+
+      return result;
+    });
+
+    return detection;
+  } catch (err: any) {
+    console.warn("[BrowserEngine] CAPTCHA/auth detection failed:", err.message || err);
+    return { detected: false, type: "", confidence: 0, reason: "Detection failed: " + (err.message || String(err)) };
+  }
 }
 
 function updateSessionActivity(sessionId: string): void {
@@ -768,6 +1188,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       }
 
       stopHandoverStreaming(session);
+      cleanupPauseLock(sessionId);
       await closeSmartSession(session);
       smartSessions.delete(sessionId);
       tabManager.markTaskComplete(sessionId);
@@ -868,6 +1289,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       const smart = smartSessions.get(sessionId);
       if (smart) {
         stopHandoverStreaming(smart);
+        cleanupPauseLock(sessionId);
         let autoSaved = false;
         if (smart.page && smart.cdpSession) {
           try {
@@ -888,6 +1310,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       const legacy = legacySessions.get(sessionId);
       if (legacy) {
         stopHandoverStreaming(legacy);
+        cleanupPauseLock(sessionId);
         let autoSaved = false;
         try {
           await stateManager.saveState(legacy.cdpSession, legacy.page, legacy.platform, legacy.username);
@@ -910,6 +1333,14 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       const body = await parseBody(req, res);
       if (!body) return;
       const { sessionId, url: navUrl, waitUntil, timeout: navTimeout } = body;
+      // Enforced pause: wait if handover is active before proceeding
+      await waitWhilePaused(sessionId);
+      // Handover enforcement: block automation during active handover
+      const handoverCheck = checkHandoverBlock(sessionId);
+      if (handoverCheck.blocked) {
+        sendJson(res, 409, { error: "Session is in handover mode — automation paused. Use /api/handover/end to resume.", handoverActive: true, sessionId });
+        return;
+      }
       const info = getSessionPage(sessionId);
       if (!info) { sendJson(res, 404, { error: "Session not found" }); return; }
       if (!info.page) { sendJson(res, 400, { error: "No browser page available for this session" }); return; }
@@ -918,6 +1349,38 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         await info.page.goto(navUrl, { waitUntil: waitUntil || "domcontentloaded", timeout: navTimeout || 30000 });
         updateSessionActivity(sessionId);
         tabManager.updateActivity(sessionId, navUrl, await info.page.title().catch(() => ""));
+
+        // Auto-CAPTCHA/Auth detection after navigation
+        try {
+          const captchaResult = await detectCaptchaOrAuth(info.page);
+          if (captchaResult.detected && captchaResult.confidence >= 0.7) {
+            // Auto-start handover
+            let session: SmartSession | LegacyBrowserSession | undefined = smartSessions.get(sessionId);
+            if (!session) session = legacySessions.get(sessionId);
+            if (session && !session.handover.active) {
+              session.handover.active = true;
+              session.handover.reason = `auto_detected:${captchaResult.type}`;
+              session.handover.startedAt = new Date().toISOString();
+              enforcePause(sessionId);
+              startHandoverStreaming(session);
+
+              console.log(`[BrowserEngine] Auto-detected ${captchaResult.type} (confidence: ${captchaResult.confidence}) on navigate to ${navUrl}`);
+
+              sendJson(res, 200, {
+                url: info.page.url(),
+                title: await info.page.title().catch(() => ""),
+                autoHandover: true,
+                captchaType: captchaResult.type,
+                captchaReason: captchaResult.reason,
+                confidence: captchaResult.confidence,
+                streamUrl: `/api/handover/${sessionId}/stream`,
+              });
+              return;
+            }
+          }
+        } catch (captchaErr: any) {
+          console.warn("[BrowserEngine] Auto-CAPTCHA check failed after navigation:", captchaErr.message || captchaErr);
+        }
 
         sendJson(res, 200, {
           url: info.page.url(),
@@ -933,6 +1396,14 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       const body = await parseBody(req, res);
       if (!body) return;
       const { sessionId } = body;
+      // Enforced pause: wait if handover is active before proceeding
+      await waitWhilePaused(sessionId);
+      // Handover enforcement: block automation during active handover
+      const handoverCheck = checkHandoverBlock(sessionId);
+      if (handoverCheck.blocked) {
+        sendJson(res, 409, { error: "Session is in handover mode — automation paused. Use /api/handover/end to resume.", handoverActive: true, sessionId });
+        return;
+      }
       const info = getSessionPage(sessionId);
       if (!info) { sendJson(res, 404, { error: "Session not found" }); return; }
       if (!info.page) { sendJson(res, 400, { error: "No browser page available for this session" }); return; }
@@ -954,6 +1425,14 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       const body = await parseBody(req, res);
       if (!body) return;
       const { sessionId, ref } = body;
+      // Enforced pause: wait if handover is active before proceeding
+      await waitWhilePaused(sessionId);
+      // Handover enforcement: block automation during active handover
+      const handoverCheck = checkHandoverBlock(sessionId);
+      if (handoverCheck.blocked) {
+        sendJson(res, 409, { error: "Session is in handover mode — automation paused. Use /api/handover/end to resume.", handoverActive: true, sessionId });
+        return;
+      }
       const info = getSessionPage(sessionId);
       if (!info) { sendJson(res, 404, { error: "Session not found" }); return; }
 
@@ -967,6 +1446,14 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       const body = await parseBody(req, res);
       if (!body) return;
       const { sessionId, ref, value } = body;
+      // Enforced pause: wait if handover is active before proceeding
+      await waitWhilePaused(sessionId);
+      // Handover enforcement: block automation during active handover
+      const handoverCheck = checkHandoverBlock(sessionId);
+      if (handoverCheck.blocked) {
+        sendJson(res, 409, { error: "Session is in handover mode — automation paused. Use /api/handover/end to resume.", handoverActive: true, sessionId });
+        return;
+      }
       const info = getSessionPage(sessionId);
       if (!info) { sendJson(res, 404, { error: "Session not found" }); return; }
 
@@ -981,6 +1468,14 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       const body = await parseBody(req, res);
       if (!body) return;
       const { sessionId, filePath, selector } = body;
+      // Enforced pause: wait if handover is active before proceeding
+      await waitWhilePaused(sessionId);
+      // Handover enforcement: block automation during active handover
+      const handoverCheck = checkHandoverBlock(sessionId);
+      if (handoverCheck.blocked) {
+        sendJson(res, 409, { error: "Session is in handover mode — automation paused. Use /api/handover/end to resume.", handoverActive: true, sessionId });
+        return;
+      }
       const info = getSessionPage(sessionId);
       if (!info) { sendJson(res, 404, { error: "Session not found" }); return; }
 
@@ -1028,6 +1523,14 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       const body = await parseBody(req, res);
       if (!body) return;
       const { sessionId, expression, script } = body;
+      // Enforced pause: wait if handover is active before proceeding
+      await waitWhilePaused(sessionId);
+      // Handover enforcement: block automation during active handover
+      const handoverCheck = checkHandoverBlock(sessionId);
+      if (handoverCheck.blocked) {
+        sendJson(res, 409, { error: "Session is in handover mode — automation paused. Use /api/handover/end to resume.", handoverActive: true, sessionId });
+        return;
+      }
       const info = getSessionPage(sessionId);
       if (!info) { sendJson(res, 404, { error: "Session not found" }); return; }
       if (!info.page) { sendJson(res, 400, { error: "No browser page available for this session" }); return; }
@@ -1041,6 +1544,26 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         sendJson(res, 200, { result });
       } catch (err: any) {
         sendJson(res, 500, { error: err.message, result: null });
+      }
+      return;
+    }
+
+    // ─── CAPTCHA Detection Endpoint ──────────────────────────────────────────
+
+    if (pathname === "/api/browser/detect-captcha" && method === "POST") {
+      const body = await parseBody(req, res);
+      if (!body) return;
+      const { sessionId } = body;
+      const info = getSessionPage(sessionId);
+      if (!info) { sendJson(res, 404, { error: "Session not found" }); return; }
+      if (!info.page) { sendJson(res, 400, { error: "No browser page available for this session" }); return; }
+
+      try {
+        const captchaResult = await detectCaptchaOrAuth(info.page);
+        updateSessionActivity(sessionId);
+        sendJson(res, 200, captchaResult);
+      } catch (err: any) {
+        sendJson(res, 500, { error: err.message, detected: false, type: "", confidence: 0, reason: "Detection failed" });
       }
       return;
     }
@@ -1236,6 +1759,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       session.handover.reason = reason || "other";
       session.handover.startedAt = new Date().toISOString();
 
+      // Enforce pause — all in-flight automation will block at waitWhilePaused()
+      enforcePause(sessionId);
+
       startHandoverStreaming(session);
 
       sendJson(res, 200, {
@@ -1307,6 +1833,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       session.handover.active = false;
       session.handover.reason = "";
       session.handover.startedAt = null;
+
+      // Release enforced pause — all blocked automation will resume
+      releasePause(sessionId);
 
       // Auto-save state after handover — track success
       let stateSaved = false;
@@ -1393,7 +1922,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       sendJson(res, 200, {
         status: "ok",
         service: "browser-engine",
-        version: "2.1.0",
+        version: "3.0.0",
         uptime: uptimeSec,
         uptimeHuman: `${Math.floor(uptimeSec / 3600)}h ${Math.floor((uptimeSec % 3600) / 60)}m ${Math.floor(uptimeSec % 60)}s`,
         memory: {
@@ -1447,6 +1976,394 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       }));
 
       sendJson(res, 200, { sessions: [...smartList, ...legacyList] });
+      return;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Human-like Form Filling Endpoints (NEW)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    if (pathname === "/api/browser/human-fill" && method === "POST") {
+      const body = await parseBody(req, res);
+      if (!body) return;
+      const { sessionId, ref, value, options: fillOptions } = body;
+      await waitWhilePaused(sessionId);
+      const handoverCheck = checkHandoverBlock(sessionId);
+      if (handoverCheck.blocked) {
+        sendJson(res, 409, { error: "Session is in handover mode", handoverActive: true, sessionId });
+        return;
+      }
+      const info = getSessionPage(sessionId);
+      if (!info) { sendJson(res, 404, { error: "Session not found" }); return; }
+
+      try {
+        // Check for CAPTCHA before filling
+        const captchaResult = await detectCaptchaOrAuth(info.page);
+        if (captchaResult.detected && captchaResult.confidence >= 0.7) {
+          sendJson(res, 200, {
+            status: "captcha_detected",
+            captchaType: captchaResult.type,
+            captchaReason: captchaResult.reason,
+            confidence: captchaResult.confidence,
+            message: "CAPTCHA detected before fill — start handover for manual completion",
+          });
+          return;
+        }
+
+        await humanFillByRef(info.page, ref, value, fillOptions);
+        updateSessionActivity(sessionId);
+        sendJson(res, 200, { status: "filled", method: "human_like", ref });
+      } catch (err: any) {
+        sendJson(res, 500, { error: err.message, ref });
+      }
+      return;
+    }
+
+    if (pathname === "/api/browser/smart-form-fill" && method === "POST") {
+      const body = await parseBody(req, res);
+      if (!body) return;
+      const { sessionId, fields, options: formOptions } = body;
+      await waitWhilePaused(sessionId);
+      const handoverCheck = checkHandoverBlock(sessionId);
+      if (handoverCheck.blocked) {
+        sendJson(res, 409, { error: "Session is in handover mode", handoverActive: true, sessionId });
+        return;
+      }
+      const info = getSessionPage(sessionId);
+      if (!info) { sendJson(res, 404, { error: "Session not found" }); return; }
+
+      if (!fields || !Array.isArray(fields) || fields.length === 0) {
+        sendJson(res, 400, { error: "fields array is required and must not be empty" });
+        return;
+      }
+
+      try {
+        // Check for CAPTCHA before filling
+        const captchaResult = await detectCaptchaOrAuth(info.page);
+        if (captchaResult.detected && captchaResult.confidence >= 0.7) {
+          sendJson(res, 200, {
+            status: "captcha_detected",
+            captchaType: captchaResult.type,
+            captchaReason: captchaResult.reason,
+            confidence: captchaResult.confidence,
+            message: "CAPTCHA detected — start handover for manual completion",
+          });
+          return;
+        }
+
+        const result = await smartFormFill(info.page, fields, formOptions);
+        updateSessionActivity(sessionId);
+        sendJson(res, 200, { status: "form_filled", ...result });
+      } catch (err: any) {
+        sendJson(res, 500, { error: err.message });
+      }
+      return;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // AI Endpoints (NEW) — Uses user's connected tool's LLM
+    // ═══════════════════════════════════════════════════════════════════════
+
+    if (pathname === "/api/ai/status" && method === "GET") {
+      const status = await getLLMStatus();
+      sendJson(res, 200, status);
+      return;
+    }
+
+    if (pathname === "/api/ai/extract" && method === "POST") {
+      const body = await parseBody(req, res);
+      if (!body) return;
+      const { sessionId, schema } = body;
+
+      if (!schema || typeof schema !== "object") {
+        sendJson(res, 400, { error: "schema object is required (e.g., { name: 'string', email: 'email', price: 'price' })" });
+        return;
+      }
+
+      // Get page content
+      let content = "";
+      if (sessionId) {
+        const info = getSessionPage(sessionId);
+        if (info?.page) {
+          try {
+            content = await info.page.evaluate(() => document.body?.innerText || "");
+          } catch (err: any) {
+            console.warn("[BrowserEngine] AI extract: could not get page text:", err.message);
+          }
+        }
+      }
+
+      // Also accept direct content parameter
+      const textToExtract = body.content || content;
+      if (!textToExtract) {
+        sendJson(res, 400, { error: "No content to extract from — provide sessionId or content parameter" });
+        return;
+      }
+
+      try {
+        const result = await llmExtract(textToExtract, schema);
+        sendJson(res, 200, { extracted: result.data, usedLLM: result.usedLLM, error: result.error });
+      } catch (err: any) {
+        sendJson(res, 500, { error: err.message });
+      }
+      return;
+    }
+
+    if (pathname === "/api/ai/summarize" && method === "POST") {
+      const body = await parseBody(req, res);
+      if (!body) return;
+      const { sessionId, maxSentences } = body;
+
+      // Get page content
+      let content = "";
+      if (sessionId) {
+        const info = getSessionPage(sessionId);
+        if (info?.page) {
+          try {
+            content = await info.page.evaluate(() => document.body?.innerText || "");
+          } catch (err: any) {
+            console.warn("[BrowserEngine] AI summarize: could not get page text:", err.message);
+          }
+        }
+      }
+
+      const textToSummarize = body.content || content;
+      if (!textToSummarize) {
+        sendJson(res, 400, { error: "No content to summarize — provide sessionId or content parameter" });
+        return;
+      }
+
+      try {
+        const result = await llmSummarize(textToSummarize, maxSentences || 5);
+        sendJson(res, 200, {
+          summary: result.summary,
+          originalLength: result.originalLength,
+          summaryLength: result.summaryLength,
+          compressionRatio: result.compressionRatio,
+          usedLLM: result.usedLLM,
+        });
+      } catch (err: any) {
+        sendJson(res, 500, { error: err.message });
+      }
+      return;
+    }
+
+    if (pathname === "/api/ai/classify" && method === "POST") {
+      const body = await parseBody(req, res);
+      if (!body) return;
+      const { text, categories } = body;
+
+      if (!text) { sendJson(res, 400, { error: "text is required" }); return; }
+      if (!categories || !Array.isArray(categories) || categories.length === 0) {
+        sendJson(res, 400, { error: "categories array is required" }); return;
+      }
+
+      try {
+        const result = await llmClassify(text, categories);
+        sendJson(res, 200, result);
+      } catch (err: any) {
+        sendJson(res, 500, { error: err.message });
+      }
+      return;
+    }
+
+    if (pathname === "/api/ai/complete" && method === "POST") {
+      const body = await parseBody(req, res);
+      if (!body) return;
+      const { prompt, systemPrompt } = body;
+
+      if (!prompt) { sendJson(res, 400, { error: "prompt is required" }); return; }
+
+      try {
+        const result = await llmComplete(prompt, systemPrompt);
+        sendJson(res, 200, { content: result.content, usedLLM: result.usedLLM, error: result.error });
+      } catch (err: any) {
+        sendJson(res, 500, { error: err.message });
+      }
+      return;
+    }
+
+    if (pathname === "/api/ai/reason-about-page" && method === "POST") {
+      const body = await parseBody(req, res);
+      if (!body) return;
+      const { sessionId, goal } = body;
+      const info = getSessionPage(sessionId);
+      if (!info) { sendJson(res, 404, { error: "Session not found" }); return; }
+      if (!goal) { sendJson(res, 400, { error: "goal is required" }); return; }
+
+      try {
+        const pageTitle = await info.page.title().catch(() => "");
+        const pageUrl = info.page.url();
+        const pageText = await info.page.evaluate(() => document.body?.innerText?.substring(0, 3000) || "").catch(() => "");
+        const tree = await getAccessibilityTree(info.page);
+        const treeStr = JSON.stringify(tree).substring(0, 2000);
+
+        const result = await llmReasonAboutPage(pageTitle, pageUrl, pageText, treeStr, goal);
+        sendJson(res, 200, { reasoning: result.content, usedLLM: result.usedLLM, error: result.error });
+      } catch (err: any) {
+        sendJson(res, 500, { error: err.message });
+      }
+      return;
+    }
+
+    if (pathname === "/api/ai/plan-form-fill" && method === "POST") {
+      const body = await parseBody(req, res);
+      if (!body) return;
+      const { sessionId, desiredData } = body;
+      const info = getSessionPage(sessionId);
+      if (!info) { sendJson(res, 404, { error: "Session not found" }); return; }
+      if (!desiredData || typeof desiredData !== "object") {
+        sendJson(res, 400, { error: "desiredData object is required" }); return;
+      }
+
+      try {
+        const pageText = await info.page.evaluate(() => document.body?.innerText?.substring(0, 2000) || "").catch(() => "");
+        const tree = await getAccessibilityTree(info.page);
+        const treeStr = JSON.stringify(tree).substring(0, 2000);
+
+        const result = await llmPlanFormFill(pageText, treeStr, desiredData);
+        sendJson(res, 200, result);
+      } catch (err: any) {
+        sendJson(res, 500, { error: err.message });
+      }
+      return;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Agent Swarm Endpoints (NEW) — LLM-powered intelligent search
+    // ═══════════════════════════════════════════════════════════════════════
+
+    if (pathname === "/api/swarm/plan" && method === "POST") {
+      const body = await parseBody(req, res);
+      if (!body) return;
+      const { query, maxAgents } = body;
+
+      if (!query) { sendJson(res, 400, { error: "query is required" }); return; }
+
+      try {
+        const result = await llmPlanSwarmQuery(query, maxAgents || 10);
+        sendJson(res, 200, result);
+      } catch (err: any) {
+        sendJson(res, 500, { error: err.message });
+      }
+      return;
+    }
+
+    if (pathname === "/api/swarm/search" && method === "POST") {
+      const body = await parseBody(req, res);
+      if (!body) return;
+      const { query, maxAgents, sessionId } = body;
+
+      if (!query) { sendJson(res, 400, { error: "query is required" }); return; }
+
+      try {
+        // Step 1: Use LLM to plan intelligent sub-queries
+        const plan = await llmPlanSwarmQuery(query, maxAgents || 10);
+        const subQueries = plan.subQueries;
+
+        // Step 2: Execute searches in parallel using LIGHT mode sessions
+        const searchResults = await Promise.allSettled(
+          subQueries.map(async (subQuery) => {
+            try {
+              // Launch a light session for each search
+              const { session } = await launchSmartSession("search", "swarm", "agent", { forceMode: "light" });
+
+              try {
+                const searchUrl = subQuery.searchEngine === "bing"
+                  ? `https://www.bing.com/search?q=${encodeURIComponent(subQuery.query)}`
+                  : subQuery.searchEngine === "duckduckgo"
+                    ? `https://duckduckgo.com/?q=${encodeURIComponent(subQuery.query)}`
+                    : `https://www.google.com/search?q=${encodeURIComponent(subQuery.query)}`;
+
+                await session.page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 15000 });
+
+                // Extract search results
+                const results = await session.page.evaluate(() => {
+                  const items: Array<{ title: string; url: string; snippet: string }> = [];
+                  // Google results
+                  const gResults = document.querySelectorAll('[data-sokoban-container] h3, .g h3');
+                  for (let i = 0; i < Math.min(gResults.length, 5); i++) {
+                    const h3 = gResults[i];
+                    const link = h3.closest("a") || h3.parentElement?.querySelector("a");
+                    const snippet = h3.closest('[data-sokoban-container]')?.querySelector('[data-sncf], .VwiC3b')?.textContent || "";
+                    items.push({
+                      title: h3.textContent || "",
+                      url: link?.getAttribute("href") || "",
+                      snippet,
+                    });
+                  }
+                  // Bing results
+                  if (items.length === 0) {
+                    const bResults = document.querySelectorAll('.b_algo h2 a, .b_algo h2');
+                    for (let i = 0; i < Math.min(bResults.length, 5); i++) {
+                      const el = bResults[i];
+                      const link = el.tagName === "A" ? el : el.querySelector("a") || el.closest("a");
+                      const snippet = el.closest('.b_algo')?.querySelector('.b_caption p')?.textContent || "";
+                      items.push({
+                        title: el.textContent || "",
+                        url: link?.getAttribute("href") || "",
+                        snippet,
+                      });
+                    }
+                  }
+                  // DuckDuckGo results
+                  if (items.length === 0) {
+                    const dResults = document.querySelectorAll('.result__a, .result__snippet');
+                    for (let i = 0; i < Math.min(dResults.length, 5); i++) {
+                      const el = dResults[i];
+                      items.push({
+                        title: el.textContent || "",
+                        url: el.getAttribute("href") || "",
+                        snippet: el.closest('.result')?.querySelector('.result__snippet')?.textContent || "",
+                      });
+                    }
+                  }
+                  return items;
+                });
+
+                await closeSmartSession(session);
+                return { query: subQuery.query, results, usedLLM: plan.usedLLM };
+              } catch (err: any) {
+                await closeSmartSession(session);
+                return { query: subQuery.query, results: [], error: err.message, usedLLM: plan.usedLLM };
+              }
+            } catch (launchErr: any) {
+              return { query: subQuery.query, results: [], error: "Failed to launch search session: " + launchErr.message, usedLLM: plan.usedLLM };
+            }
+          })
+        );
+
+        // Step 3: Compile results
+        const compiledResults = searchResults.map((r) =>
+          r.status === "fulfilled" ? r.value : { query: "unknown", results: [], error: r.reason?.message || String(r.reason) }
+        );
+
+        // Step 4: Use LLM to summarize and rank results
+        let summary = "";
+        if (plan.usedLLM) {
+          try {
+            const allText = compiledResults
+              .map((r) => `Query: ${r.query}\nResults: ${r.results?.map((rr: any) => `${rr.title}: ${rr.snippet}`).join("; ") || "No results"}`)
+              .join("\n\n");
+
+            const summaryResult = await llmSummarize(allText, 10);
+            summary = summaryResult.summary;
+          } catch (sumErr: any) {
+            summary = "Summary generation failed: " + sumErr.message;
+          }
+        }
+
+        sendJson(res, 200, {
+          query,
+          overallStrategy: plan.overallStrategy,
+          subQueryCount: subQueries.length,
+          results: compiledResults,
+          summary,
+          usedLLM: plan.usedLLM,
+        });
+      } catch (err: any) {
+        sendJson(res, 500, { error: err.message });
+      }
       return;
     }
 
@@ -1524,6 +2441,14 @@ async function shutdown() {
 
   console.log("[BrowserEngine] Shutting down gracefully...");
 
+  // Cleanup all pause locks and save smart session states
+  for (const [id] of smartSessions) {
+    cleanupPauseLock(id);
+  }
+  for (const [id] of legacySessions) {
+    cleanupPauseLock(id);
+  }
+
   // Save all smart session states
   for (const [id, session] of smartSessions) {
     try {
@@ -1574,6 +2499,11 @@ async function shutdown() {
   process.exit(0);
 }
 
+// Prevent unhandled promise rejections from crashing the server
+process.on("unhandledRejection", (reason: any) => {
+  console.error("[BrowserEngine] Unhandled promise rejection:", reason?.message || reason);
+});
+
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
@@ -1582,9 +2512,9 @@ process.on("SIGTERM", shutdown);
 tabManager.start();
 
 server.listen(PORT, () => {
-  console.log(`[BrowserEngine] 🚀 Service v2.1 running on port ${PORT}`);
+  console.log(`[BrowserEngine] 🚀 Service v3.0 running on port ${PORT}`);
   console.log(`[BrowserEngine] Health check: http://localhost:${PORT}/api/health`);
   console.log(`[BrowserEngine] WebSocket endpoint: ws://localhost:${PORT}/ws`);
-  console.log(`[BrowserEngine] Features: CDP, Smart Modes (Full/Light/Ghost), Dual-Layer State, Handoff, Tab Manager, Rate Limiting`);
+  console.log(`[BrowserEngine] Features: CDP, Smart Modes, Enforced Handover, Auto CAPTCHA Detection, Human-like Form Fill, AI Extract/Summarize, LLM Swarm, Tab Manager, Rate Limiting`);
   console.log(`[BrowserEngine] Browser states directory: /home/z/my-project/browser-states/`);
 });
