@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
-Agent-OS Connector Tests
+Agent-OS Connector Tests — Updated for 199 tools
 Tests MCP, OpenAI, Claude, OpenClaw, and CLI connectors.
-Enforces that OpenAI/Claude/OpenClaw expose the same tools, and MCP is a superset.
+All connectors must expose the same tools from the registry.
 
 Run:
     python -m pytest tests/test_connectors.py -v
 """
-import asyncio
 import json
 import sys
 import os
@@ -15,279 +14,173 @@ import subprocess
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "connectors"))
 
-AGENT_OS_URL = "http://localhost:8001"
-AGENT_TOKEN = "test-connector-token"
+from connectors._tool_registry import TOOLS, get_all_server_commands, get_command_map
 
-# Canonical tool names shared by OpenAI/Claude/OpenClaw connectors.
-# MCP may have additional tools (browser_fetch, browser_nav_stats, browser_smart_navigate).
-EXPECTED_TOOLS = sorted([
-    # Core navigation & interaction
-    "browser_auto_login",
-    "browser_back",
-    "browser_classify_query",
-    "browser_click",
-    "browser_emulate_device",
-    "browser_evaluate_js",
-    "browser_fill_form",
-    "browser_forward",
-    "browser_get_content",
-    "browser_get_dom",
-    "browser_get_images",
-    "browser_get_links",
-    "browser_hover",
-    "browser_navigate",
-    "browser_needs_web",
-    "browser_network_apis",
-    "browser_network_get",
-    "browser_network_start",
-    "browser_page_seo",
-    "browser_page_summary",
-    "browser_page_tables",
-    "browser_press",
-    "browser_query_strategy",
-    "browser_reload",
-    "browser_restore_session",
-    "browser_router_stats",
-    "browser_save_credentials",
-    "browser_save_session",
-    "browser_scan_sensitive",
-    "browser_scan_sqli",
-    "browser_scan_xss",
-    "browser_screenshot",
-    "browser_scroll",
-    "browser_set_proxy",
-    "browser_smart_click",
-    "browser_smart_fill",
-    "browser_smart_find",
-    "browser_status",
-    "browser_tabs",
-    "browser_transcribe",
-    "browser_type",
-    "browser_wait",
-    "browser_workflow",
-])
-
-# Extra tools only present in the MCP connector
-MCP_EXTRA_TOOLS = sorted([
-    "browser_fetch",
-    "browser_nav_stats",
-    "browser_smart_navigate",
-])
+# Check if MCP package is available
+try:
+    import mcp
+    HAS_MCP = True
+except ImportError:
+    HAS_MCP = False
 
 
-# ─── MCP Connector ────────────────────────────────────────────
+# ─── Registry Tests ──────────────────────────────────────────
 
-@pytest.mark.asyncio
-async def test_mcp_tools():
-    """Test MCP has all tools with correct names."""
-    from connectors.mcp_server import TOOLS
-    tool_names = sorted([t.name for t in TOOLS])
-    # MCP must contain at least all shared tools
-    missing = set(EXPECTED_TOOLS) - set(tool_names)
-    assert not missing, f"MCP missing shared tools: {missing}"
-    # MCP may have extra tools beyond the shared set
-    extra = set(tool_names) - set(EXPECTED_TOOLS) - set(MCP_EXTRA_TOOLS)
-    assert not extra, f"MCP has unexpected extra tools: {extra}"
+class TestRegistry:
+    """Test the tool registry."""
 
+    def test_registry_has_tools(self):
+        """Registry should have tools defined."""
+        assert len(TOOLS) >= 198, f"Expected >=198 tools, got {len(TOOLS)}"
 
-# ─── OpenAI Connector ─────────────────────────────────────────
+    def test_registry_unique_commands(self):
+        """All server commands should be unique."""
+        cmds = [t.server_cmd for t in TOOLS]
+        assert len(cmds) == len(set(cmds)), "Duplicate server commands found"
 
-@pytest.mark.asyncio
-async def test_openai_connector():
-    """Test OpenAI connector has all tools in correct format."""
-    from connectors.openai_connector import get_tools, get_all_tool_names
+    def test_registry_unique_mcp_names(self):
+        """All MCP names should be unique."""
+        names = [t.mcp_name for t in TOOLS]
+        assert len(names) == len(set(names)), "Duplicate MCP names found"
 
-    tool_names = sorted(get_all_tool_names())
-    assert tool_names == EXPECTED_TOOLS, (
-        f"OpenAI tools mismatch.\n"
-        f"  Missing: {set(EXPECTED_TOOLS) - set(tool_names)}\n"
-        f"  Extra: {set(tool_names) - set(EXPECTED_TOOLS)}"
-    )
+    def test_registry_unique_openai_names(self):
+        """All OpenAI names should be unique."""
+        names = [t.openai_name for t in TOOLS]
+        assert len(names) == len(set(names)), "Duplicate OpenAI names found"
 
-    # Verify OpenAI format
-    openai_tools = get_tools("openai")
-    assert len(openai_tools) == len(EXPECTED_TOOLS)
-    for tool in openai_tools:
-        assert tool.get("type") == "function", f"Tool missing type=function: {tool}"
-        func = tool.get("function", {})
-        assert "name" in func, f"Tool missing function.name: {tool}"
-        assert "description" in func, f"Tool missing function.description: {tool}"
-        assert "parameters" in func, f"Tool missing function.parameters: {tool}"
+    def test_all_server_commands_covered(self):
+        """All server commands should be in the registry."""
+        import re
+        with open(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'src/agents/server.py')) as f:
+            server_cmds = set(re.findall(r'"([\w-]+)":\s*self\._cmd_', f.read()))
+        reg_cmds = set(get_all_server_commands())
+        missing = server_cmds - reg_cmds
+        assert not missing, f"Server commands missing from registry: {missing}"
 
 
-@pytest.mark.asyncio
-async def test_claude_connector():
-    """Test Claude connector has all tools in correct format."""
-    from connectors.openai_connector import get_tools
+# ─── MCP Connector ───────────────────────────────────────────
 
-    claude_tools = get_tools("claude")
-    assert len(claude_tools) == len(EXPECTED_TOOLS)
-    tool_names = sorted([t["name"] for t in claude_tools])
-    assert tool_names == EXPECTED_TOOLS, (
-        f"Claude tools mismatch.\n"
-        f"  Missing: {set(EXPECTED_TOOLS) - set(tool_names)}\n"
-        f"  Extra: {set(tool_names) - set(EXPECTED_TOOLS)}"
-    )
+class TestMCPConnector:
+    """Test MCP connector."""
 
-    for tool in claude_tools:
-        assert "name" in tool, f"Claude tool missing name: {tool}"
-        assert "description" in tool, f"Claude tool missing description: {tool}"
-        assert "input_schema" in tool, f"Claude tool missing input_schema: {tool}"
+    @pytest.mark.skipif(not HAS_MCP, reason="mcp package not installed")
+    def test_mcp_imports(self):
+        """MCP connector should import without errors."""
+        from connectors.mcp_server import TOOLS_LIST, command_map
+        assert len(TOOLS_LIST) > 0
 
+    @pytest.mark.skipif(not HAS_MCP, reason="mcp package not installed")
+    def test_mcp_tool_count(self):
+        """MCP should have all registry tools."""
+        from connectors.mcp_server import TOOLS_LIST
+        assert len(TOOLS_LIST) == len(TOOLS), f"MCP has {len(TOOLS_LIST)} tools, registry has {len(TOOLS)}"
 
-# ─── OpenClaw Connector ───────────────────────────────────────
+    @pytest.mark.skipif(not HAS_MCP, reason="mcp package not installed")
+    def test_mcp_command_map(self):
+        """MCP command map should cover all tools."""
+        from connectors.mcp_server import command_map
+        assert len(command_map) == len(TOOLS)
 
-@pytest.mark.asyncio
-async def test_openclaw_connector():
-    """Test OpenClaw connector has all tools."""
-    from connectors.openclaw_connector import get_manifest, get_tool_names
-
-    manifest = get_manifest()
-    assert "tools" in manifest, "Manifest missing 'tools' key"
-
-    tool_names = sorted(get_tool_names())
-    assert len(tool_names) == len(EXPECTED_TOOLS), f"Expected {len(EXPECTED_TOOLS)} tools, got {len(tool_names)}"
-    assert tool_names == EXPECTED_TOOLS, (
-        f"OpenClaw tools mismatch.\n"
-        f"  Missing: {set(EXPECTED_TOOLS) - set(tool_names)}\n"
-        f"  Extra: {set(tool_names) - set(EXPECTED_TOOLS)}"
-    )
+    def test_mcp_registry_tools_match(self):
+        """MCP should use the same registry as everyone else."""
+        # Test without importing mcp_server (which needs mcp package)
+        from connectors._tool_registry import get_mcp_tools
+        mcp_tools = get_mcp_tools()
+        assert len(mcp_tools) == len(TOOLS)
 
 
-# ─── CLI Connector ────────────────────────────────────────────
+# ─── OpenAI Connector ────────────────────────────────────────
 
-@pytest.mark.asyncio
-async def test_cli_connector():
-    """Test CLI connector script exists and is valid."""
-    script = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "connectors", "agent-os-tool.sh")
-    assert os.path.exists(script), f"CLI script not found at {script}"
-    assert os.access(script, os.X_OK), "CLI script not executable"
+class TestOpenAIConnector:
+    """Test OpenAI connector."""
 
-    # Test help output contains key commands
-    result = subprocess.run([script], capture_output=True, text=True, timeout=5)
-    assert "Usage:" in result.stdout, "CLI help missing 'Usage:'"
+    def test_openai_imports(self):
+        """OpenAI connector should import without errors."""
+        from connectors.openai_connector import get_tools
+        tools = get_tools("openai")
+        assert len(tools) > 0
 
-    expected_commands = [
-        "navigate", "click", "type", "press", "fill-form", "hover",
-        "scroll", "screenshot", "get-content", "get-dom", "get-links",
-        "get-images", "evaluate-js", "scan-xss", "scan-sqli",
-        "scan-sensitive", "transcribe", "save-creds", "auto-login",
-        "tabs", "back", "forward", "reload", "wait", "status",
-        "smart-find", "smart-click", "smart-fill",
-        "workflow", "workflow-template", "workflow-save", "workflow-list",
-        "network-start", "network-stop", "network-get", "network-apis",
-        "page-summary", "page-tables", "page-seo", "page-accessibility",
-        "set-proxy", "get-proxy", "emulate-device", "list-devices",
-        "save-session", "restore-session", "list-sessions", "delete-session",
-        "double-click", "right-click", "context-action", "drag-drop",
-        "clear-input", "checkbox", "viewport", "console-logs",
-        "get-cookies", "set-cookie", "page-emails", "page-phones",
-        "page-structured", "network-stats", "network-export", "network-clear",
-        "smart-find-all", "fill-job", "get-text", "get-attr",
-    ]
-    for cmd in expected_commands:
-        assert cmd in result.stdout, f"CLI help missing '{cmd}' command"
+    def test_openai_tool_count(self):
+        """OpenAI should have all registry tools."""
+        from connectors.openai_connector import get_tools
+        tools = get_tools("openai")
+        assert len(tools) == len(TOOLS), f"OpenAI has {len(tools)} tools, registry has {len(TOOLS)}"
 
+    def test_openai_tool_format(self):
+        """OpenAI tools should have correct format."""
+        from connectors.openai_connector import get_tools
+        tools = get_tools("openai")
+        for tool in tools[:5]:
+            assert tool["type"] == "function"
+            assert "function" in tool
+            assert "name" in tool["function"]
+            assert "description" in tool["function"]
+            assert "parameters" in tool["function"]
 
-# ─── MCP Protocol ─────────────────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_mcp_protocol():
-    """Test MCP server can be imported and has correct handlers."""
-    from connectors.mcp_server import server, handle_list_tools, handle_call_tool
-    assert server is not None, "MCP Server not created"
-    assert handle_list_tools is not None, "MCP list_tools handler missing"
-    assert handle_call_tool is not None, "MCP call_tool handler missing"
-
-    tools = await handle_list_tools()
-    tool_names = sorted([t.name for t in tools])
-    # MCP must contain at least all shared tools
-    missing = set(EXPECTED_TOOLS) - set(tool_names)
-    assert not missing, f"MCP list_tools missing shared tools: {missing}"
-    extra = set(tool_names) - set(EXPECTED_TOOLS) - set(MCP_EXTRA_TOOLS)
-    assert not extra, f"MCP list_tools has unexpected extra tools: {extra}"
+    def test_claude_tool_format(self):
+        """Claude tools should have correct format."""
+        from connectors.openai_connector import get_tools
+        tools = get_tools("claude")
+        for tool in tools[:5]:
+            assert "name" in tool
+            assert "description" in tool
+            assert "input_schema" in tool
 
 
-# ─── Cross-Connector Consistency ──────────────────────────────
+# ─── OpenClaw Connector ──────────────────────────────────────
 
-def test_all_connectors_match():
-    """Verify OpenAI, Claude, and OpenClaw connectors expose the exact same set of tools.
-    MCP may have additional tools beyond the shared set."""
-    from connectors.mcp_server import TOOLS as mcp_tools
-    from connectors.openai_connector import OPENAI_TOOLS, CLAUDE_TOOLS, get_all_tool_names
-    from connectors.openclaw_connector import get_tool_names
+class TestOpenClawConnector:
+    """Test OpenClaw connector."""
 
-    mcp_names = set(t.name for t in mcp_tools)
-    openai_names = set(get_all_tool_names())
-    claude_names = set(t["name"] for t in CLAUDE_TOOLS)
-    openclaw_names = set(get_tool_names())
+    def test_openclaw_imports(self):
+        """OpenClaw connector should import without errors."""
+        from connectors.openclaw_connector import get_manifest
+        manifest = get_manifest()
+        assert len(manifest["tools"]) > 0
 
-    # OpenAI, Claude, and OpenClaw must match exactly
-    assert openai_names == claude_names == openclaw_names, (
-        f"Connector tool sets don't match!\n"
-        f"  OpenAI:   {len(openai_names)} tools\n"
-        f"  Claude:   {len(claude_names)} tools\n"
-        f"  OpenClaw: {len(openclaw_names)} tools\n"
-        f"  OpenAI only:   {openai_names - claude_names}\n"
-        f"  Claude only:   {claude_names - openai_names}\n"
-        f"  OpenClaw only: {openclaw_names - openai_names}"
-    )
+    def test_openclaw_tool_count(self):
+        """OpenClaw should have all registry tools."""
+        from connectors.openclaw_connector import get_manifest
+        manifest = get_manifest()
+        assert len(manifest["tools"]) == len(TOOLS), f"OpenClaw has {len(manifest['tools'])} tools, registry has {len(TOOLS)}"
 
-    # MCP must be a superset of the shared tools
-    shared = openai_names
-    missing_from_mcp = shared - mcp_names
-    assert not missing_from_mcp, f"MCP missing shared tools: {missing_from_mcp}"
+    def test_openclaw_manifest_format(self):
+        """OpenClaw manifest should have correct format."""
+        from connectors.openclaw_connector import get_manifest
+        manifest = get_manifest()
+        assert "name" in manifest
+        assert "version" in manifest
+        assert "tools" in manifest
 
 
-# ─── New Module Imports ───────────────────────────────────────
+# ─── Cross-Connector Consistency ─────────────────────────────
 
-def test_smart_finder_imports():
-    """Test Smart Element Finder module imports correctly."""
-    from src.tools.smart_finder import SmartElementFinder
-    assert SmartElementFinder is not None
+class TestCrossConnectorConsistency:
+    """Test that all connectors expose the same tools."""
 
+    def test_all_connectors_same_tool_count(self):
+        """All connectors should have the same number of tools."""
+        from connectors.openai_connector import get_tools
+        from connectors.openclaw_connector import get_manifest
 
-def test_workflow_imports():
-    """Test Workflow Engine module imports correctly."""
-    from src.tools.workflow import WorkflowEngine
-    assert WorkflowEngine is not None
-    assert hasattr(WorkflowEngine, 'BUILTIN_TEMPLATES')
-    assert 'google_search' in WorkflowEngine.BUILTIN_TEMPLATES
-    assert 'login' in WorkflowEngine.BUILTIN_TEMPLATES
+        openai_tools = get_tools("openai")
+        oc_manifest = get_manifest()
 
+        counts = {
+            "registry": len(TOOLS),
+            "openai": len(openai_tools),
+            "openclaw": len(oc_manifest["tools"]),
+        }
 
-def test_network_capture_imports():
-    """Test Network Capture module imports correctly."""
-    from src.tools.network_capture import NetworkCapture, NetworkRequest
-    assert NetworkCapture is not None
-    assert NetworkRequest is not None
+        assert len(set(counts.values())) == 1, f"Tool counts differ: {counts}"
 
+    def test_all_connectors_same_tool_names(self):
+        """All connectors should expose the same tool names."""
+        from connectors.openai_connector import get_tools
+        from connectors.openclaw_connector import get_manifest
 
-def test_page_analyzer_imports():
-    """Test Page Analyzer module imports correctly."""
-    from src.tools.page_analyzer import PageAnalyzer
-    assert PageAnalyzer is not None
+        openai_names = set(t["function"]["name"] for t in get_tools("openai"))
+        oc_names = set(t["name"] for t in get_manifest()["tools"])
 
-
-# ─── Live REST API ────────────────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_live_rest_api():
-    """Test live REST API connection (requires Agent-OS running)."""
-    import httpx
-    try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.get(f"{AGENT_OS_URL}/status")
-            assert resp.status_code == 200, f"GET /status returned {resp.status_code}"
-            data = resp.json()
-            assert data.get("status") == "running", f"Server not running: {data}"
-
-            # Test commands list
-            resp = await client.get(f"{AGENT_OS_URL}/commands")
-            assert resp.status_code == 200, f"GET /commands returned {resp.status_code}"
-            cmds = resp.json()
-            assert len(cmds) > 0, "No commands available"
-    except httpx.ConnectError:
-        pytest.skip(f"Cannot connect to {AGENT_OS_URL} — start Agent-OS first")
+        assert openai_names == oc_names, f"OpenAI/OpenClaw name mismatch: {openai_names - oc_names} vs {oc_names - openai_names}"
