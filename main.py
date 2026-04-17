@@ -23,6 +23,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+# ─── Auto-load .env file ────────────────────────────────
+_env_file = Path(__file__).parent / ".env"
+if _env_file.exists():
+    for line in _env_file.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and value and key not in os.environ:
+                os.environ[key] = value
+
 from src.core.config import Config
 from src.core.browser import AgentBrowser
 from src.core.session import SessionManager
@@ -377,8 +389,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Agent-OS — AI Agent Browser")
     parser.add_argument("--version", action="version", version=f"Agent-OS {__version__}")
     parser.add_argument("--headed", action="store_true", help="Show browser window")
-    parser.add_argument("--agent-token", type=str, help="Set legacy agent authentication token")
-    parser.add_argument("--port", type=int, help="WebSocket server port (HTTP = port+1, Debug = port+2)")
+    parser.add_argument("--agent-token", type=str, default=os.environ.get("AGENT_TOKEN"), help="Set legacy agent authentication token")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("WS_PORT", "0")) or None, help="WebSocket server port (HTTP = port+1, Debug = port+2)")
     parser.add_argument("--max-ram", type=int, help="Max RAM in MB")
     parser.add_argument("--config", type=str, help="Config file path")
     parser.add_argument("--proxy", type=str, help="Proxy URL (http://user:pass@host:port)")
@@ -390,8 +402,8 @@ def parse_args():
     parser.add_argument("--swarm-api-key", type=str, help="API key for swarm search endpoints")
 
     # Production options
-    parser.add_argument("--database", type=str, help="PostgreSQL DSN (postgresql+asyncpg://user:pass@host/db)")
-    parser.add_argument("--redis", type=str, help="Redis URL (redis://host:6379/0)")
+    parser.add_argument("--database", type=str, default=os.environ.get("DATABASE_DSN"), help="PostgreSQL DSN (postgresql+asyncpg://user:pass@host/db)")
+    parser.add_argument("--redis", type=str, default=os.environ.get("REDIS_URL"), help="Redis URL (redis://host:6379/0)")
     parser.add_argument("--json-logs", action="store_true", default=False, help="Enable JSON structured logging (default: off, human-readable console)")
     parser.add_argument("--no-json-logs", action="store_true", help="Alias for default behavior (console logging)")
     parser.add_argument("--log-level", type=str, choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="Log level")

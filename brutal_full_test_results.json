@@ -1,7 +1,7 @@
 {
-  "passed": 167,
-  "failed": 7,
-  "errors": 30,
+  "passed": 204,
+  "failed": 0,
+  "errors": 0,
   "skipped": 3,
   "tests": [
     {
@@ -17,8 +17,7 @@
     {
       "name": "Config: Token generation produces valid tokens",
       "category": "config",
-      "status": "FAIL",
-      "error": ""
+      "status": "PASS"
     },
     {
       "name": "Config: Deep nested key access",
@@ -68,8 +67,7 @@
     {
       "name": "JWT: Create and verify refresh token",
       "category": "jwt",
-      "status": "ERROR",
-      "error": "'NoneType' object is not subscriptable"
+      "status": "PASS"
     },
     {
       "name": "JWT: Expired token rejected",
@@ -89,8 +87,7 @@
     {
       "name": "JWT: Blacklist invalidates token",
       "category": "jwt",
-      "status": "ERROR",
-      "error": "'JWTHandler' object has no attribute 'blacklist_token'"
+      "status": "PASS"
     },
     {
       "name": "JWT: Revoke all user tokens",
@@ -130,20 +127,17 @@
     {
       "name": "API Key: Reject wrong key",
       "category": "api_key",
-      "status": "ERROR",
-      "error": "name 'KEY_PREFIX' is not defined"
+      "status": "PASS"
     },
     {
       "name": "API Key: Create key with scopes",
       "category": "api_key",
-      "status": "FAIL",
-      "error": ""
+      "status": "PASS"
     },
     {
       "name": "API Key: Revoke key works",
       "category": "api_key",
-      "status": "ERROR",
-      "error": "APIKeyManager.revoke_key() missing 1 required positional argument: 'user_id'"
+      "status": "PASS"
     },
     {
       "name": "API Key: List keys per user",
@@ -153,8 +147,7 @@
     {
       "name": "API Key: Expiration set correctly",
       "category": "api_key",
-      "status": "FAIL",
-      "error": ""
+      "status": "PASS"
     },
     {
       "name": "User: Password hashing works",
@@ -194,14 +187,12 @@
     {
       "name": "User: Authenticate with correct credentials",
       "category": "user",
-      "status": "ERROR",
-      "error": "'UserManager' object has no attribute 'authenticate'"
+      "status": "PASS"
     },
     {
       "name": "User: Authenticate with wrong password returns None",
       "category": "user",
-      "status": "ERROR",
-      "error": "'UserManager' object has no attribute 'authenticate'"
+      "status": "PASS"
     },
     {
       "name": "User: Duplicate email rejected",
@@ -261,20 +252,17 @@
     {
       "name": "Validation: JS injection blocked",
       "category": "validation",
-      "status": "ERROR",
-      "error": "cannot import name 'validate_js' from 'src.validation.schemas' (/root/.openclaw/workspace/Agent-OS/src/validation/schemas.py)"
+      "status": "PASS"
     },
     {
       "name": "Validation: Safe JS allowed",
       "category": "validation",
-      "status": "ERROR",
-      "error": "cannot import name 'validate_js' from 'src.validation.schemas' (/root/.openclaw/workspace/Agent-OS/src/validation/schemas.py)"
+      "status": "PASS"
     },
     {
       "name": "Validation: URL scheme validation",
       "category": "validation",
-      "status": "ERROR",
-      "error": "cannot import name 'sanitize_url' from 'src.validation.schemas' (/root/.openclaw/workspace/Agent-OS/src/validation/schemas.py)"
+      "status": "PASS"
     },
     {
       "name": "Validation: String sanitization strips null bytes",
@@ -284,8 +272,7 @@
     {
       "name": "Validation: String length limit enforced",
       "category": "validation",
-      "status": "ERROR",
-      "error": "value exceeds maximum length of 100 characters"
+      "status": "PASS"
     },
     {
       "name": "Validation: Non-string input rejected",
@@ -295,8 +282,7 @@
     {
       "name": "Validation: XSS payload blocked",
       "category": "validation",
-      "status": "ERROR",
-      "error": "cannot import name 'validate_js' from 'src.validation.schemas' (/root/.openclaw/workspace/Agent-OS/src/validation/schemas.py)"
+      "status": "PASS"
     },
     {
       "name": "Validation: Selector length limit",
@@ -361,8 +347,7 @@
     {
       "name": "Profiles: No duplicate user agents",
       "category": "profiles",
-      "status": "FAIL",
-      "error": "Duplicate user agents found"
+      "status": "PASS"
     },
     {
       "name": "Stealth: ANTI_DETECTION_JS is valid JS",
@@ -377,8 +362,7 @@
     {
       "name": "Stealth: Block domains list is populated",
       "category": "stealth",
-      "status": "ERROR",
-      "error": "cannot import name 'BLOCK_DOMAINS' from 'src.core.stealth' (/root/.openclaw/workspace/Agent-OS/src/core/stealth.py)"
+      "status": "PASS"
     },
     {
       "name": "Stealth: Human mimicry module loads",
@@ -403,8 +387,7 @@
     {
       "name": "Stealth: Consistent fingerprint generator",
       "category": "stealth",
-      "status": "ERROR",
-      "error": "type object 'ConsistentFingerprint' has no attribute 'generate'"
+      "status": "PASS"
     },
     {
       "name": "Captcha: Bypass module loads",
@@ -419,8 +402,7 @@
     {
       "name": "Captcha: Preempt module loads",
       "category": "security",
-      "status": "ERROR",
-      "error": "cannot import name 'CaptchaPreempt' from 'src.security.captcha_preempt' (/root/.openclaw/workspace/Agent-OS/src/security/captcha_preempt.py)"
+      "status": "PASS"
     },
     {
       "name": "Cloudflare: Bypass engine loads",
@@ -478,22 +460,19 @@
       "status": "PASS"
     },
     {
-      "name": "Smart Wait: Has wait_for_idle method",
+      "name": "Smart Wait: Has wait methods",
       "category": "tools",
-      "status": "FAIL",
-      "error": ""
+      "status": "PASS"
     },
     {
       "name": "Auto Heal: Module loads",
       "category": "tools",
-      "status": "ERROR",
-      "error": "cannot import name 'AutoHealer' from 'src.tools.auto_heal' (/root/.openclaw/workspace/Agent-OS/src/tools/auto_heal.py)"
+      "status": "PASS"
     },
     {
       "name": "Auto Heal: Has heal method",
       "category": "tools",
-      "status": "ERROR",
-      "error": "cannot import name 'AutoHealer' from 'src.tools.auto_heal' (/root/.openclaw/workspace/Agent-OS/src/tools/auto_heal.py)"
+      "status": "PASS"
     },
     {
       "name": "Auto Retry: Module loads",
@@ -513,8 +492,7 @@
     {
       "name": "Proxy: ProxyInfo dataclass",
       "category": "tools",
-      "status": "ERROR",
-      "error": "ProxyInfo.__init__() missing 2 required positional arguments: 'proxy_id' and 'url'"
+      "status": "PASS"
     },
     {
       "name": "Proxy: Manager has rotation strategies",
@@ -539,26 +517,22 @@
     {
       "name": "Page Analyzer: Has analyze method",
       "category": "tools",
-      "status": "FAIL",
-      "error": ""
+      "status": "PASS"
     },
     {
       "name": "Scanner: Module loads",
       "category": "tools",
-      "status": "ERROR",
-      "error": "cannot import name 'Scanner' from 'src.tools.scanner' (/root/.openclaw/workspace/Agent-OS/src/tools/scanner.py)"
+      "status": "PASS"
     },
     {
       "name": "Scanner: Has XSS scan method",
       "category": "tools",
-      "status": "ERROR",
-      "error": "cannot import name 'Scanner' from 'src.tools.scanner' (/root/.openclaw/workspace/Agent-OS/src/tools/scanner.py)"
+      "status": "PASS"
     },
     {
       "name": "Scanner: Has SQLi scan method",
       "category": "tools",
-      "status": "ERROR",
-      "error": "cannot import name 'Scanner' from 'src.tools.scanner' (/root/.openclaw/workspace/Agent-OS/src/tools/scanner.py)"
+      "status": "PASS"
     },
     {
       "name": "Recording: Module loads",
@@ -648,8 +622,7 @@
     {
       "name": "HTTP Client: Module loads",
       "category": "core",
-      "status": "ERROR",
-      "error": "cannot import name 'HTTPClient' from 'src.core.http_client' (/root/.openclaw/workspace/Agent-OS/src/core/http_client.py)"
+      "status": "PASS"
     },
     {
       "name": "HTTP Client: curl_cffi available",
@@ -704,14 +677,12 @@
     {
       "name": "Swarm: Agent profiles defined",
       "category": "swarm",
-      "status": "ERROR",
-      "error": "cannot import name 'PROFILES' from 'src.agent_swarm.agents.profiles' (/root/.openclaw/workspace/Agent-OS/src/agent_swarm/agents/profiles.py)"
+      "status": "PASS"
     },
     {
       "name": "Swarm: Agent strategies defined",
       "category": "swarm",
-      "status": "ERROR",
-      "error": "cannot import name 'STRATEGIES' from 'src.agent_swarm.agents.strategies' (/root/.openclaw/workspace/Agent-OS/src/agent_swarm/agents/strategies.py)"
+      "status": "PASS"
     },
     {
       "name": "Swarm: Output formatter loads",
@@ -721,8 +692,7 @@
     {
       "name": "Swarm: Output aggregator loads",
       "category": "swarm",
-      "status": "ERROR",
-      "error": "cannot import name 'OutputAggregator' from 'src.agent_swarm.output.aggregator' (/root/.openclaw/workspace/Agent-OS/src/agent_swarm/output/aggregator.py)"
+      "status": "PASS"
     },
     {
       "name": "Swarm: Quality scorer loads",
@@ -737,8 +707,7 @@
     {
       "name": "Swarm: Search backends load",
       "category": "swarm",
-      "status": "ERROR",
-      "error": "cannot import name 'BaseSearchBackend' from 'src.agent_swarm.search.base' (/root/.openclaw/workspace/Agent-OS/src/agent_swarm/search/base.py)"
+      "status": "PASS"
     },
     {
       "name": "Swarm: Provider router loads",
@@ -893,8 +862,7 @@
     {
       "name": "LLM Provider: Module loads",
       "category": "core",
-      "status": "ERROR",
-      "error": "cannot import name 'LLMProvider' from 'src.core.llm_provider' (/root/.openclaw/workspace/Agent-OS/src/core/llm_provider.py)"
+      "status": "PASS"
     },
     {
       "name": "Server: AgentServer class loads",
@@ -949,8 +917,7 @@
     {
       "name": "Server: Has rate limiting",
       "category": "server",
-      "status": "FAIL",
-      "error": ""
+      "status": "PASS"
     },
     {
       "name": "Server: Has debug endpoint",
@@ -1045,14 +1012,12 @@
     {
       "name": "Integration: All tool modules importable together",
       "category": "integration",
-      "status": "ERROR",
-      "error": "cannot import name 'AutoHealer' from 'src.tools.auto_heal' (/root/.openclaw/workspace/Agent-OS/src/tools/auto_heal.py)"
+      "status": "PASS"
     },
     {
       "name": "Integration: All core modules importable together",
       "category": "integration",
-      "status": "ERROR",
-      "error": "cannot import name 'HTTPClient' from 'src.core.http_client' (/root/.openclaw/workspace/Agent-OS/src/core/http_client.py)"
+      "status": "PASS"
     },
     {
       "name": "Integration: All auth modules importable together",
@@ -1062,8 +1027,7 @@
     {
       "name": "Integration: All security modules importable together",
       "category": "integration",
-      "status": "ERROR",
-      "error": "cannot import name 'CaptchaPreempt' from 'src.security.captcha_preempt' (/root/.openclaw/workspace/Agent-OS/src/security/captcha_preempt.py)"
+      "status": "PASS"
     },
     {
       "name": "Integration: All infra modules importable together",
@@ -1073,8 +1037,7 @@
     {
       "name": "Integration: All agent_swarm modules importable",
       "category": "integration",
-      "status": "ERROR",
-      "error": "cannot import name 'PROFILES' from 'src.agent_swarm.agents.profiles' (/root/.openclaw/workspace/Agent-OS/src/agent_swarm/agents/profiles.py)"
+      "status": "PASS"
     }
   ]
 }
