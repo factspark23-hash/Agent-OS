@@ -1062,32 +1062,46 @@ class LoginHandoffManager:
         Returns:
             Handoff result if auto-handoff was triggered, None otherwise
         """
-        # Check if auto-detection is enabled
-        auto_enabled = self._config.get("handoff.auto_detect", True) if self._config else True
-        if not auto_enabled:
+        # Check if auto-handoff is enabled
+        auto_handoff_enabled = self._config.get("auto_handoff", True)
+        if not auto_handoff_enabled:
             return None
 
-        # Don't auto-detect if there's already an active handoff on this page
-        for hs in self._sessions.values():
-            if hs.is_active and hs.page_id == page_id:
-                return None
+        # Don't trigger if already in an active handoff
+        active_count = sum(1 for h in self._sessions.values() if h.is_active)
+        if active_count > 0:
+            return None
 
-        # Run detection
-        is_login, page_type, confidence = await LoginDetector.detect(
-            self._browser._pages.get(page_id), url
-        )
+        # Detect login page using URL patterns first (fast)
+        is_login, page_type, confidence = LoginDetector.detect_from_url(url)
 
+        # If URL detection gives moderate confidence, try DOM analysis too
+        if is_login and confidence < 0.90:
+            page = self._browser._pages.get(page_id)
+            if page:
+                try:
+                    dom_is_login, dom_type, dom_conf = await LoginDetector.detect_from_dom(page)
+                    if dom_conf > confidence:
+                        is_login, page_type, confidence = dom_is_login, dom_type, dom_conf
+                except Exception as e:
+                    logger.warning(f"Auto-handoff DOM check failed: {e}")
+
+        # Only auto-handoff if confidence is above threshold
         if not is_login or confidence < 0.70:
             return None
 
-        # Auto-initiate handoff
-        timeout = self._config.get("handoff.default_timeout", 300) if self._config else 300
+        logger.info(
+            f"Auto-handoff triggered: login page detected at {url} "
+            f"(type={page_type}, confidence={confidence:.2f})"
+        )
+
+        # Start the handoff automatically
         result = await self.start_handoff(
             url=url,
             page_id=page_id,
             user_id=user_id,
             session_id=session_id,
-            timeout_seconds=timeout,
+            timeout_seconds=self._config.get("handoff_timeout", 300),
             auto_detected=True,
         )
 
@@ -1096,27 +1110,23 @@ class LoginHandoffManager:
     # ─── Background Monitoring ─────────────────────────────
 
     async def _monitor_loop(self):
-        """Background task that monitors active handoffs for:
-        - Timeout detection
-        - Auto-completion detection (page navigated away from login)
-        """
+        """Background task: monitor active handoffs for completion and timeout."""
         while self._running:
             try:
-                await asyncio.sleep(self.COMPLETION_CHECK_INTERVAL_SECONDS)
+                # Collect handoff IDs that need auto-completion (to avoid deadlock
+                # from calling complete_handoff while holding the lock)
+                auto_complete_ids: List[Tuple[str, str]] = []
 
                 async with self._lock:
                     for hs in list(self._sessions.values()):
                         if not hs.is_active:
                             continue
 
-                        # Check timeout
+                        # Check for timeout
                         if hs.is_expired:
                             hs.state = HandoffState.TIMED_OUT
                             hs.updated_at = time.time()
-                            hs.message = (
-                                f"Login handoff timed out after {hs.timeout_seconds} seconds. "
-                                f"The AI agent will continue without authentication."
-                            )
+                            hs.message = f"Handoff timed out after {hs.timeout_seconds} seconds"
                             self._add_to_history(hs)
 
                             await self._notify_ws("login_handoff_timed_out", {
@@ -1126,44 +1136,60 @@ class LoginHandoffManager:
                             })
 
                             logger.warning(
-                                f"Login handoff timed out: {hs.handoff_id} | "
-                                f"domain={hs.domain} timeout={hs.timeout_seconds}s"
+                                f"Handoff timed out: {hs.handoff_id} | domain={hs.domain} timeout={hs.timeout_seconds}s"
                             )
                             continue
 
-                        # Auto-detect completion: check if page navigated away from login
-                        if hs.state == HandoffState.WAITING_FOR_USER:
-                            page = self._browser._pages.get(hs.page_id)
-                            if page:
-                                try:
-                                    current_url = page.url or ""
-                                    # Check if the user navigated away from the login page
-                                    if self._is_login_completed(hs, current_url, page):
-                                        # Auto-complete the handoff
-                                        # Release lock first, then complete
-                                        pass  # Will be handled below
-                                except Exception:
-                                    pass
+                        # Check if user navigated away from login page (completion signal)
+                        page = self._browser._pages.get(hs.page_id)
+                        if page:
+                            try:
+                                current_url = page.url or ""
+                                parsed = urlparse(current_url)
+                                domain = (parsed.hostname or "").lower().replace("www.", "")
 
-                # Handle auto-completion outside the lock
-                # Re-fetch sessions that might need auto-completion
-                for hs in list(self._sessions.values()):
-                    if not hs.is_active or hs.state != HandoffState.WAITING_FOR_USER:
-                        continue
-                    page = self._browser._pages.get(hs.page_id)
-                    if page:
-                        try:
-                            current_url = page.url or ""
-                            if self._is_login_completed(hs, current_url, page):
-                                await self.complete_handoff(hs.handoff_id)
-                        except Exception as e:
-                            logger.warning(f"Auto-completion check failed for {hs.handoff_id}: {e}")
+                                # Check if user navigated to a known post-login page
+                                is_login_now, _, _ = LoginDetector.detect_from_url(current_url)
 
-            except asyncio.CancelledError:
-                break
+                                # If we're no longer on a login page and domain matches,
+                                # that's a strong signal that login completed
+                                if not is_login_now and domain == hs.domain:
+                                    # Check for new auth cookies
+                                    try:
+                                        cookies_result = await self._browser.get_cookies()
+                                        current_cookies = cookies_result.get("cookies", [])
+                                        before_names = {
+                                            (c.get("name", ""), c.get("domain", ""))
+                                            for c in hs.cookies_before
+                                        }
+                                        new_cookie_count = sum(
+                                            1 for c in current_cookies
+                                            if (c.get("name", ""), c.get("domain", "")) not in before_names
+                                        )
+
+                                        if new_cookie_count > 0:
+                                            # Mark for auto-completion outside the lock
+                                            auto_complete_ids.append((hs.handoff_id, hs.user_id))
+                                            logger.info(
+                                                f"Auto-completing handoff {hs.handoff_id}: "
+                                                f"user navigated away from login + {new_cookie_count} new cookies"
+                                            )
+                                    except Exception as e:
+                                        logger.debug(f"Cookie check during monitoring failed: {e}")
+                            except Exception as e:
+                                logger.debug(f"URL check during monitoring failed: {e}")
+
+                # Auto-complete handoffs outside the lock to avoid deadlock
+                for handoff_id, user_id in auto_complete_ids:
+                    try:
+                        await self.complete_handoff(handoff_id, user_id)
+                    except Exception as e:
+                        logger.warning(f"Auto-completion failed for {handoff_id}: {e}")
+
             except Exception as e:
                 logger.error(f"Monitor loop error: {e}")
-                await asyncio.sleep(5)
+
+            await asyncio.sleep(self.COMPLETION_CHECK_INTERVAL_SECONDS)
 
     def _is_login_completed(self, hs: HandoffSession, current_url: str, page) -> bool:
         """Check if the user has completed the login process.

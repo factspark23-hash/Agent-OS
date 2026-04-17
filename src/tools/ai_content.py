@@ -221,7 +221,21 @@ class AIContentExtractor:
 
     The result is always an AIContent object with a predictable
     structure — same fields regardless of how the page was fetched.
+
+    When an llm_provider (UniversalProvider) is provided, summarization
+    uses the LLM for higher-quality, abstractive summaries. Otherwise,
+    extractive summarization (first meaningful sentences) is used.
     """
+
+    def __init__(self, llm_provider=None):
+        """Initialize the content extractor.
+
+        Args:
+            llm_provider: Optional UniversalProvider instance for AI-powered
+                         summarization. If None, extractive summarization
+                         is used as fallback.
+        """
+        self._llm_provider = llm_provider
 
     # JavaScript to run in the browser to extract all data in one pass
     _BROWSER_EXTRACT_JS = """() => {
@@ -527,8 +541,8 @@ class AIContentExtractor:
                 extraction_method="dom",
             )
 
-            # Generate summary from first few paragraphs
-            content.summary = self._generate_summary(content.paragraphs)
+            # Generate summary — use LLM-powered async version when available
+            content.summary = await self._generate_summary_async(content, content.main_text)
 
             # Detect content type
             dom_signals = raw.get("dom_signals", {})
@@ -629,7 +643,9 @@ class AIContentExtractor:
                 paragraphs.append(text)
 
             main_text = "\n\n".join(paragraphs)
-            summary = self._generate_summary(paragraphs)
+            # Build a temporary AIContent to pass to async summarizer
+            _tmp_content = AIContent(paragraphs=paragraphs, main_text=main_text, url=url)
+            summary = await self._generate_summary_async(_tmp_content, main_text)
 
             # ── Tables ──────────────────────────────────────
             tables = []
@@ -778,29 +794,116 @@ class AIContentExtractor:
             logger.error(f"HTML extraction failed: {exc}", exc_info=True)
             return {"status": "error", "error": str(exc)}
 
-    def _generate_summary(self, paragraphs: List[str]) -> str:
+    def _generate_summary(self, content: AIContent, raw_text: str = "") -> str:
+        """Generate a summary of the content using LLM when available, extractive fallback.
+
+        When an llm_provider is configured, uses it for abstractive summarization
+        which produces higher-quality, context-aware summaries. Falls back to
+        extractive summarization (first meaningful sentences) when no LLM is
+        available or if the LLM call fails.
+
+        Args:
+            content: The AIContent object (used for paragraphs and URL context)
+            raw_text: Raw text from the page (used as LLM input before paragraphs)
+
+        Returns:
+            A 2-3 sentence summary string, or empty string if no content.
         """
-        Generate a 2-3 sentence extractive summary from paragraphs.
-        No LLM needed — uses position-weighted sentence extraction.
+        # If we have an LLM provider configured, try it for summarization
+        if self._llm_provider is not None:
+            try:
+                # Prepare a compact prompt with the key content
+                prompt_text = raw_text[:4000] if raw_text else ""
+                if not prompt_text and content.paragraphs:
+                    prompt_text = " ".join(content.paragraphs[:10])[:4000]
+
+                if prompt_text:
+                    # Try sync-style call via the provider's complete method
+                    # We use asyncio to run the async complete in a sync context
+                    import asyncio
+                    try:
+                        loop = asyncio.get_running_loop()
+                    except RuntimeError:
+                        loop = None
+
+                    if loop and loop.is_running():
+                        # We're inside an event loop — can't await here (use _generate_summary_async instead)
+                        pass
+                    else:
+                        summary_result = asyncio.run(self._llm_provider.complete(
+                            prompt=f"Summarize this web page content in 2-3 concise sentences. Focus on the main topic and key information.\n\nContent from {content.url}:\n{prompt_text}",
+                            max_tokens=200,
+                            temperature=0.3,
+                        ))
+                        if isinstance(summary_result, dict) and summary_result.get("status") == "success":
+                            summary = summary_result.get("content", "").strip()
+                            if summary and len(summary) > 20:
+                                return summary
+            except Exception as e:
+                logger.debug(f"LLM summarization failed, using extractive fallback: {e}")
+
+        # Extractive fallback: take first 2-3 meaningful sentences
+        paragraphs = content.paragraphs if hasattr(content, 'paragraphs') else []
+        if isinstance(content, list):
+            # Backward compat: content was passed as a list of paragraphs
+            paragraphs = content
+
+        if paragraphs:
+            sentences = []
+            for para in paragraphs[:5]:
+                for sentence in para.split(". "):
+                    sentence = sentence.strip()
+                    if len(sentence) > 20 and not sentence.lower().startswith(("click", "subscribe", "sign up", "cookie", "accept")):
+                        sentences.append(sentence)
+                        if len(sentences) >= 3:
+                            break
+                if len(sentences) >= 3:
+                    break
+            if sentences:
+                return ". ".join(sentences) + "."
+
+        # Last resort: truncate main_text
+        if hasattr(content, 'main_text') and content.main_text:
+            return content.main_text[:300].rsplit(" ", 1)[0] + "..."
+
+        return ""
+
+    async def _generate_summary_async(self, content: AIContent, raw_text: str = "") -> str:
+        """Async version: Generate summary using LLM when available.
+
+        This is the preferred method to call from async contexts (extract_from_browser,
+        extract_from_html). It tries the LLM provider's async complete method first,
+        then falls back to the sync extractive method.
+
+        Args:
+            content: The AIContent object (used for paragraphs, URL, and main_text)
+            raw_text: Raw text from the page (used as LLM input)
+
+        Returns:
+            A 2-3 sentence summary string, or empty string if no content.
         """
-        if not paragraphs:
-            return ""
+        if self._llm_provider is not None:
+            try:
+                prompt_text = raw_text[:4000] if raw_text else ""
+                if not prompt_text and content.paragraphs:
+                    prompt_text = " ".join(content.paragraphs[:10])[:4000]
 
-        # Collect sentences from first few paragraphs
-        sentences = []
-        for p in paragraphs[:5]:
-            for sent in re.split(r'(?<=[.!?])\s+', p):
-                sent = sent.strip()
-                if 20 < len(sent) < 300:
-                    sentences.append(sent)
+                if prompt_text:
+                    # Try the provider's async complete method
+                    summary_result = await self._llm_provider.complete(
+                        prompt=f"Summarize this web page content in 2-3 concise sentences. Focus on the main topic and key information.\n\nContent from {content.url}:\n{prompt_text}",
+                        max_tokens=200,
+                        temperature=0.3,
+                    )
+                    if isinstance(summary_result, dict) and summary_result.get("status") == "success":
+                        summary = summary_result.get("content", "").strip()
+                        if summary and len(summary) > 20:
+                            return summary
+            except Exception as e:
+                logger.debug(f"Async LLM summarization failed, falling back to extractive: {e}")
 
-        if not sentences:
-            # Fallback: truncate first paragraph
-            return paragraphs[0][:300] + "..." if len(paragraphs[0]) > 300 else paragraphs[0]
-
-        # Take first 2-3 sentences (position-weighted: first sentences are most important)
-        summary_sentences = sentences[:3]
-        return " ".join(summary_sentences)
+        # Fall back to extractive summary (sync method handles this)
+        return self._generate_summary(content, raw_text)
 
 
 # ─── Enhanced Structured Output Types ───────────────────────────
