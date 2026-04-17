@@ -2670,30 +2670,46 @@ class AgentServer:
             return {"status": "error", "error": "Missing 'url' parameter"}
         try:
             from src.security.captcha_preempt import CaptchaPreemptor
-            preemptor = CaptchaPreemptor(self.browser, config=self.config)
+            from src.security.captcha_bypass import CaptchaBypass
+            preemptor = CaptchaPreemptor(captcha_bypass=CaptchaBypass())
             result = await preemptor.assess_url_risk(url)
-            return {"status": "success", "data": result}
+            if hasattr(result, '__dict__'):
+                result = result.__dict__
+            elif hasattr(result, '_asdict'):
+                result = result._asdict()
+            return {"status": "success", "data": result if isinstance(result, dict) else str(result)}
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
     async def _cmd_captcha_preflight(self, data: Dict, session) -> Dict:
         """Run pre-flight check for automation artifacts on current page."""
         try:
+            page = self.browser.page
+            if not page:
+                return {"status": "error", "error": "No active browser page"}
             from src.security.captcha_preempt import CaptchaPreemptor
-            preemptor = CaptchaPreemptor(self.browser, config=self.config)
-            result = await preemptor.preflight_check()
-            return {"status": "success", "data": result}
+            from src.security.captcha_bypass import CaptchaBypass
+            preemptor = CaptchaPreemptor(captcha_bypass=CaptchaBypass())
+            result = await preemptor.preflight_check(page)
+            if hasattr(result, '__dict__'):
+                result = result.__dict__
+            elif hasattr(result, '_asdict'):
+                result = result._asdict()
+            return {"status": "success", "data": result if isinstance(result, dict) else str(result)}
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
     async def _cmd_captcha_monitor_start(self, data: Dict, session) -> Dict:
         """Start real-time captcha detection monitoring on current page."""
         try:
+            page = self.browser.page
+            if not page:
+                return {"status": "error", "error": "No active browser page"}
             from src.security.captcha_preempt import CaptchaPreemptor
-            preemptor = CaptchaPreemptor(self.browser, config=self.config)
-            mode = data.get("mode", "moderate")
-            result = await preemptor.start_monitoring(mode=mode)
-            return {"status": "success", "data": result}
+            from src.security.captcha_bypass import CaptchaBypass
+            preemptor = CaptchaPreemptor(captcha_bypass=CaptchaBypass())
+            result = await preemptor.start_monitoring(page)
+            return {"status": "success", "data": str(result)}
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
@@ -2701,9 +2717,11 @@ class AgentServer:
         """Stop captcha detection monitoring."""
         try:
             from src.security.captcha_preempt import CaptchaPreemptor
-            preemptor = CaptchaPreemptor(self.browser, config=self.config)
-            result = await preemptor.stop_monitoring()
-            return {"status": "success", "data": result}
+            from src.security.captcha_bypass import CaptchaBypass
+            preemptor = CaptchaPreemptor(captcha_bypass=CaptchaBypass())
+            page_id = data.get("page_id", "main")
+            result = await preemptor.stop_monitoring(page_id)
+            return {"status": "success", "data": result if isinstance(result, dict) else str(result)}
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
@@ -2712,8 +2730,7 @@ class AgentServer:
         try:
             from src.security.captcha_preempt import CaptchaPreemptor
             from src.security.captcha_bypass import CaptchaBypass
-            bypass = CaptchaBypass()
-            preemptor = CaptchaPreemptor(captcha_bypass=bypass)
+            preemptor = CaptchaPreemptor(captcha_bypass=CaptchaBypass())
             page = self.browser.page
             if not page:
                 return {"status": "error", "error": "No active browser page"}
@@ -2727,10 +2744,18 @@ class AgentServer:
     async def _cmd_captcha_shutdown(self, data: Dict, session) -> Dict:
         """Emergency shutdown current page — rescue data, disable network, navigate to about:blank."""
         try:
+            page = self.browser.page
+            if not page:
+                return {"status": "error", "error": "No active browser page"}
             from src.security.captcha_preempt import CaptchaPreemptor
-            preemptor = CaptchaPreemptor(self.browser, config=self.config)
-            result = await preemptor.shutdown_page(reason=data.get("reason", "manual"))
-            return {"status": "success", "data": result}
+            from src.security.captcha_bypass import CaptchaBypass
+            preemptor = CaptchaPreemptor(captcha_bypass=CaptchaBypass())
+            result = await preemptor.shutdown_page(page, reason=data.get("reason", "manual"))
+            if hasattr(result, '__dict__'):
+                result = result.__dict__
+            elif hasattr(result, '_asdict'):
+                result = result._asdict()
+            return {"status": "success", "data": result if isinstance(result, dict) else str(result)}
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
@@ -2807,7 +2832,7 @@ class AgentServer:
             from src.core.llm_provider import get_llm
             llm = get_llm()
             llm.set_provider(
-                provider=provider,
+                provider_name=provider,
                 api_key=data.get("api_key"),
                 base_url=data.get("base_url"),
                 model=data.get("model"),
@@ -2947,7 +2972,10 @@ class AgentServer:
         headers = data.get("headers", {})
         profile = data.get("profile")
         timeout = data.get("timeout", 30)
-        return await self.browser.tls_get(url, headers=headers, profile=profile, timeout=timeout)
+        result = await self.browser.tls_get(url, headers=headers, profile=profile, timeout=timeout)
+        if "status" not in result:
+            result["status"] = "success" if result.get("status_code", 0) > 0 else "error"
+        return result
 
     async def _cmd_tls_post(self, data: Dict, session) -> Dict:
         """HTTP POST with real browser TLS fingerprint (no browser needed)."""
@@ -2964,7 +2992,10 @@ class AgentServer:
             kwargs["json_data"] = json_data
         elif body:
             kwargs["data"] = body.encode() if isinstance(body, str) else body
-        return await self.browser.tls_post(url, **kwargs)
+        result = await self.browser.tls_post(url, **kwargs)
+        if "status" not in result:
+            result["status"] = "success" if result.get("status_code", 0) > 0 else "error"
+        return result
 
     async def _cmd_tls_stats(self, data: Dict, session) -> Dict:
         """Get TLS proxy and fingerprinting statistics."""
