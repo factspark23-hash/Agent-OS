@@ -381,6 +381,9 @@ class BuiltinLLM:
             "title": (r'(?:title|heading|subject)[\s:]+(.+?)(?:\n|$)', str),
         }
 
+        # Track which matches have been consumed (for multiple same-type fields)
+        consumed_positions: Dict[str, set] = {}  # pattern -> set of char positions already used
+
         for field_name, field_type in schema.items():
             field_key = str(field_name)
             field_type_str = str(field_type) if isinstance(field_type, str) else ""
@@ -421,11 +424,27 @@ class BuiltinLLM:
                     continue
 
             if pattern:
-                found = re.findall(pattern, text, re.IGNORECASE)
                 if return_list or isinstance(field_type, list):
-                    data[field_key] = list(dict.fromkeys(m.strip() for m in found))[:10]  # Dedupe, limit
+                    found = re.findall(pattern, text, re.IGNORECASE)
+                    data[field_key] = list(dict.fromkeys(m.strip() for m in found))[:10]
                 else:
-                    val = found[0].strip() if found else None
+                    # Find all matches with positions
+                    all_matches = list(re.finditer(pattern, text, re.IGNORECASE))
+                    if not all_matches:
+                        data[field_key] = None
+                        continue
+
+                    # For number-type fields, skip already-consumed positions
+                    if pattern not in consumed_positions:
+                        consumed_positions[pattern] = set()
+
+                    val = None
+                    for m in all_matches:
+                        if m.start() not in consumed_positions[pattern]:
+                            val = m.group().strip()
+                            consumed_positions[pattern].add(m.start())
+                            break
+
                     if val:
                         val = val.split('\n')[0].strip()
                     data[field_key] = val
