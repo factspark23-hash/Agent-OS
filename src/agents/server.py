@@ -3566,7 +3566,7 @@ class AgentServer:
         """Rotate to the next proxy in the pool."""
         try:
             manager = await self._get_proxy_manager()
-            proxy = await manager.rotate()
+            proxy = await manager.get_proxy()
             if proxy:
                 return {"status": "success", "proxy": proxy.to_dict()}
             return {"status": "error", "error": "No proxy available"}
