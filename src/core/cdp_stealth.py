@@ -46,12 +46,25 @@ def generate_cdp_stealth_js(
     screen_height: int = 1080,
     pixel_ratio: float = 1.0,
     timezone: str = "America/New_York",
+    locale: str = "en-US",
+    seed: int = None,
 ) -> str:
     """
     Generate the complete CDP stealth JavaScript.
     This is injected via Page.addScriptToEvaluateOnNewDocument so it runs
     BEFORE any page JavaScript, including detection scripts.
+
+    Args:
+        seed: Deterministic seed for WebGL and canvas noise values.
+              If None, a seed is derived from a hash of the webgl_renderer.
+              Using the same seed guarantees identical fingerprints on re-injection.
     """
+
+    # Use a seeded PRNG so re-injection after recovery produces the same values
+    import random as _random
+    if seed is None:
+        seed = abs(hash(webgl_renderer)) % (2**31 - 1) + 1
+    rng = _random.Random(seed)
 
     return f"""
 // ═══════════════════════════════════════════════════════════════
@@ -262,15 +275,17 @@ Object.defineProperty(Navigator.prototype, 'plugins', {{
 // 5. NAVIGATOR PROPERTIES — Consistent Real Browser Values
 // ═══════════════════════════════════════════════════════════════
 
-// Languages
+// Languages — derived from the profile locale
+const _agentOsLocale = '{locale}';
+const _agentOsLang = _agentOsLocale.split('-')[0];
 Object.defineProperty(Navigator.prototype, 'languages', {{
-    get: function() {{ return ['en-US', 'en']; }},
+    get: function() {{ return [_agentOsLocale, _agentOsLang]; }},
     configurable: true,
     enumerable: true
 }});
 
 Object.defineProperty(Navigator.prototype, 'language', {{
-    get: function() {{ return 'en-US'; }},
+    get: function() {{ return _agentOsLocale; }},
     configurable: true,
     enumerable: true
 }});
@@ -497,16 +512,16 @@ WebGLRenderingContext.prototype.getParameter = makeNative(function(param) {{
     switch(param) {{
         case 37445: return '{webgl_vendor}';
         case 37446: return '{webgl_renderer}';
-        case 35661: return {random.randint(16, 32)};
-        case 34076: return {random.randint(16384, 32768)};
-        case 34921: return {random.randint(16, 32)};
-        case 36347: return {random.randint(1024, 4096)};
-        case 36349: return {random.randint(1024, 4096)};
-        case 34024: return {random.randint(16384, 32768)};
-        case 3386: return [{random.randint(16384, 32768)}, {random.randint(16384, 32768)}];
-        case 34047: return {random.randint(8, 16)};
-        case 3413: case 3414: case 3415: return {random.randint(8, 16)};
-        case 33902: return [0, {random.uniform(1, 16)}];
+        case 35661: return {rng.randint(16, 32)};
+        case 34076: return {rng.randint(16384, 32768)};
+        case 34921: return {rng.randint(16, 32)};
+        case 36347: return {rng.randint(1024, 4096)};
+        case 36349: return {rng.randint(1024, 4096)};
+        case 34024: return {rng.randint(16384, 32768)};
+        case 3386: return [{rng.randint(16384, 32768)}, {rng.randint(16384, 32768)}];
+        case 34047: return {rng.randint(8, 16)};
+        case 3413: case 3414: case 3415: return {rng.randint(8, 16)};
+        case 33902: return [0, {rng.uniform(1, 16):.4f}];
         default: return origGetParam.call(this, param);
     }}
 }}, 'getParameter');
@@ -516,6 +531,16 @@ if (origGetParam2) {{
         switch(param) {{
             case 37445: return '{webgl_vendor}';
             case 37446: return '{webgl_renderer}';
+            case 35661: return {rng.randint(16, 32)};
+            case 34076: return {rng.randint(16384, 32768)};
+            case 34921: return {rng.randint(16, 32)};
+            case 36347: return {rng.randint(1024, 4096)};
+            case 36349: return {rng.randint(1024, 4096)};
+            case 34024: return {rng.randint(16384, 32768)};
+            case 3386: return [{rng.randint(16384, 32768)}, {rng.randint(16384, 32768)}];
+            case 34047: return {rng.randint(8, 16)};
+            case 3413: case 3414: case 3415: return {rng.randint(8, 16)};
+            case 33902: return [0, {rng.uniform(1, 16):.4f}];
             default: return origGetParam2.call(this, param);
         }}
     }}, 'getParameter');
@@ -525,7 +550,7 @@ if (origGetParam2) {{
 // 9. CANVAS FINGERPRINT — Consistent Noise
 // ═══════════════════════════════════════════════════════════════
 
-const canvasSeed = {random.randint(1, 2**31 - 1)};
+const canvasSeed = {seed};
 const rng = seededRandom(canvasSeed);
 
 const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
@@ -566,7 +591,7 @@ HTMLCanvasElement.prototype.toBlob = function(callback, type, quality) {{
 // 10. AUDIO FINGERPRINT — Consistent Noise
 // ═══════════════════════════════════════════════════════════════
 
-const audioSeed = {random.randint(1, 2**31 - 1)};
+const audioSeed = {rng.randint(1, 2**31 - 1)};
 const audioRng = seededRandom(audioSeed);
 
 if (typeof AnalyserNode !== 'undefined') {{
@@ -714,19 +739,11 @@ Error.prepareStackTrace = function(error, stack) {{
 }};
 
 // ═══════════════════════════════════════════════════════════════
-// 16. IFRAME SANDBOX — Consistent Fingerprint in Iframes
+// 16. AUTOMATION HEADERS — Remove from outgoing requests
 // ═══════════════════════════════════════════════════════════════
-
-// Override iframe contentWindow to apply stealth to iframes too
-const origCreateElement = document.createElement;
-document.createElement = makeNative(function(tagName) {{
-    const element = origCreateElement.apply(this, arguments);
-    if (tagName.toLowerCase() === 'iframe') {{
-        // When iframe loads, our CDP script will handle it
-        // (Page.addScriptToEvaluateOnNewDocument applies to all frames)
-    }}
-    return element;
-}}, 'createElement');
+// NOTE: The previous iframe createElement override was a no-op —
+// Page.addScriptToEvaluateOnNewDocument already applies to all frames.
+// Removed to avoid unnecessary detection surface.
 
 // ═══════════════════════════════════════════════════════════════
 // 17. AUTOMATION HEADERS — Remove from outgoing requests
@@ -823,6 +840,8 @@ class CDPStealthInjector:
                 screen_height=fingerprint.get("screen_height", 1080),
                 pixel_ratio=fingerprint.get("pixel_ratio", 1.0),
                 timezone=fingerprint.get("timezone", "America/New_York"),
+                locale=fingerprint.get("locale", "en-US"),
+                seed=fingerprint.get("seed"),
             )
 
             # Inject via CDP Page.addScriptToEvaluateOnNewDocument
@@ -900,6 +919,8 @@ class CDPStealthInjector:
                 screen_height=fingerprint.get("screen_height", 1080),
                 pixel_ratio=fingerprint.get("pixel_ratio", 1.0),
                 timezone=fingerprint.get("timezone", "America/New_York"),
+                locale=fingerprint.get("locale", "en-US"),
+                seed=fingerprint.get("seed"),
             )
 
             # Create a temporary page to get CDP session
@@ -972,8 +993,8 @@ class CDPStealthInjector:
                             {**b, "version": f"{b['version']}.0.0.0"} for b in brands
                         ],
                         "fullVersion": f"{chrome_version}.0.0.0",
-                        "platform": "Windows",
-                        "platformVersion": "15.0.0",
+                        "platform": fingerprint.get("sec_ch_ua_platform", '"Windows"').strip('"'),
+                        "platformVersion": "15.0.0" if fingerprint.get("platform", "Win32") == "Win32" else "14.0.0",
                         "architecture": "x86",
                         "model": "",
                         "mobile": False,

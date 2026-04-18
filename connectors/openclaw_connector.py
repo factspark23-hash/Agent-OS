@@ -22,6 +22,21 @@ AGENT_TOKEN = os.environ.get("AGENT_OS_TOKEN", "openclaw-agent")
 
 command_map = get_command_map()
 
+# ─── Persistent HTTP Client ──────────────────────────────────
+
+_client: Optional[httpx.AsyncClient] = None
+
+
+async def _get_client() -> httpx.AsyncClient:
+    """Get or create a persistent httpx.AsyncClient with connection pooling."""
+    global _client
+    if _client is None or _client.is_closed:
+        _client = httpx.AsyncClient(
+            timeout=60.0,
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
+    return _client
+
 
 def get_manifest() -> Dict[str, Any]:
     """Get the tool manifest for OpenClaw registration."""
@@ -81,26 +96,25 @@ async def _execute_command(command: str, params: Dict[str, Any] = None) -> Dict[
     if params:
         payload.update(params)
 
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(
-                f"{AGENT_OS_URL}/command",
-                json=payload,
-                timeout=60.0,
-            )
-            return response.json()
-        except Exception as e:
-            return {"status": "error", "error": str(e)}
+    client = await _get_client()
+    try:
+        response = await client.post(
+            f"{AGENT_OS_URL}/command",
+            json=payload,
+        )
+        return response.json()
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 
 
 async def _check_status() -> Dict[str, Any]:
     """Check Agent-OS server status."""
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(f"{AGENT_OS_URL}/health", timeout=10.0)
-            return response.json()
-        except Exception as e:
-            return {"status": "error", "error": str(e)}
+    client = await _get_client()
+    try:
+        response = await client.get(f"{AGENT_OS_URL}/health")
+        return response.json()
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 
 
 def get_tool_count() -> int:

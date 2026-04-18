@@ -222,6 +222,36 @@ def generate_god_mode_js(fp: ConsistentFingerprint) -> str:
     7. Randomize timing (but consistently)
     """
 
+    # Derive locale from the fingerprint's hardware profile
+    # (default to en-US since ConsistentFingerprint doesn't store locale)
+    _locale = "en-US"
+    _lang = _locale.split("-")[0]
+
+    # Pre-generate deterministic WebGL values using the fingerprint's seeded RNG
+    _wgl_35661 = fp._rng.randint(16, 32)
+    _wgl_34076 = fp._rng.randint(16384, 32768)
+    _wgl_34921 = fp._rng.randint(16, 32)
+    _wgl_36347 = fp._rng.randint(1024, 4096)
+    _wgl_36349 = fp._rng.randint(1024, 4096)
+    _wgl_34024 = fp._rng.randint(16384, 32768)
+    _wgl_3386_a = fp._rng.randint(16384, 32768)
+    _wgl_3386_b = fp._rng.randint(16384, 32768)
+    _wgl_34047 = fp._rng.randint(8, 16)
+    _wgl_341x = fp._rng.randint(8, 16)
+    _wgl_33902 = fp._rng.uniform(1, 16)
+    # Generate second set for WebGL2 (same values for consistency)
+    _wgl2_35661 = fp._rng.randint(16, 32)
+    _wgl2_34076 = fp._rng.randint(16384, 32768)
+    _wgl2_34921 = fp._rng.randint(16, 32)
+    _wgl2_36347 = fp._rng.randint(1024, 4096)
+    _wgl2_36349 = fp._rng.randint(1024, 4096)
+    _wgl2_34024 = fp._rng.randint(16384, 32768)
+    _wgl2_3386_a = fp._rng.randint(16384, 32768)
+    _wgl2_3386_b = fp._rng.randint(16384, 32768)
+    _wgl2_34047 = fp._rng.randint(8, 16)
+    _wgl2_341x = fp._rng.randint(8, 16)
+    _wgl2_33902 = fp._rng.uniform(1, 16)
+
     return f"""
 // ═══════════════════════════════════════════════════════════════
 // AGENT-OS GOD MODE v5.0 — Ultimate Anti-Detection System
@@ -231,22 +261,25 @@ def generate_god_mode_js(fp: ConsistentFingerprint) -> str:
 (function() {{
 'use strict';
 
-// ── UTILITY: Make function look native ──
-const nativeToString = Function.prototype.toString;
-const nativeCall = nativeToString.call;
-const NATIVE_PATTERN = /^function\\s*\\w*\\s*\\([^)]*\\)\\s*{{\\s*\\[native code\\]\\s*}}$/;
+// ── UTILITY: Map-based native toString cloaking ──
+// Instead of per-function Object.defineProperty (detectable), we use
+// a single Map + one Function.prototype.toString override.
+const _nativeFnMap = new Map();
+const _origFnToString = Function.prototype.toString;
 
 function makeNative(fn, name) {{
-    const original = nativeToString.call(fn);
-    Object.defineProperty(fn, 'toString', {{
-        value: function() {{
-            if (this === fn) return `function ${{name}}() {{ [native code] }}`;
-            return nativeCall.call(nativeToString, this);
-        }},
-        writable: false, configurable: false, enumerable: false
-    }});
+    const nativeStr = `function ${{name || fn.name || ''}}() {{ [native code] }}`;
+    _nativeFnMap.set(fn, nativeStr);
     return fn;
 }}
+
+// Single toString override — checks the Map for registered functions
+Function.prototype.toString = makeNative(function() {{
+    if (_nativeFnMap.has(this)) {{
+        return _nativeFnMap.get(this);
+    }}
+    return _origFnToString.call(this);
+}}, 'toString');
 
 // ── UTILITY: Seeded random (consistent per session) ──
 function createRNG(seed) {{
@@ -319,15 +352,6 @@ Object.keys = makeNative(function(obj) {{
 // new Function() for templating, dynamic code generation, etc.
 // DevTools detection via debugger is handled by the performance.now()
 // timing offset and stack trace sanitization instead.
-
-// Block element inspector detection
-// Sites check element styles that change when inspected
-const origGetComputedStyle = window.getComputedStyle;
-window.getComputedStyle = makeNative(function(element, pseudo) {{
-    const style = origGetComputedStyle.call(this, element, pseudo);
-    // Remove any DevTools-injected styles
-    return style;
-}}, 'getComputedStyle');
 
 // ═══════════════════════════════════════════════════════════════
 // 3. WEBDRIVER — COMPLETE PROTOTYPE-LEVEL REMOVAL
@@ -417,9 +441,13 @@ Object.defineProperty(Navigator.prototype, 'maxTouchPoints', {{
     configurable: true, enumerable: true
 }});
 
-// Languages
+// Languages — derived from the profile locale
 Object.defineProperty(Navigator.prototype, 'languages', {{
-    get: function() {{ return ['en-US', 'en']; }},
+    get: function() {{ return ['{_locale}', '{_lang}']; }},
+    configurable: true, enumerable: true
+}});
+Object.defineProperty(Navigator.prototype, 'language', {{
+    get: function() {{ return '{_locale}'; }},
     configurable: true, enumerable: true
 }});
 
@@ -620,19 +648,24 @@ Object.defineProperty(window, 'devicePixelRatio', {{
 // ═══════════════════════════════════════════════════════════════
 // 9. WEBGL — Consistent Hardware GPU
 // ═══════════════════════════════════════════════════════════════
+// Values are pre-generated from the fingerprint's seeded PRNG so they
+// remain consistent across re-injections (e.g. after crash recovery).
 
 const origGetParam = WebGLRenderingContext.prototype.getParameter;
 WebGLRenderingContext.prototype.getParameter = function(param) {{
     switch(param) {{
         case 37445: return '{fp.hardware["webgl_vendor"]}';
         case 37446: return '{fp.hardware["webgl_renderer"]}';
-        case 35661: return {random.randint(16, 32)};
-        case 34076: return {random.randint(16384, 32768)};
-        case 34921: return {random.randint(16, 32)};
-        case 36347: return {random.randint(1024, 4096)};
-        case 36349: return {random.randint(1024, 4096)};
-        case 34024: return {random.randint(16384, 32768)};
-        case 3386: return [{random.randint(16384, 32768)}, {random.randint(16384, 32768)}];
+        case 35661: return {_wgl_35661};
+        case 34076: return {_wgl_34076};
+        case 34921: return {_wgl_34921};
+        case 36347: return {_wgl_36347};
+        case 36349: return {_wgl_36349};
+        case 34024: return {_wgl_34024};
+        case 3386: return [{_wgl_3386_a}, {_wgl_3386_b}];
+        case 34047: return {_wgl_34047};
+        case 3413: case 3414: case 3415: return {_wgl_341x};
+        case 33902: return [0, {_wgl_33902:.4f}];
         default: return origGetParam.call(this, param);
     }}
 }};
@@ -643,6 +676,16 @@ if (typeof WebGL2RenderingContext !== 'undefined') {{
         switch(param) {{
             case 37445: return '{fp.hardware["webgl_vendor"]}';
             case 37446: return '{fp.hardware["webgl_renderer"]}';
+            case 35661: return {_wgl2_35661};
+            case 34076: return {_wgl2_34076};
+            case 34921: return {_wgl2_34921};
+            case 36347: return {_wgl2_36347};
+            case 36349: return {_wgl2_36349};
+            case 34024: return {_wgl2_34024};
+            case 3386: return [{_wgl2_3386_a}, {_wgl2_3386_b}];
+            case 34047: return {_wgl2_34047};
+            case 3413: case 3414: case 3415: return {_wgl2_341x};
+            case 33902: return [0, {_wgl2_33902:.4f}];
             default: return origGetParam2.call(this, param);
         }}
     }};

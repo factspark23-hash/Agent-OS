@@ -381,13 +381,21 @@ class AgentBrowser:
         Client Hints headers (sec-ch-ua) which are critical for passing
         modern bot detection.
         """
+        # Build Accept-Language from the profile's locale instead of
+        # hardcoding "en-US,en;q=0.9". A mismatch between the locale
+        # (used for Intl, navigator.language) and Accept-Language header
+        # is a common bot detection signal.
+        locale = profile.locale
+        lang_primary = locale.split("-")[0]  # e.g., "en" from "en-US"
+        accept_language = f"{locale},{lang_primary};q=0.9"
+
         headers: Dict[str, str] = {
             "Accept": (
                 "text/html,application/xhtml+xml,application/xml;q=0.9,"
                 "image/avif,image/webp,image/apng,*/*;q=0.8,"
                 "application/signed-exchange;v=b3;q=0.7"
             ),
-            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Language": accept_language,
             "Accept-Encoding": "gzip, deflate, br, zstd",
             "sec-ch-ua": profile.sec_ch_ua,
             "sec-ch-ua-mobile": "?0",
@@ -482,7 +490,6 @@ class AgentBrowser:
                 "--window-size=1920,1080",
                 "--disable-features=TranslateUI",
                 "--disable-ipc-flooding-protection",
-                "--headless=new",  # New headless mode — preserves plugins, chrome runtime, correct UA
             ]
 
             # In Docker containers, Chromium cannot use its own namespace sandbox
@@ -496,6 +503,17 @@ class AgentBrowser:
             if in_docker:
                 self._launch_args.append("--no-sandbox")
                 logger.info("Docker environment detected — browser running with --no-sandbox (container is the sandbox)")
+
+        # Conditionally add --headless=new only when running in headless mode.
+        # Adding it unconditionally would override launch_options["headless"]=False
+        # and force headless even when the user explicitly wants a headed browser.
+        if headless:
+            if "--headless=new" not in self._launch_args:
+                self._launch_args.append("--headless=new")
+        else:
+            # Remove --headless=new if it was cached from a previous headless launch
+            if "--headless=new" in self._launch_args:
+                self._launch_args.remove("--headless=new")
 
         # Build launch options
         launch_options = {
@@ -528,7 +546,7 @@ class AgentBrowser:
             "viewport": self._active_profile.viewport,
             "locale": self._active_profile.locale,
             "timezone_id": self._active_profile.timezone_id,
-            "device_scale_factor": 1.0,
+            "device_scale_factor": self._active_profile.pixel_ratio,
             "has_touch": False,
             "is_mobile": False,
             "java_script_enabled": True,
@@ -601,11 +619,14 @@ class AgentBrowser:
             # would create invalid JS like `window.'Win32'`.
             # Instead, we prepend property-setting statements so
             # `window.__AGENT_OS_X__` resolves correctly at runtime.
+            # Generate a deterministic canvas seed from the cookie key
+            canvas_seed = int(hashlib.sha256(self._cookie_key).hexdigest()[:8], 16)
             platform_init = (
                 f"window.__AGENT_OS_PLATFORM__='{self._active_profile.platform}';"
                 f"window.__AGENT_OS_CORES__={self._active_profile.hardware_concurrency};"
                 f"window.__AGENT_OS_MEMORY__={self._active_profile.device_memory};"
                 f"window.__AGENT_OS_TOUCH__={self._active_profile.max_touch_points};"
+                f"window.__AGENT_OS_LOCALE__='{self._active_profile.locale}';"
             )
             stealth_js_filled = platform_init + "\n" + self._stealth_js
             stealth_js_filled = stealth_js_filled.replace(
@@ -616,6 +637,9 @@ class AgentBrowser:
             )
             stealth_js_filled = stealth_js_filled.replace(
                 '__AGENT_OS_DEVICE_PIXEL_RATIO__', str(self._active_profile.pixel_ratio)
+            )
+            stealth_js_filled = stealth_js_filled.replace(
+                '__CANVAS_SEED__', str(canvas_seed)
             )
             await self.context.add_init_script(stealth_js_filled)
             layers.append("InitScript")
@@ -651,7 +675,7 @@ class AgentBrowser:
         logger.info(f"Stealth layers active for 'main': {layers}")
 
         # Apply TLS fingerprint spoofing via CDP (needs an existing page)
-        await apply_browser_tls_spoofing(self.page, chrome_version=chrome_ver)
+        await apply_browser_tls_spoofing(self.page, chrome_version=chrome_ver, browser_profile=self._active_profile)
 
         # ═══════════════════════════════════════════════════════════
         # HEADLESS STEALTH POST-INJECTION
@@ -774,11 +798,15 @@ class AgentBrowser:
         finally:
             self._recovery_in_progress = False
 
-    async def _safe_execute(self, coro, page_id: str = "main", max_retries: int = 1):
+    async def _safe_execute(self, coro_factory, page_id: str = "main", max_retries: int = 1):
         """Execute a browser operation with crash recovery and automatic retry.
 
         Args:
-            coro: Coroutine to execute
+            coro_factory: A callable (e.g. lambda) that returns a fresh coroutine
+                          each time it is called. This is required because Python
+                          coroutines can only be awaited once — re-awaiting a
+                          coroutine that already raised will produce
+                          "RuntimeError: coroutine already awaited".
             page_id: Page identifier for the operation
             max_retries: Number of times to retry after successful recovery
                          (default 1 — retry once after crash recovery)
@@ -791,6 +819,7 @@ class AgentBrowser:
         """
         for attempt in range(max_retries + 1):
             try:
+                coro = coro_factory()
                 return await coro
             except Exception as e:
                 error_str = str(e).lower()
@@ -834,6 +863,39 @@ class AgentBrowser:
         identify the inconsistency.
         """
         HEADLESS_STEALTH_JS = """() => {
+            // ═══ CACHE CHECK: return same object references across navigations ═══
+            // Detection scripts can compare `navigator.plugins === navigator.plugins`
+            // across domcontentloaded events. If we create new objects each time,
+            // the reference identity changes and exposes the hook.
+            // We cache the fake objects on window.__agentOsStealthCache and
+            // re-apply the SAME references on every navigation.
+            if (window.__agentOsStealthCache) {
+                try {
+                    Object.defineProperty(Navigator.prototype, 'plugins', {
+                        get: () => window.__agentOsStealthCache.plugins,
+                        configurable: true,
+                        enumerable: true
+                    });
+                } catch(e) {}
+                try {
+                    Object.defineProperty(window, 'chrome', {
+                        get: () => window.__agentOsStealthCache.chrome,
+                        configurable: true,
+                        enumerable: true
+                    });
+                } catch(e) {}
+                try {
+                    if (navigator.webdriver !== undefined) {
+                        Object.defineProperty(Navigator.prototype, 'webdriver', {
+                            get: function() { return undefined; },
+                            configurable: true,
+                            enumerable: false
+                        });
+                    }
+                } catch(e) {}
+                return;
+            }
+
             // ═══ VERIFY AND FIX: navigator.plugins ═══
             // CDP stealth already sets this on Navigator.prototype.
             // Only fix if headless Chromium stripped it (plugins.length === 0 or missing).
@@ -859,6 +921,8 @@ class AgentBrowser:
                         configurable: true,
                         enumerable: true
                     });
+                    // Cache the plugins array for reference identity across navigations
+                    window.__agentOsStealthCache_plugins = arr;
                 }
             } catch(e) {}
 
@@ -900,6 +964,8 @@ class AgentBrowser:
                         configurable: true,
                         enumerable: true
                     });
+                    // Cache the chrome object for reference identity across navigations
+                    window.__agentOsStealthCache_chrome = _chromeObj;
                 } else {
                     // chrome exists but may be missing sub-properties — merge them in
                     try {
@@ -909,6 +975,8 @@ class AgentBrowser:
                         if (!existing.csi) existing.csi = function() { return { onloadT: Date.now(), pageT: Date.now(), startE: Date.now() }; };
                         if (!existing.loadTimes) existing.loadTimes = function() { var now = Date.now() / 1000; return { commitLoadTime: now, connectionInfo: 'h2', finishDocumentLoadTime: now, finishLoadTime: now, firstPaintAfterLoadTime: 0, firstPaintTime: now, npnNegotiatedProtocol: 'h2', requestTime: now, startLoadTime: now, wasAlternateProtocolAvailable: false, wasFetchedViaSpdy: true, wasNpnNegotiated: true }; };
                         if (!existing.webstore) existing.webstore = { onInstallStageChanged: { addListener: function(){}, removeListener: function(){}, hasListener: function(){return false;} }, onDownloadProgress: { addListener: function(){}, removeListener: function(){}, hasListener: function(){return false;} } };
+                        // Cache the existing (merged) chrome object
+                        window.__agentOsStealthCache_chrome = existing;
                     } catch(mergeErr) {}
                 }
             } catch(e) {}
@@ -924,6 +992,20 @@ class AgentBrowser:
                         enumerable: false
                     });
                 }
+            } catch(e) {}
+
+            // ═══ INIT STEALTH CACHE for future navigations ═══
+            // Store the created/merged objects so subsequent domcontentloaded
+            // events can re-apply the SAME object references (preserving
+            // identity checks like navigator.plugins === navigator.plugins).
+            try {
+                window.__agentOsStealthCache = {
+                    plugins: window.__agentOsStealthCache_plugins || navigator.plugins,
+                    chrome: window.__agentOsStealthCache_chrome || window.chrome
+                };
+                // Clean up temp keys
+                delete window.__agentOsStealthCache_plugins;
+                delete window.__agentOsStealthCache_chrome;
             } catch(e) {}
         }"""
         
@@ -3388,14 +3470,19 @@ class AgentBrowser:
             self._current_proxy = _ProxyRef(proxy_data)
 
             # For Playwright, we need to recreate the browser with the new proxy
-            # because Chromium doesn't support changing proxy at runtime
-            # Instead, we'll use the TLS proxy which CAN change proxies dynamically
+            # because Chromium doesn't support changing proxy at runtime.
+            # Trigger browser recovery (restart) so the new proxy config takes effect.
+            new_proxy_url = proxy_data.get("url", proxy_id)
             if self._tls_proxy:
                 # Update TLS proxy to use this proxy
                 logger.info(f"Rotating to proxy {proxy_id} for {domain} (via TLS proxy)")
             else:
-                # Direct proxy — need browser restart
-                logger.info(f"Proxy {proxy_id} selected for {domain} (browser restart needed for direct proxy)")
+                # Direct proxy — need browser restart for the new proxy to take effect
+                logger.info(f"Rotating proxy to {new_proxy_url}, triggering browser restart")
+                try:
+                    await self.recover()
+                except Exception as e:
+                    logger.error(f"Failed to restart browser with new proxy: {e}")
 
             return proxy_id
 
@@ -3955,6 +4042,12 @@ class AgentBrowser:
                 await self._firefox_engine.stop()
             except Exception as ff_err:
                 logger.debug(f"Firefox engine stop error: {ff_err}")
+        # Stop dual engine manager
+        if self._dual_engine:
+            try:
+                await self._dual_engine.stop()
+            except Exception as de_err:
+                logger.debug(f"Dual engine manager stop error: {de_err}")
         logger.info("Browser stopped (all engines)")
 
     async def tls_get(self, url: str, **kwargs) -> Dict[str, Any]:
