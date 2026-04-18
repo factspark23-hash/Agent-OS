@@ -2891,7 +2891,7 @@ class AgentServer:
             llm = get_llm()
             result = await llm.complete(
                 prompt,
-                system_prompt=data.get("system_prompt"),
+                system=data.get("system_prompt", data.get("system", "")),
                 max_tokens=data.get("max_tokens", 1000),
                 temperature=data.get("temperature", 0.7),
             )
@@ -2938,7 +2938,6 @@ class AgentServer:
             result = await llm.summarize(
                 text,
                 max_length=data.get("max_length", 500),
-                style=data.get("style", "concise"),
             )
             return result
         except Exception as e:
