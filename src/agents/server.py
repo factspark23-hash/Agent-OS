@@ -3229,7 +3229,7 @@ class AgentServer:
         return await (await self._get_auto_heal()).fingerprint_page(page_id=data.get("page_id", "main"))
 
     async def _cmd_heal_stats(self, data: Dict, session) -> Dict:
-        return await (await self._get_auto_heal()).get_stats()
+        return (await self._get_auto_heal()).get_stats()
 
     async def _cmd_heal_clear(self, data: Dict, session) -> Dict:
         (await self._get_auto_heal()).clear_cache()
@@ -3272,7 +3272,7 @@ class AgentServer:
         return await (await self._get_auto_retry()).api_call(url=url, method=data.get("method", "GET"), headers=data.get("headers"), body=data.get("body"))
 
     async def _cmd_retry_stats(self, data: Dict, session) -> Dict:
-        return await (await self._get_auto_retry()).get_stats()
+        return (await self._get_auto_retry()).get_stats()
 
     async def _cmd_retry_health(self, data: Dict, session) -> Dict:
         return {"status": "success", **(await self._get_auto_retry()).get_health()}
@@ -3392,10 +3392,10 @@ class AgentServer:
         return await (await self._get_agent_hub()).heartbeat(aid)
 
     async def _cmd_hub_status(self, data: Dict, session) -> Dict:
-        return await (await self._get_agent_hub()).get_status()
+        return (await self._get_agent_hub()).get_status()
 
     async def _cmd_hub_agents(self, data: Dict, session) -> Dict:
-        return await (await self._get_agent_hub()).get_agents(alive_only=data.get("alive_only", True))
+        return (await self._get_agent_hub()).get_agents(alive_only=data.get("alive_only", True))
 
     async def _cmd_hub_lock(self, data: Dict, session) -> Dict:
         aid, res = data.get("agent_id"), data.get("resource")
@@ -3410,7 +3410,7 @@ class AgentServer:
         return await (await self._get_agent_hub()).release_lock(aid, lid)
 
     async def _cmd_hub_locks(self, data: Dict, session) -> Dict:
-        return await (await self._get_agent_hub()).get_locks(resource=data.get("resource"), agent_id=data.get("agent_id"))
+        return (await self._get_agent_hub()).get_locks(resource=data.get("resource"), agent_id=data.get("agent_id"))
 
     async def _cmd_hub_task_create(self, data: Dict, session) -> Dict:
         title = data.get("title")
@@ -3462,7 +3462,7 @@ class AgentServer:
         aid = data.get("agent_id")
         if not aid:
             return {"status": "error", "error": "Missing 'agent_id'"}
-        return await (await self._get_agent_hub()).get_events(agent_id=aid, topic=data.get("topic"), since_seconds=data.get("since_seconds"), limit=data.get("limit", 50))
+        return (await self._get_agent_hub()).get_events(agent_id=aid, topic=data.get("topic"), since_seconds=data.get("since_seconds"), limit=data.get("limit", 50))
 
     async def _cmd_hub_memory_set(self, data: Dict, session) -> Dict:
         aid, key = data.get("agent_id"), data.get("key")
@@ -3560,7 +3560,7 @@ class AgentServer:
         return await (await self._get_proxy_manager()).set_strategy(strategy)
 
     async def _cmd_proxy_stats(self, data: Dict, session) -> Dict:
-        return await (await self._get_proxy_manager()).get_stats()
+        return (await self._get_proxy_manager()).get_stats()
 
     async def _cmd_proxy_rotate(self, data: Dict, session) -> Dict:
         """Rotate to the next proxy in the pool."""
