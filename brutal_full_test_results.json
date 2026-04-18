@@ -2,7 +2,7 @@
   "passed": 204,
   "failed": 0,
   "errors": 0,
-  "skipped": 3,
+  "skipped": 0,
   "tests": [
     {
       "name": "Config: Default values load correctly",
@@ -750,29 +750,14 @@
       "status": "PASS"
     },
     {
-      "name": "MCP Server",
-      "status": "SKIP",
-      "error": "MCP module import issue"
-    },
-    {
       "name": "MCP: Server module loads",
       "category": "connectors",
       "status": "PASS"
     },
     {
-      "name": "OpenAI Connector",
-      "status": "SKIP",
-      "error": "Import issue"
-    },
-    {
       "name": "OpenAI: Connector loads",
       "category": "connectors",
       "status": "PASS"
-    },
-    {
-      "name": "OpenClaw Connector",
-      "status": "SKIP",
-      "error": "Import issue"
     },
     {
       "name": "OpenClaw: Connector loads",

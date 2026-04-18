@@ -1376,28 +1376,33 @@ print("\n🔌 CATEGORY 33: CONNECTORS")
 def test_mcp_loads():
     sys.path.insert(0, str(Path(__file__).parent / "connectors"))
     try:
-        from mcp_server import MCPServer
-        assert MCPServer is not None
-    except ImportError:
-        skip("MCP Server", "MCP module import issue")
+        from mcp_server import _get_client, logger
+        assert logger is not None
+        assert callable(_get_client)
+    except ImportError as e:
+        skip("MCP Server", f"MCP module import issue: {e}")
 
 @test("OpenAI: Connector loads", "connectors")
 def test_openai_connector_loads():
     sys.path.insert(0, str(Path(__file__).parent / "connectors"))
     try:
-        from openai_connector import OpenAIConnector
-        assert OpenAIConnector is not None
-    except ImportError:
-        skip("OpenAI Connector", "Import issue")
+        from openai_connector import get_tools, call_tool, TOOL_REGISTRY
+        assert callable(get_tools)
+        assert callable(call_tool)
+        assert len(TOOL_REGISTRY) == 199
+    except ImportError as e:
+        skip("OpenAI Connector", f"Import issue: {e}")
 
 @test("OpenClaw: Connector loads", "connectors")
 def test_openclaw_connector_loads():
     sys.path.insert(0, str(Path(__file__).parent / "connectors"))
     try:
-        from openclaw_connector import OpenClawConnector
-        assert OpenClawConnector is not None
-    except ImportError:
-        skip("OpenClaw Connector", "Import issue")
+        from openclaw_connector import get_manifest, execute_tool, TOOLS
+        assert callable(get_manifest)
+        assert callable(execute_tool)
+        assert len(TOOLS) == 199
+    except ImportError as e:
+        skip("OpenClaw Connector", f"Import issue: {e}")
 
 # ═══════════════════════════════════════════════════════════
 # CATEGORY 34: AUTH MIDDLEWARE (Feature #22)
