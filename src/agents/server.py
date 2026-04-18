@@ -3152,34 +3152,34 @@ class AgentServer:
     # ─── Smart Wait ────────────────────────────────────────
 
     async def _cmd_smart_wait(self, data: Dict, session) -> Dict:
-        return (await self._get_smart_wait()).auto(selector=data.get("selector"), idle_ms=data.get("idle_ms", 500), dom_stable_ms=data.get("dom_stable_ms", 300), timeout_ms=data.get("timeout_ms", 30000), page_id=data.get("page_id", "main"))
+        return await (await self._get_smart_wait()).auto(selector=data.get("selector"), idle_ms=data.get("idle_ms", 500), dom_stable_ms=data.get("dom_stable_ms", 300), timeout_ms=data.get("timeout_ms", 30000), page_id=data.get("page_id", "main"))
 
     async def _cmd_smart_wait_network(self, data: Dict, session) -> Dict:
-        return (await self._get_smart_wait()).network_idle(idle_ms=data.get("idle_ms", 500), timeout_ms=data.get("timeout_ms", 30000), page_id=data.get("page_id", "main"))
+        return await (await self._get_smart_wait()).network_idle(idle_ms=data.get("idle_ms", 500), timeout_ms=data.get("timeout_ms", 30000), page_id=data.get("page_id", "main"))
 
     async def _cmd_smart_wait_dom(self, data: Dict, session) -> Dict:
-        return (await self._get_smart_wait()).dom_stable(stability_ms=data.get("stability_ms", 300), timeout_ms=data.get("timeout_ms", 15000), page_id=data.get("page_id", "main"))
+        return await (await self._get_smart_wait()).dom_stable(stability_ms=data.get("stability_ms", 300), timeout_ms=data.get("timeout_ms", 15000), page_id=data.get("page_id", "main"))
 
     async def _cmd_smart_wait_element(self, data: Dict, session) -> Dict:
         selector = data.get("selector")
         if not selector:
             return {"status": "error", "error": "Missing 'selector'"}
-        return (await self._get_smart_wait()).element_ready(selector=selector, timeout_ms=data.get("timeout_ms", 15000), require_interactable=data.get("require_interactable", True), wait_for_animation=data.get("wait_for_animation", True), page_id=data.get("page_id", "main"))
+        return await (await self._get_smart_wait()).element_ready(selector=selector, timeout_ms=data.get("timeout_ms", 15000), require_interactable=data.get("require_interactable", True), wait_for_animation=data.get("wait_for_animation", True), page_id=data.get("page_id", "main"))
 
     async def _cmd_smart_wait_page(self, data: Dict, session) -> Dict:
-        return (await self._get_smart_wait()).page_ready(timeout_ms=data.get("timeout_ms", 30000), require_images=data.get("require_images", True), require_fonts=data.get("require_fonts", True), page_id=data.get("page_id", "main"))
+        return await (await self._get_smart_wait()).page_ready(timeout_ms=data.get("timeout_ms", 30000), require_images=data.get("require_images", True), require_fonts=data.get("require_fonts", True), page_id=data.get("page_id", "main"))
 
     async def _cmd_smart_wait_js(self, data: Dict, session) -> Dict:
         expr = data.get("expression")
         if not expr:
             return {"status": "error", "error": "Missing 'expression'"}
-        return (await self._get_smart_wait()).js_condition(expression=expr, timeout_ms=data.get("timeout_ms", 10000), poll_ms=data.get("poll_ms"), page_id=data.get("page_id", "main"))
+        return await (await self._get_smart_wait()).js_condition(expression=expr, timeout_ms=data.get("timeout_ms", 10000), poll_ms=data.get("poll_ms"), page_id=data.get("page_id", "main"))
 
     async def _cmd_smart_wait_compose(self, data: Dict, session) -> Dict:
         conditions = data.get("conditions")
         if not conditions:
             return {"status": "error", "error": "Missing 'conditions'"}
-        return (await self._get_smart_wait()).compose(conditions=conditions, mode=data.get("mode", "all"), timeout_ms=data.get("timeout_ms", 30000), page_id=data.get("page_id", "main"))
+        return await (await self._get_smart_wait()).compose(conditions=conditions, mode=data.get("mode", "all"), timeout_ms=data.get("timeout_ms", 30000), page_id=data.get("page_id", "main"))
 
     # ─── Auto Heal ─────────────────────────────────────────
 
@@ -3187,49 +3187,49 @@ class AgentServer:
         s = data.get("selector")
         if not s:
             return {"status": "error", "error": "Missing 'selector'"}
-        return (await self._get_auto_heal()).click(selector=s, page_id=data.get("page_id", "main"), timeout_ms=data.get("timeout_ms", 5000))
+        return await (await self._get_auto_heal()).click(selector=s, page_id=data.get("page_id", "main"), timeout_ms=data.get("timeout_ms", 5000))
 
     async def _cmd_heal_fill(self, data: Dict, session) -> Dict:
         s, v = data.get("selector"), data.get("value")
         if not s or v is None:
             return {"status": "error", "error": "Missing 'selector' or 'value'"}
-        return (await self._get_auto_heal()).fill(selector=s, value=v, page_id=data.get("page_id", "main"), timeout_ms=data.get("timeout_ms", 5000))
+        return await (await self._get_auto_heal()).fill(selector=s, value=v, page_id=data.get("page_id", "main"), timeout_ms=data.get("timeout_ms", 5000))
 
     async def _cmd_heal_wait(self, data: Dict, session) -> Dict:
         s = data.get("selector")
         if not s:
             return {"status": "error", "error": "Missing 'selector'"}
-        return (await self._get_auto_heal()).wait(selector=s, page_id=data.get("page_id", "main"), timeout_ms=data.get("timeout_ms", 10000))
+        return await (await self._get_auto_heal()).wait(selector=s, page_id=data.get("page_id", "main"), timeout_ms=data.get("timeout_ms", 10000))
 
     async def _cmd_heal_hover(self, data: Dict, session) -> Dict:
         s = data.get("selector")
         if not s:
             return {"status": "error", "error": "Missing 'selector'"}
-        return (await self._get_auto_heal()).hover(selector=s, page_id=data.get("page_id", "main"), timeout_ms=data.get("timeout_ms", 5000))
+        return await (await self._get_auto_heal()).hover(selector=s, page_id=data.get("page_id", "main"), timeout_ms=data.get("timeout_ms", 5000))
 
     async def _cmd_heal_double_click(self, data: Dict, session) -> Dict:
         s = data.get("selector")
         if not s:
             return {"status": "error", "error": "Missing 'selector'"}
-        return (await self._get_auto_heal()).double_click(selector=s, page_id=data.get("page_id", "main"), timeout_ms=data.get("timeout_ms", 5000))
+        return await (await self._get_auto_heal()).double_click(selector=s, page_id=data.get("page_id", "main"), timeout_ms=data.get("timeout_ms", 5000))
 
     async def _cmd_heal_selector(self, data: Dict, session) -> Dict:
         s = data.get("selector")
         if not s:
             return {"status": "error", "error": "Missing 'selector'"}
-        return (await self._get_auto_heal()).heal_selector(broken_selector=s, page_id=data.get("page_id", "main"))
+        return await (await self._get_auto_heal()).heal_selector(broken_selector=s, page_id=data.get("page_id", "main"))
 
     async def _cmd_heal_fingerprint(self, data: Dict, session) -> Dict:
         s = data.get("selector")
         if not s:
             return {"status": "error", "error": "Missing 'selector'"}
-        return (await self._get_auto_heal()).fingerprint(selector=s, page_id=data.get("page_id", "main"))
+        return await (await self._get_auto_heal()).fingerprint(selector=s, page_id=data.get("page_id", "main"))
 
     async def _cmd_heal_fingerprint_page(self, data: Dict, session) -> Dict:
-        return (await self._get_auto_heal()).fingerprint_page(page_id=data.get("page_id", "main"))
+        return await (await self._get_auto_heal()).fingerprint_page(page_id=data.get("page_id", "main"))
 
     async def _cmd_heal_stats(self, data: Dict, session) -> Dict:
-        return (await self._get_auto_heal()).get_stats()
+        return await (await self._get_auto_heal()).get_stats()
 
     async def _cmd_heal_clear(self, data: Dict, session) -> Dict:
         (await self._get_auto_heal()).clear_cache()
@@ -3245,34 +3245,34 @@ class AgentServer:
         payload["command"] = command
         async def action():
             return await self._execute_command(command, payload, session)
-        return (await self._get_auto_retry()).execute(operation=command, action=action, params=payload, deduplicate=data.get("deduplicate", False))
+        return await (await self._get_auto_retry()).execute(operation=command, action=action, params=payload, deduplicate=data.get("deduplicate", False))
 
     async def _cmd_retry_navigate(self, data: Dict, session) -> Dict:
         url = data.get("url")
         if not url:
             return {"status": "error", "error": "Missing 'url'"}
-        return (await self._get_auto_retry()).navigate(url=url, page_id=data.get("page_id", "main"), wait_until=data.get("wait_until", "domcontentloaded"))
+        return await (await self._get_auto_retry()).navigate(url=url, page_id=data.get("page_id", "main"), wait_until=data.get("wait_until", "domcontentloaded"))
 
     async def _cmd_retry_click(self, data: Dict, session) -> Dict:
         s = data.get("selector")
         if not s:
             return {"status": "error", "error": "Missing 'selector'"}
-        return (await self._get_auto_retry()).click(selector=s, page_id=data.get("page_id", "main"))
+        return await (await self._get_auto_retry()).click(selector=s, page_id=data.get("page_id", "main"))
 
     async def _cmd_retry_fill(self, data: Dict, session) -> Dict:
         s, v = data.get("selector"), data.get("value")
         if not s or v is None:
             return {"status": "error", "error": "Missing 'selector' or 'value'"}
-        return (await self._get_auto_retry()).fill(selector=s, value=v, page_id=data.get("page_id", "main"))
+        return await (await self._get_auto_retry()).fill(selector=s, value=v, page_id=data.get("page_id", "main"))
 
     async def _cmd_retry_api_call(self, data: Dict, session) -> Dict:
         url = data.get("url")
         if not url:
             return {"status": "error", "error": "Missing 'url'"}
-        return (await self._get_auto_retry()).api_call(url=url, method=data.get("method", "GET"), headers=data.get("headers"), body=data.get("body"))
+        return await (await self._get_auto_retry()).api_call(url=url, method=data.get("method", "GET"), headers=data.get("headers"), body=data.get("body"))
 
     async def _cmd_retry_stats(self, data: Dict, session) -> Dict:
-        return (await self._get_auto_retry()).get_stats()
+        return await (await self._get_auto_retry()).get_stats()
 
     async def _cmd_retry_health(self, data: Dict, session) -> Dict:
         return {"status": "success", **(await self._get_auto_retry()).get_health()}
@@ -3284,30 +3284,30 @@ class AgentServer:
         op = data.get("operation")
         if not op:
             return {"status": "error", "error": "Missing 'operation'"}
-        return (await self._get_auto_retry()).reset_circuit_breaker(op)
+        return await (await self._get_auto_retry()).reset_circuit_breaker(op)
 
     async def _cmd_retry_reset_all_circuits(self, data: Dict, session) -> Dict:
-        return (await self._get_auto_retry()).reset_all_circuit_breakers()
+        return await (await self._get_auto_retry()).reset_all_circuit_breakers()
 
     # ─── Session Recording ─────────────────────────────────
 
     async def _cmd_record_start(self, data: Dict, session) -> Dict:
-        return (await self._get_recorder()).start(name=data.get("name"), screenshot_interval_ms=data.get("screenshot_interval_ms", 2000), screenshot_on_event=data.get("screenshot_on_event", True), capture_network=data.get("capture_network", True), capture_console=data.get("capture_console", True), capture_dom=data.get("capture_dom", True), capture_scroll=data.get("capture_scroll", True), capture_cookies=data.get("capture_cookies", True), tags=data.get("tags"), page_id=data.get("page_id", "main"))
+        return await (await self._get_recorder()).start(name=data.get("name"), screenshot_interval_ms=data.get("screenshot_interval_ms", 2000), screenshot_on_event=data.get("screenshot_on_event", True), capture_network=data.get("capture_network", True), capture_console=data.get("capture_console", True), capture_dom=data.get("capture_dom", True), capture_scroll=data.get("capture_scroll", True), capture_cookies=data.get("capture_cookies", True), tags=data.get("tags"), page_id=data.get("page_id", "main"))
 
     async def _cmd_record_stop(self, data: Dict, session) -> Dict:
-        return (await self._get_recorder()).stop(save=data.get("save", True))
+        return await (await self._get_recorder()).stop(save=data.get("save", True))
 
     async def _cmd_record_pause(self, data: Dict, session) -> Dict:
-        return (await self._get_recorder()).pause()
+        return await (await self._get_recorder()).pause()
 
     async def _cmd_record_resume(self, data: Dict, session) -> Dict:
-        return (await self._get_recorder()).resume()
+        return await (await self._get_recorder()).resume()
 
     async def _cmd_record_annotate(self, data: Dict, session) -> Dict:
         text = data.get("text")
         if not text:
             return {"status": "error", "error": "Missing 'text'"}
-        return (await self._get_recorder()).annotate(text=text, category=data.get("category", "note"), page_id=data.get("page_id", "main"))
+        return await (await self._get_recorder()).annotate(text=text, category=data.get("category", "note"), page_id=data.get("page_id", "main"))
 
     async def _cmd_record_status(self, data: Dict, session) -> Dict:
         rec = await self._get_recorder()
@@ -3333,166 +3333,166 @@ class AgentServer:
         rid = data.get("recording_id")
         if not rid:
             return {"status": "error", "error": "Missing 'recording_id'"}
-        return (await self._get_replay()).load(rid)
+        return await (await self._get_replay()).load(rid)
 
     async def _cmd_replay_play(self, data: Dict, session) -> Dict:
-        return (await self._get_replay()).play(speed=data.get("speed", 1.0), from_event=data.get("from_event", 0), to_event=data.get("to_event"), skip_types=data.get("skip_types"), verify_screenshots=data.get("verify_screenshots", False))
+        return await (await self._get_replay()).play(speed=data.get("speed", 1.0), from_event=data.get("from_event", 0), to_event=data.get("to_event"), skip_types=data.get("skip_types"), verify_screenshots=data.get("verify_screenshots", False))
 
     async def _cmd_replay_stop(self, data: Dict, session) -> Dict:
-        return (await self._get_replay()).stop()
+        return await (await self._get_replay()).stop()
 
     async def _cmd_replay_pause(self, data: Dict, session) -> Dict:
-        return (await self._get_replay()).pause()
+        return await (await self._get_replay()).pause()
 
     async def _cmd_replay_resume(self, data: Dict, session) -> Dict:
-        return (await self._get_replay()).resume()
+        return await (await self._get_replay()).resume()
 
     async def _cmd_replay_step(self, data: Dict, session) -> Dict:
-        return (await self._get_replay()).step()
+        return await (await self._get_replay()).step()
 
     async def _cmd_replay_jump(self, data: Dict, session) -> Dict:
-        return (await self._get_replay()).jump_to(event_index=data.get("event_index"), elapsed_ms=data.get("elapsed_ms"))
+        return await (await self._get_replay()).jump_to(event_index=data.get("event_index"), elapsed_ms=data.get("elapsed_ms"))
 
     async def _cmd_replay_position(self, data: Dict, session) -> Dict:
-        return (await self._get_replay()).get_position()
+        return await (await self._get_replay()).get_position()
 
     async def _cmd_replay_events(self, data: Dict, session) -> Dict:
-        return (await self._get_replay()).get_event_list(offset=data.get("offset", 0), limit=data.get("limit", 50), event_type=data.get("event_type"))
+        return await (await self._get_replay()).get_event_list(offset=data.get("offset", 0), limit=data.get("limit", 50), event_type=data.get("event_type"))
 
     async def _cmd_replay_export_workflow(self, data: Dict, session) -> Dict:
-        return (await self._get_replay()).export_as_workflow(include_navigations=data.get("include_navigations", True))
+        return await (await self._get_replay()).export_as_workflow(include_navigations=data.get("include_navigations", True))
 
     async def _cmd_analyze(self, data: Dict, session) -> Dict:
         rid = data.get("recording_id")
         if not rid:
             return {"status": "error", "error": "Missing 'recording_id'"}
-        return (await self._get_analyzer()).analyze(rid)
+        return await (await self._get_analyzer()).analyze(rid)
 
     async def _cmd_analyze_search(self, data: Dict, session) -> Dict:
         rid = data.get("recording_id")
         if not rid:
             return {"status": "error", "error": "Missing 'recording_id'"}
-        return (await self._get_analyzer()).search(rid, event_type=data.get("event_type"), query=data.get("query"), from_ms=data.get("from_ms"), to_ms=data.get("to_ms"), limit=data.get("limit", 100))
+        return await (await self._get_analyzer()).search(rid, event_type=data.get("event_type"), query=data.get("query"), from_ms=data.get("from_ms"), to_ms=data.get("to_ms"), limit=data.get("limit", 100))
 
     # ─── Multi-Agent Hub ───────────────────────────────────
 
     async def _cmd_hub_register(self, data: Dict, session) -> Dict:
-        return (await self._get_agent_hub()).register_agent(agent_id=data.get("agent_id"), name=data.get("name"), role=data.get("role", "operator"), capabilities=data.get("capabilities"), metadata=data.get("metadata"))
+        return await (await self._get_agent_hub()).register_agent(agent_id=data.get("agent_id"), name=data.get("name"), role=data.get("role", "operator"), capabilities=data.get("capabilities"), metadata=data.get("metadata"))
 
     async def _cmd_hub_unregister(self, data: Dict, session) -> Dict:
         aid = data.get("agent_id")
         if not aid:
             return {"status": "error", "error": "Missing 'agent_id'"}
-        return (await self._get_agent_hub()).unregister_agent(aid)
+        return await (await self._get_agent_hub()).unregister_agent(aid)
 
     async def _cmd_hub_heartbeat(self, data: Dict, session) -> Dict:
         aid = data.get("agent_id")
         if not aid:
             return {"status": "error", "error": "Missing 'agent_id'"}
-        return (await self._get_agent_hub()).heartbeat(aid)
+        return await (await self._get_agent_hub()).heartbeat(aid)
 
     async def _cmd_hub_status(self, data: Dict, session) -> Dict:
-        return (await self._get_agent_hub()).get_status()
+        return await (await self._get_agent_hub()).get_status()
 
     async def _cmd_hub_agents(self, data: Dict, session) -> Dict:
-        return (await self._get_agent_hub()).get_agents(alive_only=data.get("alive_only", True))
+        return await (await self._get_agent_hub()).get_agents(alive_only=data.get("alive_only", True))
 
     async def _cmd_hub_lock(self, data: Dict, session) -> Dict:
         aid, res = data.get("agent_id"), data.get("resource")
         if not aid or not res:
             return {"status": "error", "error": "Missing 'agent_id' or 'resource'"}
-        return (await self._get_agent_hub()).acquire_lock(agent_id=aid, resource=res, lock_type=data.get("lock_type", "exclusive"), ttl_seconds=data.get("ttl_seconds"), timeout_ms=data.get("timeout_ms", 5000))
+        return await (await self._get_agent_hub()).acquire_lock(agent_id=aid, resource=res, lock_type=data.get("lock_type", "exclusive"), ttl_seconds=data.get("ttl_seconds"), timeout_ms=data.get("timeout_ms", 5000))
 
     async def _cmd_hub_unlock(self, data: Dict, session) -> Dict:
         aid, lid = data.get("agent_id"), data.get("lock_id")
         if not aid or not lid:
             return {"status": "error", "error": "Missing 'agent_id' or 'lock_id'"}
-        return (await self._get_agent_hub()).release_lock(aid, lid)
+        return await (await self._get_agent_hub()).release_lock(aid, lid)
 
     async def _cmd_hub_locks(self, data: Dict, session) -> Dict:
-        return (await self._get_agent_hub()).get_locks(resource=data.get("resource"), agent_id=data.get("agent_id"))
+        return await (await self._get_agent_hub()).get_locks(resource=data.get("resource"), agent_id=data.get("agent_id"))
 
     async def _cmd_hub_task_create(self, data: Dict, session) -> Dict:
         title = data.get("title")
         if not title:
             return {"status": "error", "error": "Missing 'title'"}
-        return (await self._get_agent_hub()).create_task(title=title, description=data.get("description", ""), assigned_to=data.get("assigned_to"), assigned_by=data.get("assigned_by"), priority=data.get("priority", 0), tags=data.get("tags"), dependencies=data.get("dependencies"), max_retries=data.get("max_retries", 0))
+        return await (await self._get_agent_hub()).create_task(title=title, description=data.get("description", ""), assigned_to=data.get("assigned_to"), assigned_by=data.get("assigned_by"), priority=data.get("priority", 0), tags=data.get("tags"), dependencies=data.get("dependencies"), max_retries=data.get("max_retries", 0))
 
     async def _cmd_hub_task_claim(self, data: Dict, session) -> Dict:
         aid = data.get("agent_id")
         if not aid:
             return {"status": "error", "error": "Missing 'agent_id'"}
-        return (await self._get_agent_hub()).claim_task(aid, task_id=data.get("task_id"), tags=data.get("tags"))
+        return await (await self._get_agent_hub()).claim_task(aid, task_id=data.get("task_id"), tags=data.get("tags"))
 
     async def _cmd_hub_task_start(self, data: Dict, session) -> Dict:
         aid, tid = data.get("agent_id"), data.get("task_id")
         if not aid or not tid:
             return {"status": "error", "error": "Missing 'agent_id' or 'task_id'"}
-        return (await self._get_agent_hub()).start_task(aid, tid)
+        return await (await self._get_agent_hub()).start_task(aid, tid)
 
     async def _cmd_hub_task_complete(self, data: Dict, session) -> Dict:
         aid, tid = data.get("agent_id"), data.get("task_id")
         if not aid or not tid:
             return {"status": "error", "error": "Missing 'agent_id' or 'task_id'"}
-        return (await self._get_agent_hub()).complete_task(aid, tid, result=data.get("result"))
+        return await (await self._get_agent_hub()).complete_task(aid, tid, result=data.get("result"))
 
     async def _cmd_hub_task_fail(self, data: Dict, session) -> Dict:
         aid, tid = data.get("agent_id"), data.get("task_id")
         if not aid or not tid:
             return {"status": "error", "error": "Missing 'agent_id' or 'task_id'"}
-        return (await self._get_agent_hub()).fail_task(aid, tid, error=data.get("error", ""))
+        return await (await self._get_agent_hub()).fail_task(aid, tid, error=data.get("error", ""))
 
     async def _cmd_hub_task_cancel(self, data: Dict, session) -> Dict:
         tid = data.get("task_id")
         if not tid:
             return {"status": "error", "error": "Missing 'task_id'"}
-        return (await self._get_agent_hub()).cancel_task(tid, cancelled_by=data.get("cancelled_by"))
+        return await (await self._get_agent_hub()).cancel_task(tid, cancelled_by=data.get("cancelled_by"))
 
     async def _cmd_hub_tasks(self, data: Dict, session) -> Dict:
-        return (await self._get_agent_hub()).get_tasks(status=data.get("status"), assigned_to=data.get("assigned_to"), tags=data.get("tags"), limit=data.get("limit", 50))
+        return await (await self._get_agent_hub()).get_tasks(status=data.get("status"), assigned_to=data.get("assigned_to"), tags=data.get("tags"), limit=data.get("limit", 50))
 
     async def _cmd_hub_broadcast(self, data: Dict, session) -> Dict:
         sid = data.get("sender_id") or data.get("agent_id")
         topic = data.get("topic")
         if not sid or not topic:
             return {"status": "error", "error": "Missing 'agent_id'/'sender_id' or 'topic'"}
-        return (await self._get_agent_hub()).broadcast(sender_id=sid, topic=topic, payload=data.get("payload", data.get("message", {})), ttl_seconds=data.get("ttl_seconds"))
+        return await (await self._get_agent_hub()).broadcast(sender_id=sid, topic=topic, payload=data.get("payload", data.get("message", {})), ttl_seconds=data.get("ttl_seconds"))
 
     async def _cmd_hub_events(self, data: Dict, session) -> Dict:
         aid = data.get("agent_id")
         if not aid:
             return {"status": "error", "error": "Missing 'agent_id'"}
-        return (await self._get_agent_hub()).get_events(agent_id=aid, topic=data.get("topic"), since_seconds=data.get("since_seconds"), limit=data.get("limit", 50))
+        return await (await self._get_agent_hub()).get_events(agent_id=aid, topic=data.get("topic"), since_seconds=data.get("since_seconds"), limit=data.get("limit", 50))
 
     async def _cmd_hub_memory_set(self, data: Dict, session) -> Dict:
         aid, key = data.get("agent_id"), data.get("key")
         if not aid or not key:
             return {"status": "error", "error": "Missing 'agent_id' or 'key'"}
-        return (await self._get_agent_hub()).memory_set(agent_id=aid, key=key, value=data.get("value"), ttl_seconds=data.get("ttl_seconds", 0), access=data.get("access", "shared"))
+        return await (await self._get_agent_hub()).memory_set(agent_id=aid, key=key, value=data.get("value"), ttl_seconds=data.get("ttl_seconds", 0), access=data.get("access", "shared"))
 
     async def _cmd_hub_memory_get(self, data: Dict, session) -> Dict:
         aid, key = data.get("agent_id"), data.get("key")
         if not aid or not key:
             return {"status": "error", "error": "Missing 'agent_id' or 'key'"}
-        return (await self._get_agent_hub()).memory_get(aid, key)
+        return await (await self._get_agent_hub()).memory_get(aid, key)
 
     async def _cmd_hub_memory_delete(self, data: Dict, session) -> Dict:
         aid, key = data.get("agent_id"), data.get("key")
         if not aid or not key:
             return {"status": "error", "error": "Missing 'agent_id' or 'key'"}
-        return (await self._get_agent_hub()).memory_delete(aid, key)
+        return await (await self._get_agent_hub()).memory_delete(aid, key)
 
     async def _cmd_hub_memory_list(self, data: Dict, session) -> Dict:
-        return (await self._get_agent_hub()).memory_list(prefix=data.get("prefix"), agent_id=data.get("agent_id"))
+        return await (await self._get_agent_hub()).memory_list(prefix=data.get("prefix"), agent_id=data.get("agent_id"))
 
     async def _cmd_hub_handoff(self, data: Dict, session) -> Dict:
         fid, tid = data.get("from_agent_id"), data.get("to_agent_id")
         if not fid or not tid:
             return {"status": "error", "error": "Missing 'from_agent_id' or 'to_agent_id'"}
-        return (await self._get_agent_hub()).handoff(from_agent_id=fid, to_agent_id=tid, resource=data.get("resource", "page:main"), context=data.get("context"))
+        return await (await self._get_agent_hub()).handoff(from_agent_id=fid, to_agent_id=tid, resource=data.get("resource", "page:main"), context=data.get("context"))
 
     async def _cmd_hub_audit(self, data: Dict, session) -> Dict:
-        return (await self._get_agent_hub()).get_audit(agent_id=data.get("agent_id"), action=data.get("action"), since_seconds=data.get("since_seconds"), limit=data.get("limit", 100))
+        return await (await self._get_agent_hub()).get_audit(agent_id=data.get("agent_id"), action=data.get("action"), since_seconds=data.get("since_seconds"), limit=data.get("limit", 100))
 
     # ─── Proxy Rotation ────────────────────────────────────
 
@@ -3500,67 +3500,67 @@ class AgentServer:
         url = data.get("url")
         if not url:
             return {"status": "error", "error": "Missing 'url'"}
-        return (await self._get_proxy_manager()).add_proxy(url=url, country=data.get("country", ""), region=data.get("region", ""), tags=data.get("tags", []), weight=data.get("weight", 1.0), max_requests_per_minute=data.get("max_requests_per_minute", 0))
+        return await (await self._get_proxy_manager()).add_proxy(url=url, country=data.get("country", ""), region=data.get("region", ""), tags=data.get("tags", []), weight=data.get("weight", 1.0), max_requests_per_minute=data.get("max_requests_per_minute", 0))
 
     async def _cmd_proxy_remove(self, data: Dict, session) -> Dict:
         pid = data.get("proxy_id")
         if not pid:
             return {"status": "error", "error": "Missing 'proxy_id'"}
-        return (await self._get_proxy_manager()).remove_proxy(pid)
+        return await (await self._get_proxy_manager()).remove_proxy(pid)
 
     async def _cmd_proxy_load_file(self, data: Dict, session) -> Dict:
         fp = data.get("filepath")
         if not fp:
             return {"status": "error", "error": "Missing 'filepath'"}
-        return (await self._get_proxy_manager()).load_proxies(fp, proxy_type=data.get("proxy_type", "http"))
+        return await (await self._get_proxy_manager()).load_proxies(fp, proxy_type=data.get("proxy_type", "http"))
 
     async def _cmd_proxy_load_api(self, data: Dict, session) -> Dict:
         api_url = data.get("api_url")
         if not api_url:
             return {"status": "error", "error": "Missing 'api_url'"}
-        return (await self._get_proxy_manager()).load_from_api(api_url, api_key=data.get("api_key"))
+        return await (await self._get_proxy_manager()).load_from_api(api_url, api_key=data.get("api_key"))
 
     async def _cmd_proxy_get(self, data: Dict, session) -> Dict:
-        return (await self._get_proxy_manager()).get_proxy(domain=data.get("domain"), session_id=data.get("session_id"), country=data.get("country"), tags=data.get("tags"), with_failover=data.get("with_failover", True))
+        return await (await self._get_proxy_manager()).get_proxy(domain=data.get("domain"), session_id=data.get("session_id"), country=data.get("country"), tags=data.get("tags"), with_failover=data.get("with_failover", True))
 
     async def _cmd_proxy_record(self, data: Dict, session) -> Dict:
         pid = data.get("proxy_id")
         if not pid:
             return {"status": "error", "error": "Missing 'proxy_id'"}
-        return (await self._get_proxy_manager()).record_result(proxy_id=pid, success=data.get("success", True), latency_ms=data.get("latency_ms", 0), status_code=data.get("status_code", 0), error=data.get("error", ""))
+        return await (await self._get_proxy_manager()).record_result(proxy_id=pid, success=data.get("success", True), latency_ms=data.get("latency_ms", 0), status_code=data.get("status_code", 0), error=data.get("error", ""))
 
     async def _cmd_proxy_check(self, data: Dict, session) -> Dict:
         pid = data.get("proxy_id")
         if not pid:
             return {"status": "error", "error": "Missing 'proxy_id'"}
-        return (await self._get_proxy_manager()).check_proxy(pid)
+        return await (await self._get_proxy_manager()).check_proxy(pid)
 
     async def _cmd_proxy_check_all(self, data: Dict, session) -> Dict:
-        return (await self._get_proxy_manager()).check_all()
+        return await (await self._get_proxy_manager()).check_all()
 
     async def _cmd_proxy_list(self, data: Dict, session) -> Dict:
-        return (await self._get_proxy_manager()).list_proxies(status=data.get("status"), country=data.get("country"))
+        return await (await self._get_proxy_manager()).list_proxies(status=data.get("status"), country=data.get("country"))
 
     async def _cmd_proxy_enable(self, data: Dict, session) -> Dict:
         pid = data.get("proxy_id")
         if not pid:
             return {"status": "error", "error": "Missing 'proxy_id'"}
-        return (await self._get_proxy_manager()).enable_proxy(pid)
+        return await (await self._get_proxy_manager()).enable_proxy(pid)
 
     async def _cmd_proxy_disable(self, data: Dict, session) -> Dict:
         pid = data.get("proxy_id")
         if not pid:
             return {"status": "error", "error": "Missing 'proxy_id'"}
-        return (await self._get_proxy_manager()).disable_proxy(pid)
+        return await (await self._get_proxy_manager()).disable_proxy(pid)
 
     async def _cmd_proxy_strategy(self, data: Dict, session) -> Dict:
         strategy = data.get("strategy")
         if not strategy:
             return {"status": "error", "error": "Missing 'strategy'"}
-        return (await self._get_proxy_manager()).set_strategy(strategy)
+        return await (await self._get_proxy_manager()).set_strategy(strategy)
 
     async def _cmd_proxy_stats(self, data: Dict, session) -> Dict:
-        return (await self._get_proxy_manager()).get_stats()
+        return await (await self._get_proxy_manager()).get_stats()
 
     async def _cmd_proxy_rotate(self, data: Dict, session) -> Dict:
         """Rotate to the next proxy in the pool."""
@@ -3575,10 +3575,10 @@ class AgentServer:
             return {"status": "error", "error": self._sanitize_error_message(str(e))}
 
     async def _cmd_proxy_save(self, data: Dict, session) -> Dict:
-        return (await self._get_proxy_manager()).save(filename=data.get("filename", "proxies.json"))
+        return await (await self._get_proxy_manager()).save(filename=data.get("filename", "proxies.json"))
 
     async def _cmd_proxy_load(self, data: Dict, session) -> Dict:
-        return (await self._get_proxy_manager()).load(filename=data.get("filename", "proxies.json"))
+        return await (await self._get_proxy_manager()).load(filename=data.get("filename", "proxies.json"))
 
     # ─── Login Handoff Commands ───────────────────────────────
 
