@@ -45,7 +45,15 @@ A standalone MCP server that gives Claude Desktop, Claude Code, Codex, and any M
 
 ## Quick Start
 
-### Option A: Startup Script (Easiest)
+### Option A: One-Line Install (Easiest)
+
+```bash
+curl -sSL https://raw.githubusercontent.com/factspark23-hash/Agent-OS/main/install.sh | bash
+```
+
+After install, it prints your Claude Desktop config automatically.
+
+### Option B: Startup Script
 
 ```bash
 cd Agent-OS

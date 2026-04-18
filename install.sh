@@ -354,6 +354,34 @@ echo -e "  ${BLUE}HTTP API:${NC}     http://localhost:8001"
 echo -e "  ${BLUE}WebSocket:${NC}    ws://localhost:8000"
 echo ""
 
+# ─── MCP Passthrough Setup ──────────────────────────────
+echo -e "${CYAN}═══ MCP Passthrough (Zero API Key) ═══${NC}"
+echo ""
+echo "  For Claude Desktop / Codex — no API key needed:"
+echo ""
+echo "  1. Start Agent-OS server:"
+echo "     cd $INSTALL_DIR && python main.py --agent-token '$AGENT_TOKEN'"
+echo ""
+echo "  2. In another terminal, start MCP wrapper:"
+echo "     cd $INSTALL_DIR && ./run_mcp.sh --token '$AGENT_TOKEN'"
+echo ""
+echo "  3. Add to Claude Desktop config:"
+echo '     {'
+echo '       "mcpServers": {'
+echo '         "agent-os": {'
+echo '           "command": "python3",'
+echo "           \"args\": [\"$INSTALL_DIR/connectors/mcp_passthrough.py\"],"
+echo '           "env": {'
+echo '             "AGENT_OS_URL": "http://localhost:8001",'
+echo "             \"AGENT_OS_TOKEN\": \"$AGENT_TOKEN\""
+echo '           }'
+echo '         }'
+echo '       }'
+echo '     }'
+echo ""
+echo -e "  ${GREEN}199 tools • 87% token savings • No API key needed${NC}"
+echo ""
+
 # ─── Start Server ───────────────────────────────────────
 if $START_AFTER; then
     echo -e "${GREEN}Starting Agent-OS...${NC}"
