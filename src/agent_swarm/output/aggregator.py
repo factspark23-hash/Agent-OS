@@ -46,24 +46,33 @@ class ResultAggregator:
         return valid_results[:self.max_results]
 
     def _deduplicate(self, results: list[AgentResult]) -> list[AgentResult]:
-        """Remove duplicate results based on URL similarity."""
-        seen_urls = set()
-        unique_results = []
+        """Remove duplicate results based on URL similarity.
+
+        Uses a dict for O(1) lookup instead of O(n²) linear scan.
+        When a duplicate URL is found, the result with the higher
+        relevance_score is kept.
+        """
+        seen: dict[str, int] = {}  # normalized_url → index in unique_results
+        unique_results: list[AgentResult] = []
 
         for result in results:
             normalized_url = self._normalize_url(result.url)
-            if normalized_url not in seen_urls:
-                seen_urls.add(normalized_url)
+            if normalized_url not in seen:
+                seen[normalized_url] = len(unique_results)
                 unique_results.append(result)
             else:
-                existing = next(
-                    (r for r in unique_results if self._normalize_url(r.url) == normalized_url),
-                    None
-                )
-                if existing and len(result.content) > len(existing.content):
+                # Duplicate — keep the higher quality result
+                idx = seen[normalized_url]
+                existing = unique_results[idx]
+                if result.relevance_score > existing.relevance_score:
+                    # Replace with higher-quality result, but merge content
+                    existing.content = result.content if len(result.content) > len(existing.content) else existing.content
+                    existing.snippet = result.snippet or existing.snippet
+                    existing.relevance_score = result.relevance_score
+                elif len(result.content) > len(existing.content):
+                    # Keep existing but merge longer content
                     existing.content = result.content
                     existing.snippet = result.snippet or existing.snippet
-                    existing.relevance_score = max(existing.relevance_score, result.relevance_score)
 
         logger.info(f"Deduplication: {len(results)} → {len(unique_results)} results")
         return unique_results

@@ -617,6 +617,48 @@ class SmartWait:
         else:
             return {"status": "error", "error": f"Unknown compose mode: {mode}. Use 'all' or 'any'."}
 
+    # JS snippet for fast DOM node count check — lighter than full MutationObserver
+    _FAST_DOM_COUNT_JS = """
+    (() => {
+        return document.querySelectorAll('*').length;
+    })();
+    """
+
+    async def _fast_dom_stable_check(
+        self,
+        page,
+        check_interval_ms: int = 500,
+        max_checks: int = 4,
+    ) -> bool:
+        """Quick DOM stability check by comparing node counts.
+
+        Polls the DOM node count at intervals. If the count stays the same
+        for 2 consecutive checks, the DOM is likely stable enough to skip
+        the full network_idle wait. This is much faster than waiting for
+        full network idle (typically saves 1-5 seconds).
+
+        Returns True if DOM appears stable, False if still changing.
+        """
+        last_count = None
+        stable_count = 0
+
+        for _ in range(max_checks):
+            try:
+                count = await page.evaluate(self._FAST_DOM_COUNT_JS)
+            except Exception:
+                return False
+
+            if count == last_count:
+                stable_count += 1
+                if stable_count >= 2:
+                    return True
+            else:
+                stable_count = 0
+            last_count = count
+            await asyncio.sleep(check_interval_ms / 1000)
+
+        return False
+
     async def auto(
         self,
         selector: str = None,
@@ -649,17 +691,33 @@ class SmartWait:
 
         conditions = []
 
+        # Phase 0: Fast DOM stability check
+        # Before committing to expensive waits, do a quick poll to see if
+        # the DOM is already stable. If it is, we can skip the longer
+        # network_idle wait entirely, saving 1-5 seconds on most pages.
+        page = self._get_page(page_id)
+        dom_already_stable = await self._fast_dom_stable_check(page)
+
         # Phase 1: Page readiness
         elapsed = (time.time() - start) * 1000
         remaining = max(100, timeout_ms - elapsed)
         r1 = await self.page_ready(timeout_ms=min(remaining, 10_000), page_id=page_id)
         conditions.append({"strategy": "page_ready", "result": r1})
 
-        # Phase 2: Network idle
-        elapsed = (time.time() - start) * 1000
-        remaining = max(100, timeout_ms - elapsed)
-        r2 = await self.network_idle(idle_ms=idle_ms, timeout_ms=min(remaining, 8_000), page_id=page_id)
-        conditions.append({"strategy": "network_idle", "result": r2})
+        # Phase 2: Network idle — skip if DOM was already stable
+        if dom_already_stable:
+            r2 = {
+                "status": "success",
+                "strategy": "network_idle",
+                "waited_ms": 0,
+                "skipped_reason": "dom_already_stable",
+            }
+            conditions.append({"strategy": "network_idle", "result": r2})
+        else:
+            elapsed = (time.time() - start) * 1000
+            remaining = max(100, timeout_ms - elapsed)
+            r2 = await self.network_idle(idle_ms=idle_ms, timeout_ms=min(remaining, 8_000), page_id=page_id)
+            conditions.append({"strategy": "network_idle", "result": r2})
 
         # Phase 3: DOM stable
         elapsed = (time.time() - start) * 1000

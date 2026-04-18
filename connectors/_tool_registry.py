@@ -854,3 +854,15 @@ def get_command_map() -> Dict[str, tuple]:
 def get_cli_commands() -> List[Dict[str, str]]:
     """Get CLI command definitions."""
     return [{"cli": t.cli_name, "server": t.server_cmd, "desc": t.description} for t in TOOLS]
+
+
+# ─── Validation ────────────────────────────────────────────────
+
+def _validate_tool_names():
+    """Validate that all MCP tool names are unique at module load time."""
+    names = [t.mcp_name for t in TOOLS]
+    duplicates = [n for n in names if names.count(n) > 1]
+    if duplicates:
+        raise ValueError(f"Duplicate MCP tool names: {set(duplicates)}")
+
+_validate_tool_names()

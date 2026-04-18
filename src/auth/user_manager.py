@@ -3,7 +3,9 @@ Agent-OS User Manager
 Full user lifecycle: registration, authentication, quota enforcement.
 """
 import logging
+import re
 import secrets
+from collections import deque
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -21,9 +23,15 @@ class UserManager:
     - Usage tracking
     """
 
+    # Email validation regex
+    EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+
     def __init__(self, db_session_factory=None):
         self._db_factory = db_session_factory
         self._memory_store: Dict[str, Dict] = {}
+        # In-memory logging deques for usage and audit when no database
+        self._memory_usage_log: deque = deque(maxlen=10000)
+        self._memory_audit_log: deque = deque(maxlen=10000)
 
     def hash_password(self, password: str) -> str:
         """Hash a password with bcrypt."""
@@ -36,12 +44,16 @@ class UserManager:
         except Exception:
             return False
 
+    def _validate_email(self, email: str) -> bool:
+        """Validate email format using regex pattern."""
+        return bool(self.EMAIL_PATTERN.match(email))
+
     async def create_user(self, email: str, username: str, password: str,
                           display_name: str = None, organization: str = None,
                           plan: str = "free") -> Dict[str, Any]:
         """Register a new user."""
         # Validate inputs
-        if not email or "@" not in email:
+        if not email or not self._validate_email(email):
             raise ValueError("Valid email required")
         if not username or len(username) < 3:
             raise ValueError("Username must be at least 3 characters")
@@ -230,39 +242,63 @@ class UserManager:
                         session_id: str = None, client_ip: str = None,
                         error_message: str = None):
         """Log a command execution for billing/analytics."""
-        if self._db_factory:
-            from src.infra.models import UsageLog
-            async with self._db_factory() as session:
-                log = UsageLog(
-                    user_id=user_id,
-                    api_key_id=api_key_id,
-                    session_id=session_id,
-                    command=command,
-                    status=status,
-                    duration_ms=duration_ms,
-                    client_ip=client_ip,
-                    error_message=error_message,
-                )
-                session.add(log)
-                await session.commit()
+        if not self._db_factory:
+            self._memory_usage_log.append({
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "user_id": user_id,
+                "api_key_id": api_key_id,
+                "session_id": session_id,
+                "command": command,
+                "status": status,
+                "duration_ms": duration_ms,
+                "client_ip": client_ip,
+                "error_message": error_message,
+            })
+            return
+        from src.infra.models import UsageLog
+        async with self._db_factory() as session:
+            log = UsageLog(
+                user_id=user_id,
+                api_key_id=api_key_id,
+                session_id=session_id,
+                command=command,
+                status=status,
+                duration_ms=duration_ms,
+                client_ip=client_ip,
+                error_message=error_message,
+            )
+            session.add(log)
+            await session.commit()
 
     async def log_audit(self, user_id: str, action: str, success: bool,
                         client_ip: str = None, details: dict = None,
                         resource_type: str = None, resource_id: str = None,
                         error_message: str = None):
         """Log a security audit event."""
-        if self._db_factory:
-            from src.infra.models import AuditLog
-            async with self._db_factory() as session:
-                log = AuditLog(
-                    user_id=user_id,
-                    action=action,
-                    resource_type=resource_type,
-                    resource_id=resource_id,
-                    client_ip=client_ip,
-                    details=details,
-                    success=success,
-                    error_message=error_message,
-                )
-                session.add(log)
-                await session.commit()
+        if not self._db_factory:
+            self._memory_audit_log.append({
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "user_id": user_id,
+                "action": action,
+                "resource_type": resource_type,
+                "resource_id": resource_id,
+                "client_ip": client_ip,
+                "details": details,
+                "success": success,
+                "error_message": error_message,
+            })
+            return
+        from src.infra.models import AuditLog
+        async with self._db_factory() as session:
+            log = AuditLog(
+                user_id=user_id,
+                action=action,
+                resource_type=resource_type,
+                resource_id=resource_id,
+                client_ip=client_ip,
+                details=details,
+                success=success,
+                error_message=error_message,
+            )
+            session.add(log)
+            await session.commit()

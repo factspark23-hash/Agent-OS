@@ -15,15 +15,23 @@ Features:
 - Geckodriver compatibility layer
 """
 import asyncio
+import json
 import logging
 import random
 import time
 import os
+import hashlib
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 from urllib.parse import urlparse
 
 from patchright.async_api import async_playwright, Browser, Page, BrowserContext
+
+try:
+    from cryptography.fernet import Fernet
+    _FERNET_AVAILABLE = True
+except ImportError:
+    _FERNET_AVAILABLE = False
 
 logger = logging.getLogger("agent-os.firefox")
 
@@ -142,7 +150,7 @@ const _ffGetParam = WebGLRenderingContext.prototype.getParameter;
 WebGLRenderingContext.prototype.getParameter = function(p) {
     // Firefox uses different WebGL vendor/renderer strings
     if (p === 37445) return 'Mozilla';  // VENDOR
-    if (p === 37446) return 'Mozilla (ANGLE)';  // RENDERER — simplified
+    if (p === 37446) return 'Mozilla';  // RENDERER — Firefox never uses ANGLE
     return _ffGetParam.call(this, p);
 };
 
@@ -221,14 +229,15 @@ XMLHttpRequest.prototype.send = function(data) {
 
 # Firefox User-Agents (real-world Firefox versions)
 FIREFOX_USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14.4; rv:124.0) Gecko/20100101 Firefox/124.0",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14.3; rv:123.0) Gecko/20100101 Firefox/123.0",
-    "Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0",
-    "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:123.0) Gecko/20100101 Firefox/123.0",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:115.0) Gecko/20100101 Firefox/115.0",  # ESR
-    "Mozilla/5.0 (X11; Linux x86_64; rv:115.0) Gecko/20100101 Firefox/115.0",  # ESR
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:137.0) Gecko/20100101 Firefox/137.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:136.0) Gecko/20100101 Firefox/136.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:135.0) Gecko/20100101 Firefox/135.0",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:137.0) Gecko/20100101 Firefox/137.0",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:136.0) Gecko/20100101 Firefox/136.0",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:135.0) Gecko/20100101 Firefox/135.0",
 ]
 
 # Firefox screen resolutions
@@ -300,6 +309,10 @@ class FirefoxEngine:
         self._crash_count = 0
         self._max_crash_retries = 3
         self._recovery_lock = asyncio.Lock()
+        self._cookies_dirty = False
+        # Cookie encryption (same pattern as browser.py)
+        self._cookie_key = self._get_or_create_cookie_key()
+        self._cookie_fernet = Fernet(self._cookie_key) if _FERNET_AVAILABLE else None
 
     @property
     def engine_name(self) -> str:
@@ -322,13 +335,17 @@ class FirefoxEngine:
         # Firefox-specific launch args
         if self._launch_args is None:
             self._launch_args = [
-                # Firefox prefs that help with stealth
+                "--disable-blink-features=AutomationControlled",
+                "-devtools",  # Don't auto-open devtools
             ]
 
         firefox_prefs = {
             # Disable automation indicators
             "dom.webdriver.enabled": False,
             "useAutomationExtension": False,
+            # Disable devtools auto-open
+            "devtools.toolbox.selectedTool": "webconsole",
+            "devtools.policy.disabled": True,
             # Disable various tracking/telemetry
             "datareporting.healthreport.uploadEnabled": False,
             "datareporting.policy.dataSubmissionEnabled": False,
@@ -454,9 +471,14 @@ class FirefoxEngine:
         page.on("pageerror", on_page_error)
 
     BLOCK_INDICATORS = [
-        "access denied", "captcha", "bot detected", "just a moment",
-        "checking your browser", "please verify", "unusual traffic",
-        "challenge", "blocked", "cloudflare ray id", "attention required",
+        "cloudflare challenge",
+        "checking your browser",
+        "please wait while we verify",
+        "access denied - bot detection",
+        "are you a robot",
+        "cf-browser-verification",
+        "just a moment",
+        "ray id",
     ]
 
     def _is_blocked_page(self, title: str, text: str) -> bool:
@@ -480,7 +502,13 @@ class FirefoxEngine:
 
             try:
                 response = await page.goto(url, wait_until=wait_until, timeout=30000)
-                await asyncio.sleep(random.uniform(1.0, 2.5))
+
+                # Only add human-like delay for complex sites that need JS rendering time
+                domain = urlparse(url).netloc.lower()
+                if any(d in domain for d in ['twitter.com', 'facebook.com', 'instagram.com', 'linkedin.com']):
+                    await asyncio.sleep(random.uniform(0.5, 1.5))
+                else:
+                    await asyncio.sleep(random.uniform(0.1, 0.3))
 
                 title = await page.title()
                 text = ""
@@ -496,6 +524,9 @@ class FirefoxEngine:
                 if self._is_blocked_page(title, text) and attempt < retries:
                     logger.warning(f"Firefox: block detected on {url[:60]} (attempt {attempt + 1})")
                     continue
+
+                # Save cookies after successful navigation
+                await self._save_cookies("default")
 
                 return {
                     "status": "success",
@@ -526,7 +557,7 @@ class FirefoxEngine:
             "engine": "firefox",
         }
 
-    async def screenshot(self, page_id: str = "main", full_page: bool = False) -> bytes:
+    async def screenshot(self, page_id: str = "main", full_page: bool = False) -> str:
         """Take screenshot."""
         import base64
         page = self._pages.get(page_id, self.page)
@@ -681,6 +712,54 @@ class FirefoxEngine:
         if parsed.password:
             config["password"] = parsed.password
         return config
+
+    def _get_or_create_cookie_key(self) -> bytes:
+        """Get or create encryption key for cookie storage."""
+        key_path = Path(os.path.expanduser("~/.agent-os/.cookie_key"))
+        if key_path.exists():
+            return key_path.read_bytes()
+        key = Fernet.generate_key()
+        key_path.parent.mkdir(parents=True, exist_ok=True)
+        key_path.write_bytes(key)
+        key_path.chmod(0o600)
+        return key
+
+    def _load_cookies(self, profile: str = "default") -> Optional[Dict]:
+        """Load saved cookies for a profile (encrypted)."""
+        cookie_file = self._cookie_dir / f"{profile}.enc"
+        if cookie_file.exists():
+            try:
+                if self._cookie_fernet:
+                    encrypted = cookie_file.read_bytes()
+                    decrypted = self._cookie_fernet.decrypt(encrypted)
+                    return json.loads(decrypted)
+                else:
+                    # Fallback to plaintext if Fernet unavailable
+                    with open(cookie_file) as f:
+                        return json.load(f)
+            except Exception as e:
+                logger.warning(f"Failed to load cookies for {profile}: {e}")
+        return None
+
+    async def _save_cookies(self, profile: str = "default"):
+        """Save cookies to disk with Fernet encryption."""
+        if not self.context:
+            return
+        try:
+            state = await self.context.storage_state()
+            cookie_file = self._cookie_dir / f"{profile}.enc"
+            if self._cookie_fernet:
+                encrypted = self._cookie_fernet.encrypt(json.dumps(state).encode())
+                cookie_file.write_bytes(encrypted)
+            else:
+                # Fallback to plaintext if Fernet unavailable
+                with open(cookie_file, "w") as f:
+                    json.dump(state, f)
+            cookie_file.chmod(0o600)
+            self._cookies_dirty = False
+            logger.info(f"Firefox cookies saved for profile: {profile}")
+        except Exception as e:
+            logger.warning(f"Firefox cookie save failed: {e}")
 
     async def recover(self):
         """Recover from crash."""

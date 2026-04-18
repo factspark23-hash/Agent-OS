@@ -169,9 +169,12 @@ class AgentOS:
                 self.config, self.browser, self.session_manager,
                 self.server, self.persistent_manager,
             )
+            # Set debug_mode config flag so server.py can gate debug query param
+            self.config.set("server.debug_mode", True)
 
         self._running = False
         self._ram_monitor_task = None
+        self._shutdown_event = asyncio.Event()
 
         # ─── Apply CLI Overrides ─────────────────────────
         if args.headed:
@@ -292,7 +295,7 @@ class AgentOS:
 
         # Wait for shutdown signal
         try:
-            await asyncio.Event().wait()
+            await self._shutdown_event.wait()
         except asyncio.CancelledError:
             pass
 
@@ -340,6 +343,7 @@ class AgentOS:
     async def stop(self):
         """Graceful shutdown."""
         self._running = False
+        self._shutdown_event.set()
         self.logger.info("Shutting down Agent-OS...")
 
         if self._ram_monitor_task:

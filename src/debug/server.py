@@ -93,9 +93,9 @@ class DebugServer:
         if path in ("/style.css", "/app.js"):
             return await handler(request)
 
-        # Allow handoff API without auth (for UI convenience)
-        if path.startswith("/api/handoff/"):
-            return await handler(request)
+        # Require token validation for handoff API endpoints too (security fix)
+        # Previously handoff paths were allowed without auth — now they require
+        # at least a simple token check to prevent unauthenticated access.
 
         # Extract token from header, query param, or cookie
         token = (
@@ -193,7 +193,7 @@ class DebugServer:
 
         status = {
             "status": "running",
-            "version": "2.1.0",
+            "version": "3.2.0",
             "uptime_seconds": int(time.time() - self._start_time),
             "ram_usage_mb": round(ram_mb, 1),
             "ram_limit_mb": self.config.get("browser.max_ram_mb", 500),
@@ -356,7 +356,7 @@ class DebugServer:
             cookies = result.get("cookies", [])
             export_data = {
                 "version": "1.0",
-                "agent_os_version": "2.1.0",
+                "agent_os_version": "3.2.0",
                 "exported_at": time.time(),
                 "cookie_count": len(cookies),
                 "cookies": cookies,
@@ -502,16 +502,16 @@ class DebugServer:
 
     # ─── Login Handoff Proxy Handlers ────────────────────────
 
-    def _get_handoff_manager(self):
+    async def _get_handoff_manager(self):
         """Get the LoginHandoffManager from the agent server."""
         try:
-            return self.agent_server._get_login_handoff()
+            return await self.agent_server._get_login_handoff()
         except Exception:
             return None
 
     async def _handle_api_handoff_list(self, request: web.Request) -> web.Response:
         """GET /api/handoff/list — List all handoff sessions."""
-        handoff = self._get_handoff_manager()
+        handoff = await self._get_handoff_manager()
         if not handoff:
             return web.json_response({"status": "error", "error": "Handoff not available"}, status=503)
         state_filter = request.query.get("state")
@@ -521,7 +521,7 @@ class DebugServer:
 
     async def _handle_api_handoff_history(self, request: web.Request) -> web.Response:
         """GET /api/handoff/history — Get completed handoff history."""
-        handoff = self._get_handoff_manager()
+        handoff = await self._get_handoff_manager()
         if not handoff:
             return web.json_response({"status": "error", "error": "Handoff not available"}, status=503)
         limit = int(request.query.get("limit", "50"))
@@ -530,7 +530,7 @@ class DebugServer:
 
     async def _handle_api_handoff_stats(self, request: web.Request) -> web.Response:
         """GET /api/handoff/stats — Get handoff statistics."""
-        handoff = self._get_handoff_manager()
+        handoff = await self._get_handoff_manager()
         if not handoff:
             return web.json_response({"status": "error", "error": "Handoff not available"}, status=503)
         result = {"status": "success", **handoff.get_stats()}
@@ -538,7 +538,7 @@ class DebugServer:
 
     async def _handle_api_handoff_detect(self, request: web.Request) -> web.Response:
         """POST /api/handoff/detect — Detect if current page is a login page."""
-        handoff = self._get_handoff_manager()
+        handoff = await self._get_handoff_manager()
         if not handoff:
             return web.json_response({"status": "error", "error": "Handoff not available"}, status=503)
         try:
@@ -550,7 +550,7 @@ class DebugServer:
 
     async def _handle_api_handoff_start(self, request: web.Request) -> web.Response:
         """POST /api/handoff/start — Start a login handoff session."""
-        handoff = self._get_handoff_manager()
+        handoff = await self._get_handoff_manager()
         if not handoff:
             return web.json_response({"status": "error", "error": "Handoff not available"}, status=503)
         try:
@@ -569,7 +569,7 @@ class DebugServer:
 
     async def _handle_api_handoff_complete(self, request: web.Request) -> web.Response:
         """POST /api/handoff/{handoff_id}/complete — Mark handoff as completed."""
-        handoff = self._get_handoff_manager()
+        handoff = await self._get_handoff_manager()
         if not handoff:
             return web.json_response({"status": "error", "error": "Handoff not available"}, status=503)
         handoff_id = request.match_info.get("handoff_id", "")
@@ -592,7 +592,7 @@ class DebugServer:
 
     async def _handle_api_handoff_cancel(self, request: web.Request) -> web.Response:
         """POST /api/handoff/{handoff_id}/cancel — Cancel a handoff session."""
-        handoff = self._get_handoff_manager()
+        handoff = await self._get_handoff_manager()
         if not handoff:
             return web.json_response({"status": "error", "error": "Handoff not available"}, status=503)
         handoff_id = request.match_info.get("handoff_id", "")

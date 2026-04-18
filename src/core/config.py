@@ -186,13 +186,25 @@ class Config:
         with open(self.config_path, "w") as f:
             yaml.dump(config or self.config, f, default_flow_style=False)
 
+    _SENTINEL = object()
+
     def get(self, dotted_key: str, default=None):
-        """Get config value by dotted path (e.g., 'browser.max_ram_mb')."""
+        """Get config value by dotted path (e.g., 'browser.max_ram_mb').
+
+        Uses a sentinel-based approach so that keys whose value is an empty
+        dict (or any other falsy value) are correctly distinguished from
+        missing keys.
+        """
         keys = dotted_key.split(".")
         val = self.config
         for k in keys:
-            val = val.get(k, {}) if isinstance(val, dict) else default
-        return val if val != {} else default
+            if isinstance(val, dict):
+                if k not in val:
+                    return default
+                val = val[k]
+            else:
+                return default
+        return val
 
     def set(self, dotted_key: str, value: Any, save: bool = False):
         """Set config value by dotted path. Only saves to disk if save=True."""
