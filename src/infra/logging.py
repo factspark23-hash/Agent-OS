@@ -19,14 +19,13 @@ def setup_logging(level: str = "INFO", json_logs: bool = True, service_name: str
         json_logs: If True, output JSON (for production). If False, colored console (dev).
         service_name: Service name included in every log line.
     """
-    # Standard library logging
-    logging.basicConfig(
-        format="%(message)s",
-        stream=sys.stdout,
-        level=getattr(logging, level.upper(), logging.INFO),
-    )
+    # Choose renderer based on config
+    if json_logs:
+        renderer = structlog.processors.JSONRenderer()
+    else:
+        renderer = structlog.dev.ConsoleRenderer(colors=True)
 
-    # Shared processors
+    # Shared processors (run for ALL log entries)
     shared_processors = [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_log_level,
@@ -37,26 +36,36 @@ def setup_logging(level: str = "INFO", json_logs: bool = True, service_name: str
         _add_service_name(service_name),
     ]
 
-    if json_logs:
-        renderer = structlog.processors.JSONRenderer()
-    else:
-        renderer = structlog.dev.ConsoleRenderer(colors=True)
-
+    # Configure structlog to use stdlib logging as backend
+    # This ensures structlog loggers have .name attribute and
+    # output goes through standard Python logging handlers
     structlog.configure(
         processors=shared_processors + [
             structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],
-        logger_factory=structlog.stdlib.LoggerFactory(
-            formatter=structlog.stdlib.ProcessorFormatter(
-                processors=[
-                    structlog.stdlib.ProcessorFormatter.remove_processors_meta,
-                    renderer,
-                ],
-            ),
-        ),
+        context_class=dict,
+        logger_factory=structlog.stdlib.LoggerFactory(),
         wrapper_class=structlog.stdlib.BoundLogger,
         cache_logger_on_first_use=True,
     )
+
+    # Configure standard library logging to use the ProcessorFormatter
+    # with the chosen renderer (JSON or Console)
+    formatter = structlog.stdlib.ProcessorFormatter(
+        processors=[
+            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+            renderer,
+        ],
+    )
+
+    # Set up root handler with our formatter
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(formatter)
+
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    root_logger.addHandler(handler)
+    root_logger.setLevel(getattr(logging, level.upper(), logging.INFO))
 
     # Suppress noisy loggers
     logging.getLogger("playwright").setLevel(logging.WARNING)
