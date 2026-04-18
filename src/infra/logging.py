@@ -38,15 +38,22 @@ def setup_logging(level: str = "INFO", json_logs: bool = True, service_name: str
     ]
 
     if json_logs:
-        _renderer = structlog.processors.JSONRenderer()  # noqa: F841
+        renderer = structlog.processors.JSONRenderer()
     else:
-        _renderer = structlog.dev.ConsoleRenderer(colors=True)  # noqa: F841
+        renderer = structlog.dev.ConsoleRenderer(colors=True)
 
     structlog.configure(
         processors=shared_processors + [
             structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],
-        logger_factory=structlog.stdlib.LoggerFactory(),
+        logger_factory=structlog.stdlib.LoggerFactory(
+            formatter=structlog.stdlib.ProcessorFormatter(
+                processors=[
+                    structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+                    renderer,
+                ],
+            ),
+        ),
         wrapper_class=structlog.stdlib.BoundLogger,
         cache_logger_on_first_use=True,
     )

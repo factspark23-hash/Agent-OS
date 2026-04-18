@@ -148,7 +148,7 @@ class SmartNavigator:
 
     # ── Strategy Executors ─────────────────────────────────────
 
-    async def _try_http(self, url: str) -> Dict[str, Any]:
+    async def _try_http(self, url: str, ai_format: bool = False) -> Dict[str, Any]:
         """Fetch via TLS-spoofed HTTP client and normalize result."""
         domain = self._get_domain(url)
         start_ms = time.monotonic()
@@ -182,7 +182,7 @@ class SmartNavigator:
             }
 
             # If ai_format requested, transform raw content into structured JSON
-            if ok and getattr(self, '_ai_format', False) and result.get("text"):
+            if ok and ai_format and result.get("text"):
                 try:
                     extractor = self._get_ai_extractor()
                     ai_result = await extractor.extract_from_html(
@@ -214,7 +214,7 @@ class SmartNavigator:
                 "error": str(exc),
             }
 
-    async def _try_browser(self, url: str) -> Dict[str, Any]:
+    async def _try_browser(self, url: str, ai_format: bool = False) -> Dict[str, Any]:
         """Fetch via Patchright browser and normalize result."""
         domain = self._get_domain(url)
         start_ms = time.monotonic()
@@ -278,7 +278,7 @@ class SmartNavigator:
             }
 
             # If ai_format requested, extract structured data from browser DOM
-            if nav_ok and not blocked and getattr(self, '_ai_format', False):
+            if nav_ok and not blocked and ai_format:
                 try:
                     extractor = self._get_ai_extractor()
                     ai_result = await extractor.extract_from_browser(self._browser, page_id="main")
@@ -374,8 +374,24 @@ class SmartNavigator:
             ai_format: Return AI-structured data instead of raw text
                        (symmetrical JSON with deduplicated, typed content)
         """
-        self._ai_format = ai_format  # Store for use in _try_* methods
         self._total_navigations += 1
+
+        try:
+            return await asyncio.wait_for(
+                self._navigate_inner(url, prefer_browser, max_retries, ai_format),
+                timeout=60,
+            )
+        except asyncio.TimeoutError:
+            return {"status": "error", "error": "Navigation timed out after 60s", "url": url}
+
+    async def _navigate_inner(
+        self,
+        url: str,
+        prefer_browser: bool = False,
+        max_retries: int = 3,
+        ai_format: bool = False,
+    ) -> Dict[str, Any]:
+        """Inner navigation logic, wrapped by navigate() with timeout."""
         domain = self._get_domain(url)
         strategy = self._pick_initial_strategy(url, prefer_browser)
 
@@ -394,9 +410,9 @@ class SmartNavigator:
 
             # ── Execute current strategy ───────────────────────
             if strategy == "http":
-                response = await self._try_http(url)
+                response = await self._try_http(url, ai_format=ai_format)
             else:
-                response = await self._try_browser(url)
+                response = await self._try_browser(url, ai_format=ai_format)
 
             last_response = response
             status_code = response.get("http_status", 0)

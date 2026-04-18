@@ -142,8 +142,10 @@ Object.defineProperty(navigator, 'plugins', {
 // LAYER 3: Languages
 // ═══════════════════════════════════════════════════════════════
 
-Object.defineProperty(navigator, 'languages', {get: function() { return ['en-US', 'en']; }, configurable: true});
-Object.defineProperty(navigator, 'language', {get: function() { return 'en-US'; }, configurable: true});
+var _agentOsLocale = window.__AGENT_OS_LOCALE__ || 'en-US';
+var _agentOsLang = _agentOsLocale.split('-')[0];
+Object.defineProperty(Navigator.prototype, 'languages', {get: function() { return [_agentOsLocale, _agentOsLang]; }, configurable: true});
+Object.defineProperty(Navigator.prototype, 'language', {get: function() { return _agentOsLocale; }, configurable: true});
 
 // ═══════════════════════════════════════════════════════════════
 // LAYER 4: Platform
@@ -468,15 +470,36 @@ if (typeof WebGL2RenderingContext !== 'undefined') {
 // LAYER 11: Canvas fingerprint noise
 // ═══════════════════════════════════════════════════════════════
 
+// Use a seeded RNG based on the session seed so canvas noise is
+// deterministic per session but variable per pixel (not predictable XOR).
+var _canvasNoiseRng = new function() {
+    var s = __CANVAS_SEED__;
+    this.next = function() { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; };
+};
+
+// Helper: apply seeded noise to imageData without modifying the original canvas
+function _applyCanvasNoise(imageData) {
+    var step = Math.max(67, Math.floor(imageData.data.length / 10000));
+    for (var i = 0; i < imageData.data.length; i += step) {
+        var noise = Math.floor(_canvasNoiseRng.next() * 5) - 2; // -2 to +2
+        imageData.data[i] = Math.max(0, Math.min(255, imageData.data[i] + noise));
+    }
+}
+
 var _origToDataURL = HTMLCanvasElement.prototype.toDataURL;
-HTMLCanvasElement.prototype.toDataURL = function(type) {
-    var context = this.getContext('2d');
-    if (context && this.width > 0 && this.height > 0) {
-        var imageData = context.getImageData(0, 0, this.width, this.height);
-        for (var i = 0; i < imageData.data.length; i += 100) {
-            imageData.data[i] = imageData.data[i] ^ 1;
-        }
-        context.putImageData(imageData, 0, 0);
+HTMLCanvasElement.prototype.toDataURL = function() {
+    var ctx = this.getContext('2d');
+    if (ctx && this.width > 0 && this.height > 0) {
+        try {
+            var imageData = ctx.getImageData(0, 0, this.width, this.height);
+            _applyCanvasNoise(imageData);
+            // Write to a temporary offscreen canvas instead of mutating the original
+            var tempCanvas = document.createElement('canvas');
+            tempCanvas.width = this.width;
+            tempCanvas.height = this.height;
+            tempCanvas.getContext('2d').putImageData(imageData, 0, 0);
+            return _origToDataURL.apply(tempCanvas, arguments);
+        } catch(e) { /* tainted canvas */ }
     }
     return _origToDataURL.apply(this, arguments);
 };
@@ -485,15 +508,20 @@ spoofToString(HTMLCanvasElement.prototype.toDataURL, 'toDataURL');
 // Also spoof toBlob
 var _origToBlob = HTMLCanvasElement.prototype.toBlob;
 HTMLCanvasElement.prototype.toBlob = function(callback, type, quality) {
-    var context = this.getContext('2d');
-    if (context && this.width > 0 && this.height > 0) {
-        var imageData = context.getImageData(0, 0, this.width, this.height);
-        for (var i = 0; i < imageData.data.length; i += 100) {
-            imageData.data[i] = imageData.data[i] ^ 1;
-        }
-        context.putImageData(imageData, 0, 0);
+    var ctx = this.getContext('2d');
+    if (ctx && this.width > 0 && this.height > 0) {
+        try {
+            var imageData = ctx.getImageData(0, 0, this.width, this.height);
+            _applyCanvasNoise(imageData);
+            // Write to a temporary offscreen canvas instead of mutating the original
+            var tempCanvas = document.createElement('canvas');
+            tempCanvas.width = this.width;
+            tempCanvas.height = this.height;
+            tempCanvas.getContext('2d').putImageData(imageData, 0, 0);
+            return _origToBlob.apply(tempCanvas, arguments);
+        } catch(e) { /* tainted canvas */ }
     }
-    return _origToBlob.call(this, callback, type, quality);
+    return _origToBlob.apply(this, arguments);
 };
 spoofToString(HTMLCanvasElement.prototype.toBlob, 'toBlob');
 
@@ -583,12 +611,15 @@ var DEVICE_PIXEL_RATIO = __AGENT_OS_DEVICE_PIXEL_RATIO__;
 Object.defineProperty(screen, 'width', {get: function() { return SCREEN_W; }, configurable: true});
 Object.defineProperty(screen, 'height', {get: function() { return SCREEN_H; }, configurable: true});
 Object.defineProperty(screen, 'availWidth', {get: function() { return SCREEN_W; }, configurable: true});
-Object.defineProperty(screen, 'availHeight', {get: function() { return SCREEN_H - 40; }, configurable: true});
+var _isMacScreen = window.__AGENT_OS_PLATFORM__ === 'MacIntel';
+var _availHeightOffset = _isMacScreen ? 25 : 40;
+var _outerHeightOffset = _isMacScreen ? 78 : 74;
+Object.defineProperty(screen, 'availHeight', {get: function() { return SCREEN_H - _availHeightOffset; }, configurable: true});
 Object.defineProperty(screen, 'colorDepth', {get: function() { return 24; }, configurable: true});
 Object.defineProperty(screen, 'pixelDepth', {get: function() { return 24; }, configurable: true});
 
 Object.defineProperty(window, 'outerWidth', {get: function() { return SCREEN_W; }, configurable: true});
-Object.defineProperty(window, 'outerHeight', {get: function() { return SCREEN_H + 74; }, configurable: true});
+Object.defineProperty(window, 'outerHeight', {get: function() { return SCREEN_H + _outerHeightOffset; }, configurable: true});
 Object.defineProperty(window, 'screenX', {get: function() { return 0; }, configurable: true});
 Object.defineProperty(window, 'screenY', {get: function() { return 0; }, configurable: true});
 Object.defineProperty(window, 'devicePixelRatio', {get: function() { return DEVICE_PIXEL_RATIO; }, configurable: true});
@@ -725,7 +756,6 @@ try {
 
 // 19a. Override navigator.sendBeacon
 navigator.sendBeacon = function sendBeacon(url, data) {
-    console.debug('[Agent-OS stealth] beacon intercepted:', url);
     return true;
 };
 spoofToString(navigator.sendBeacon, 'sendBeacon');

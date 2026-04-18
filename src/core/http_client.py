@@ -78,8 +78,6 @@ class TLSClient:
     DEFAULT_BROWSER_HEADERS = {
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
         "Accept-Language": "en-US,en;q=0.9",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
         "Sec-Ch-Ua-Mobile": "?0",
         "Sec-Ch-Ua-Platform": '"Windows"',
         "Sec-Fetch-Dest": "document",
@@ -165,7 +163,12 @@ class TLSClient:
         # Add Referer for same-origin requests (helps with WAF)
         parsed = urlparse(url)
         origin = f"{parsed.scheme}://{parsed.netloc}"
-        headers["Origin"] = origin
+
+        # Only set Origin for non-navigation requests (POST, PUT, PATCH, DELETE)
+        # Real Chrome does not send Origin on initial GET navigations
+        method = headers.get("X-Method-Override", "GET")  # Will be set by post() below
+        if method.upper() in ("POST", "PUT", "PATCH", "DELETE"):
+            headers["Origin"] = origin
 
         # Stealth mode: extra headers for anti-bot domains
         domain = parsed.hostname or ""
@@ -175,7 +178,10 @@ class TLSClient:
         ):
             # Add DNT and more realistic browser signals
             headers["Dnt"] = "1"
-            headers["Sec-Fetch-Site"] = "same-origin"  # Looks like internal nav
+            # Keep Sec-Fetch-Site: none for initial navigations
+            # same-origin is only used for subsequent requests within the same origin
+            if headers.get("Sec-Fetch-Site") != "none":
+                headers["Sec-Fetch-Site"] = "same-origin"
 
         # User headers override everything
         if user_headers:
@@ -285,8 +291,12 @@ class TLSClient:
         Returns:
             Same dict format as :meth:`get`.
         """
-        # Build realistic browser headers
-        final_headers = self._build_headers(url, headers)
+        # Build realistic browser headers — mark as POST so Origin header is included
+        override_headers = dict(headers) if headers else {}
+        override_headers["X-Method-Override"] = "POST"
+        final_headers = self._build_headers(url, override_headers)
+        # Remove the internal marker before sending
+        final_headers.pop("X-Method-Override", None)
         # Override Accept for POST
         final_headers.setdefault("Accept", "application/json, text/plain, */*")
         final_headers["Sec-Fetch-Dest"] = "empty"

@@ -213,6 +213,7 @@ def create_auth_middleware(auth_mw: AuthMiddleware):
         if request.method == "POST" and request.content_type == "application/json":
             try:
                 body = await request.json()
+                request['parsed_body'] = body  # Store for handlers to reuse
             except Exception:
                 pass
 

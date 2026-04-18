@@ -265,7 +265,7 @@ CHROME_BRAND_VERSIONS = {
 }
 
 
-async def apply_browser_tls_spoofing(page, chrome_version: str = "124") -> bool:
+async def apply_browser_tls_spoofing(page, chrome_version: str = "124", browser_profile=None) -> bool:
     """
     Apply TLS metadata spoofing to a Playwright page via CDP.
 
@@ -277,6 +277,8 @@ async def apply_browser_tls_spoofing(page, chrome_version: str = "124") -> bool:
     Args:
         page: Playwright Page object
         chrome_version: Chrome version to emulate
+        browser_profile: Optional BrowserProfile dataclass for platform-aware
+                         values (platform, locale, sec_ch_ua_platform, etc.)
 
     Returns:
         True if applied successfully
@@ -284,69 +286,100 @@ async def apply_browser_tls_spoofing(page, chrome_version: str = "124") -> bool:
     try:
         cdp = await page.context.new_cdp_session(page)
 
-        # Build realistic User-Agent string
-        ua = (
-            f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            f"AppleWebKit/537.36 (KHTML, like Gecko) "
-            f"Chrome/{chrome_version}.0.0.0 Safari/537.36"
-        )
+        try:
+            # Derive platform-aware values from the browser profile when available
+            if browser_profile is not None:
+                platform = browser_profile.platform
+                sec_ch_platform = browser_profile.sec_ch_ua_platform.strip('"')
+                locale = browser_profile.locale
+                accept_lang = f"{locale},{locale.split('-')[0]};q=0.9"
+                if platform == "Win32":
+                    platform_version = "15.0.0"
+                    ua_os = "Windows NT 10.0; Win64; x64"
+                elif platform == "MacIntel":
+                    platform_version = "14.0.0"
+                    ua_os = "Macintosh; Intel Mac OS X 10_15_7"
+                else:
+                    platform_version = "6.0.0"
+                    ua_os = "X11; Linux x86_64"
+            else:
+                platform = "Win32"
+                sec_ch_platform = "Windows"
+                locale = "en-US"
+                accept_lang = "en-US,en;q=0.9"
+                platform_version = "15.0.0"
+                ua_os = "Windows NT 10.0; Win64; x64"
 
-        # Set User-Agent override with full metadata
-        brands = CHROME_BRAND_VERSIONS.get(chrome_version, CHROME_BRAND_VERSIONS["124"])
-        await cdp.send("Network.setUserAgentOverride", {
-            "userAgent": ua,
-            "acceptLanguage": "en-US,en;q=0.9",
-            "platform": "Win32",
-            "userAgentMetadata": {
-                "brands": brands,
-                "fullVersionList": [
-                    {**b, "version": f"{b['version']}.0.0.0"} for b in brands
-                ],
-                "fullVersion": f"{chrome_version}.0.0.0",
-                "platform": "Windows",
-                "platformVersion": "15.0.0",
-                "architecture": "x86",
-                "model": "",
-                "mobile": False,
-                "bitness": "64",
-                "wow64": False,
-            },
-        })
+            # Build realistic User-Agent string
+            ua = (
+                f"Mozilla/5.0 ({ua_os}) "
+                f"AppleWebKit/537.36 (KHTML, like Gecko) "
+                f"Chrome/{chrome_version}.0.0.0 Safari/537.36"
+            )
 
-        # Enable Network domain
-        await cdp.send("Network.enable")
+            # Set User-Agent override with full metadata
+            brands = CHROME_BRAND_VERSIONS.get(chrome_version, CHROME_BRAND_VERSIONS["124"])
+            await cdp.send("Network.setUserAgentOverride", {
+                "userAgent": ua,
+                "acceptLanguage": accept_lang,
+                "platform": platform,
+                "userAgentMetadata": {
+                    "brands": brands,
+                    "fullVersionList": [
+                        {**b, "version": f"{b['version']}.0.0.0"} for b in brands
+                    ],
+                    "fullVersion": f"{chrome_version}.0.0.0",
+                    "platform": sec_ch_platform,
+                    "platformVersion": platform_version,
+                    "architecture": "x86",
+                    "model": "",
+                    "mobile": False,
+                    "bitness": "64",
+                    "wow64": False,
+                },
+            })
 
-        # Set extra HTTP headers that match real Chrome navigations
-        await cdp.send("Network.setExtraHTTPHeaders", {
-            "headers": {
-                "sec-ch-ua": ', '.join(
-                    f'"{b["brand"]}";v="{b["version"]}"' for b in brands
-                ),
-                "sec-ch-ua-mobile": "?0",
-                "sec-ch-ua-platform": '"Windows"',
-                "Upgrade-Insecure-Requests": "1",
-                "Accept": (
-                    "text/html,application/xhtml+xml,application/xml;"
-                    "q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
-                ),
-                "Sec-Fetch-Site": "none",
-                "Sec-Fetch-Mode": "navigate",
-                "Sec-Fetch-User": "?1",
-                "Sec-Fetch-Dest": "document",
-                "Accept-Encoding": "gzip, deflate, br",
-                "Accept-Language": "en-US,en;q=0.9",
-            }
-        })
+            # Enable Network domain
+            await cdp.send("Network.enable")
 
-        # Also spoof via CDP Page domain for JavaScript-level checks
-        await cdp.send("Emulation.setUserAgentOverride", {
-            "userAgent": ua,
-            "acceptLanguage": "en-US,en;q=0.9",
-            "platform": "Win32",
-        })
+            # Set extra HTTP headers that match real Chrome navigations
+            await cdp.send("Network.setExtraHTTPHeaders", {
+                "headers": {
+                    "sec-ch-ua": ', '.join(
+                        f'"{b["brand"]}";v="{b["version"]}"' for b in brands
+                    ),
+                    "sec-ch-ua-mobile": "?0",
+                    "sec-ch-ua-platform": f'"{sec_ch_platform}"',
+                    "Upgrade-Insecure-Requests": "1",
+                    "Accept": (
+                        "text/html,application/xhtml+xml,application/xml;"
+                        "q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
+                    ),
+                    "Sec-Fetch-Site": "none",
+                    "Sec-Fetch-Mode": "navigate",
+                    "Sec-Fetch-User": "?1",
+                    "Sec-Fetch-Dest": "document",
+                    "Accept-Encoding": "gzip, deflate, br",
+                    "Accept-Language": accept_lang,
+                }
+            })
 
-        logger.info(f"Browser TLS spoofing applied (Chrome {chrome_version})")
-        return True
+            # Also spoof via CDP Page domain for JavaScript-level checks
+            await cdp.send("Emulation.setUserAgentOverride", {
+                "userAgent": ua,
+                "acceptLanguage": accept_lang,
+                "platform": platform,
+            })
+
+            logger.info(f"Browser TLS spoofing applied (Chrome {chrome_version}, {platform})")
+            return True
+
+        finally:
+            # ALWAYS detach CDP session to prevent leaks
+            try:
+                await cdp.detach()
+            except Exception:
+                pass
 
     except Exception as e:
         logger.warning(f"Browser TLS spoofing failed: {e}")

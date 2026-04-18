@@ -36,6 +36,12 @@ from src.core.stealth import (
     handle_request_interception,
 )
 
+try:
+    from cryptography.fernet import Fernet
+    _FERNET_AVAILABLE = True
+except ImportError:
+    _FERNET_AVAILABLE = False
+
 logger = logging.getLogger("agent-os.persistent")
 
 
@@ -148,6 +154,9 @@ class UserContext:
         self.blocked_requests = 0
         self._console_logs: Dict[str, List[Dict]] = {}
         self._state_file = self.profile_dir / "context_state.json"
+        # Cookie encryption (same pattern as browser.py)
+        self._cookie_key = self._get_or_create_cookie_key()
+        self._cookie_fernet = Fernet(self._cookie_key) if _FERNET_AVAILABLE else None
 
     async def initialize(self, config: Dict[str, Any]):
         """Create or restore persistent context for this user."""
@@ -349,16 +358,38 @@ class UserContext:
         except Exception as e:
             logger.error(f"Failed to save state for {self.user_id}: {e}")
 
-        # Save cookies
+        # Save cookies (encrypted with Fernet, matching browser.py pattern)
         if self.context:
             try:
-                cookies_file = self.profile_dir / "cookies.json"
+                cookies_file = self.profile_dir / "cookies.enc"
                 storage = await self.context.storage_state()
-                with open(cookies_file, "w") as f:
-                    json.dump(storage, f)
+                if self._cookie_fernet:
+                    encrypted = self._cookie_fernet.encrypt(json.dumps(storage).encode())
+                    cookies_file.write_bytes(encrypted)
+                else:
+                    # Fallback to plaintext if Fernet unavailable
+                    with open(cookies_file, "w") as f:
+                        json.dump(storage, f)
+                cookies_file.chmod(0o600)
                 state.cookies_count = len(storage.get("cookies", []))
             except Exception as e:
                 logger.warning(f"Failed to save cookies for {self.user_id}: {e}")
+
+    def _get_or_create_cookie_key(self) -> bytes:
+        """Get or create encryption key for cookie storage."""
+        key_path = Path(os.path.expanduser("~/.agent-os/.cookie_key"))
+        if key_path.exists():
+            return key_path.read_bytes()
+        if _FERNET_AVAILABLE:
+            key = Fernet.generate_key()
+        else:
+            # Fallback: generate a deterministic key from user_id if Fernet unavailable
+            import hashlib
+            key = hashlib.sha256(f"agent-os-cookie-key-{self.user_id}".encode()).digest()
+        key_path.parent.mkdir(parents=True, exist_ok=True)
+        key_path.write_bytes(key)
+        key_path.chmod(0o600)
+        return key
 
     def _attach_console_listener(self, page_id: str, page: Page):
         """Capture console logs per page."""
@@ -572,6 +603,8 @@ class BrowserInstance:
 
         # Process memory
         try:
+            # Reset before accumulating to avoid monotonically increasing values
+            self.health.memory_mb = 0
             # Find Chromium processes
             for proc in psutil.process_iter(['pid', 'name', 'memory_info']):
                 try:

@@ -56,6 +56,7 @@ class SessionManager:
         self.config = config
         self.browser = browser
         self.sessions: Dict[str, Session] = {}
+        self._token_to_session: Dict[str, str] = {}  # agent_token -> session_id
         self._cleanup_task: Optional[asyncio.Task] = None
         self._max_sessions: int = config.get("session.max_concurrent", 3)
         self._default_timeout: float = config.get("session.timeout_minutes", 15) * 60
@@ -108,7 +109,9 @@ class SessionManager:
                 sid for sid, s in self.sessions.items() if s.is_expired
             ]
             for sid in expired_ids:
-                del self.sessions[sid]
+                evicted = self.sessions.pop(sid, None)
+                if evicted:
+                    self._token_to_session.pop(evicted.agent_token, None)
 
             if expired_ids:
                 logger.info(
@@ -142,6 +145,7 @@ class SessionManager:
             expires_at=time.time() + timeout,
         )
         self.sessions[session_id] = session
+        self._token_to_session[agent_token] = session_id
         logger.info(f"Session created: {session_id} (expires in {timeout / 60:.0f}min)")
         return session
 
@@ -161,7 +165,7 @@ class SessionManager:
         return session
 
     def get_session_by_token(self, agent_token: str) -> Optional[Session]:
-        """Get active session by agent token.
+        """Get active session by agent token using reverse index (O(1)).
 
         Args:
             agent_token: The agent's authentication token.
@@ -169,10 +173,15 @@ class SessionManager:
         Returns:
             The active, non-expired Session for this token, or None.
         """
-        for session in self.sessions.values():
-            if session.agent_token == agent_token and session.active and not session.is_expired:
-                return session
-        return None
+        session_id = self._token_to_session.get(agent_token)
+        if session_id is None:
+            return None
+        session = self.sessions.get(session_id)
+        if session is None or not session.active or session.is_expired:
+            # Clean up stale index entry
+            self._token_to_session.pop(agent_token, None)
+            return None
+        return session
 
     async def destroy_session(self, session_id: str) -> None:
         """Destroy a session and wipe all its data, including browser tabs.
@@ -199,6 +208,8 @@ class SessionManager:
             # Wipe session data (security)
             session.data.clear()
             session.pages.clear()
+            # Clean up reverse index
+            self._token_to_session.pop(session.agent_token, None)
             del self.sessions[session_id]
             logger.info(f"Session destroyed and wiped: {session_id}")
 
