@@ -137,6 +137,9 @@ class AuthMiddleware:
 
     def check_login_attempts(self, identifier: str) -> bool:
         """Check if login is allowed for this identifier (IP or username)."""
+        # Periodically clean up expired login attempt records
+        self._cleanup_login_attempts()
+
         now = time.time()
         cutoff = now - self._lockout_seconds
         attempts = self._login_attempts.get(identifier, [])
@@ -161,6 +164,16 @@ class AuthMiddleware:
         oldest_relevant = max(attempts[-self._max_attempts:])
         remaining = int(oldest_relevant + self._lockout_seconds - time.time())
         return max(0, remaining)
+
+    def _cleanup_login_attempts(self):
+        """Remove expired login attempt records to prevent unbounded growth."""
+        now = time.time()
+        expired = [
+            k for k, v in self._login_attempts.items()
+            if not v or now - v[-1] > 3600  # Remove entries with no attempts in the last hour
+        ]
+        for k in expired:
+            del self._login_attempts[k]
 
     def require_scope(self, scope: str):
         """Decorator to require a specific scope for an endpoint."""

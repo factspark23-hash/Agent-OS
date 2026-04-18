@@ -6,12 +6,12 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
+import sqlalchemy as sa
 from sqlalchemy import (
     String, Text, Integer, Boolean, DateTime,
     ForeignKey, Index, CheckConstraint,
     func, text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.infra.database import Base
@@ -110,8 +110,8 @@ class APIKey(Base):
 
     # Scopes/permissions
     scopes: Mapped[dict] = mapped_column(
-        JSONB, nullable=False, default=dict,
-        server_default=text("'{}'::jsonb")
+        sa.JSON, nullable=False, default=dict,
+        server_default=text("'{}'")
     )
 
     # Rate limits (per-key overrides)
@@ -254,7 +254,7 @@ class AuditLog(Base):
     # Context
     client_ip: Mapped[Optional[str]] = mapped_column(String(45))
     user_agent: Mapped[Optional[str]] = mapped_column(Text)
-    details: Mapped[Optional[dict]] = mapped_column(JSONB)
+    details: Mapped[Optional[dict]] = mapped_column(sa.JSON)
 
     # Result
     success: Mapped[bool] = mapped_column(Boolean, nullable=False)

@@ -3,6 +3,7 @@ Agent-OS Redis Layer
 Distributed rate limiting, session caching, pub/sub for multi-instance coordination.
 Falls back gracefully to in-memory when Redis is unavailable.
 """
+import asyncio
 import json
 import logging
 import time
@@ -111,11 +112,13 @@ class RedisClient:
 
     def __init__(self, url: str = "redis://localhost:6379/0", fallback_on_failure: bool = True):
         self.url = url
+        self._url = url
         self._redis = None
         self._fallback = InMemoryFallback()
         self._use_fallback = True
         self._fallback_on_failure = fallback_on_failure
         self._connected = False
+        self._mode = "memory"  # Track current mode: "redis" or "memory"
 
     @property
     def is_fallback(self) -> bool:
@@ -137,6 +140,7 @@ class RedisClient:
             await self._redis.ping()
             self._use_fallback = False
             self._connected = True
+            self._mode = "redis"
             logger.info(f"Connected to Redis: {self.url}")
         except Exception as e:
             if self._fallback_on_failure:
@@ -161,10 +165,44 @@ class RedisClient:
     def _backend(self):
         return self._fallback if self._use_fallback else self._redis
 
+    async def _ensure_connected(self) -> bool:
+        """Ensure Redis connection is alive, reconnect if needed with exponential backoff."""
+        if self._mode != "redis" or self._redis is None:
+            return False
+        try:
+            await self._redis.ping()
+            return True
+        except Exception:
+            # Try to reconnect with exponential backoff
+            for attempt in range(3):
+                try:
+                    await asyncio.sleep(min(2 ** attempt, 10))
+                    import redis.asyncio as aioredis
+                    self._redis = aioredis.from_url(
+                        self._url,
+                        decode_responses=True,
+                        socket_connect_timeout=5,
+                        socket_timeout=5,
+                        retry_on_timeout=True,
+                        max_connections=50,
+                    )
+                    await self._redis.ping()
+                    logger.info("Redis reconnected successfully")
+                    return True
+                except Exception:
+                    continue
+            logger.error("Redis reconnection failed after 3 attempts, using in-memory fallback")
+            self._use_fallback = True
+            self._mode = "memory"
+            return False
+
     async def health_check(self) -> dict:
         """Check Redis connectivity."""
         start = time.time()
         try:
+            # If we think we're in redis mode, verify the connection first
+            if not self._use_fallback and self._redis is not None:
+                await self._ensure_connected()
             backend = self._backend
             await backend.ping()
             return {

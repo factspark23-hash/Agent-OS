@@ -323,6 +323,10 @@ class AgentBrowser:
         self._firefox_enabled = self.config.get("browser.firefox_fallback", True)
         # Dual engine manager
         self._dual_engine: Optional[DualEngineManager] = None
+        # DNS resolution cache — domain → last_resolved_timestamp
+        # Avoids redundant TCP connect checks for recently-accessed domains
+        self._dns_cache: Dict[str, float] = {}
+        self._dns_cache_ttl = 300.0  # 5 minutes
         # Browser profile (picked once per session, consistent within session)
         self._active_profile: Optional[BrowserProfile] = None
 
@@ -460,6 +464,9 @@ class AgentBrowser:
 
         # Start background cookie flush (save dirty cookies every 60s)
         self._cookie_flush_task = asyncio.create_task(self._cookie_flush_loop())
+
+        # Start background session warmup — doesn't block server startup
+        asyncio.create_task(self._warmup_session_async())
 
         logger.info("Browser started with stealth patches v2.0 + TLS fingerprinting + proxy rotation")
 
@@ -1138,6 +1145,13 @@ class AgentBrowser:
 
     async def _handle_request(self, route, request):
         """Intercept and block bot detection requests."""
+        # Skip check for images, fonts, stylesheets, media — these are never
+        # bot detection scripts and processing them wastes CPU on every request.
+        _SKIP_CHECK_TYPES = {'image', 'font', 'stylesheet', 'media', 'manifest', 'other'}
+        if request.resource_type in _SKIP_CHECK_TYPES:
+            await route.continue_()
+            return
+
         should_block, fake_response = handle_request_interception(request.url, request.resource_type)
         if should_block:
             self._blocked_requests += 1
@@ -1395,6 +1409,22 @@ class AgentBrowser:
                 # Warmup failures are non-critical — continue anyway
                 pass
 
+    async def _warmup_session_async(self, target_url: str = "https://www.google.com") -> None:
+        """Background warmup — doesn't block server startup or navigation.
+
+        Starts after a short delay to let the server settle, then visits
+        warmup pages in the background. Errors are silently caught since
+        warmup is non-critical.
+        """
+        try:
+            await asyncio.sleep(2)  # Let server settle
+            # Visit warmup pages in background
+            await self._warmup_session(target_url)
+            self._session_warmed_up = True
+            logger.debug("Background session warmup completed")
+        except Exception as e:
+            logger.debug(f"Background warmup skipped: {e}")
+
     async def _try_cloudflare_bypass(self, url: str, page: Page) -> bool:
         """
         Attempt Cloudflare bypass using enhanced bypass engine.
@@ -1505,13 +1535,21 @@ class AgentBrowser:
             # 5-second timeout — no browser launch, no retries.
             _pf_start = time.time()
             try:
-                port = 443 if url.startswith("https") else 80
-                _, writer = await asyncio.wait_for(
-                    asyncio.open_connection(domain, port),
-                    timeout=5.0,
-                )
-                writer.close()
-                await writer.wait_closed()
+                # DNS cache: skip pre-flight for recently-accessed domains
+                _now = time.time()
+                _cached_at = self._dns_cache.get(domain, 0.0)
+                if _now - _cached_at < self._dns_cache_ttl:
+                    logger.debug(f"DNS cache hit for {domain} — skipping pre-flight check")
+                else:
+                    port = 443 if url.startswith("https") else 80
+                    _, writer = await asyncio.wait_for(
+                        asyncio.open_connection(domain, port),
+                        timeout=5.0,
+                    )
+                    writer.close()
+                    await writer.wait_closed()
+                    # Cache successful connection
+                    self._dns_cache[domain] = _now
             except (asyncio.TimeoutError, OSError, Exception) as _pf_err:
                 _pf_elapsed = round(time.time() - _pf_start, 1)
                 logger.warning(f"Pre-flight failed for {domain}: {_pf_err} ({_pf_elapsed}s)")
@@ -1525,8 +1563,13 @@ class AgentBrowser:
             geo_target = country or self._get_geo_target(domain)
 
             # Session warmup — build realistic browsing history before target
+            # Warmup runs as a background task launched in start(), so it
+            # doesn't block the first real navigation. If it hasn't completed
+            # yet, we just skip it (the site will still work without warmup).
+            # If warmup is still pending, launch it now as a background task
+            # so it doesn't block this navigation.
             if warmup and not self._session_warmed_up:
-                await self._warmup_session(url)
+                asyncio.create_task(self._warmup_session_async(url))
                 self._session_warmed_up = True
 
             last_error = None
@@ -1967,11 +2010,24 @@ class AgentBrowser:
             "text": await page.inner_text("body") if await page.query_selector("body") else ""
         }
 
-    async def screenshot(self, page_id: str = "main", full_page: bool = False) -> str:
-        """Take a base64 screenshot."""
+    async def screenshot(self, page_id: str = "main", full_page: bool = False,
+                         format: str = "png", quality: int = 80) -> str:
+        """Take a base64 screenshot.
+
+        Args:
+            page_id: Tab/page ID to screenshot.
+            full_page: If True, capture the full scrollable page.
+            format: Image format — "png" or "jpeg". JPEG is much smaller
+                    (typically 5-10x) and recommended for API responses.
+            quality: JPEG quality (1-100). Only used when format="jpeg".
+                     Default 80 provides good quality with significant size savings.
+        """
         page = self._pages.get(page_id, self.page)
         try:
-            img_bytes = await page.screenshot(type="png", full_page=full_page)
+            options: Dict[str, Any] = {"full_page": full_page, "type": format}
+            if format == "jpeg" and quality:
+                options["quality"] = quality
+            img_bytes = await page.screenshot(**options)
             return base64.b64encode(img_bytes).decode()
         except Exception as e:
             logger.error(f"Screenshot failed: {e}")

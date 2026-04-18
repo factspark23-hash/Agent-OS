@@ -17,7 +17,7 @@ import asyncio
 import logging
 import time
 import re
-from typing import Optional, Dict
+from typing import Any, Optional, Dict
 from urllib.parse import urlparse
 from dataclasses import dataclass, field
 from collections import defaultdict
@@ -544,6 +544,9 @@ class TLSHTTPClient:
     Direct HTTP client using curl_cffi with real browser TLS.
     Use this instead of requests/httpx for any non-browser HTTP calls.
 
+    Supports connection pooling via a persistent httpx.AsyncClient fallback
+    when curl_cffi is unavailable.
+
     Example:
         client = TLSHTTPClient()
         resp = await client.get("https://bot-protected-site.com")
@@ -553,8 +556,28 @@ class TLSHTTPClient:
     def __init__(self, default_profile: str = "chrome124"):
         self._pool = TLSSessionPool()
         self._default_profile = default_profile
+        # Persistent httpx client for fallback with connection pooling
+        self._httpx_client: Optional[Any] = None
         if _CURL_AVAILABLE:
             _init_profiles()
+
+    async def _get_httpx_client(self):
+        """Get or create a persistent httpx client with connection pooling.
+
+        Uses HTTP/2 with keep-alive connections to avoid the overhead of
+        establishing a new TCP+TLS connection for every request.
+        """
+        import httpx as _httpx
+        if self._httpx_client is None or self._httpx_client.is_closed:
+            self._httpx_client = _httpx.AsyncClient(
+                http2=True,
+                limits=_httpx.Limits(
+                    max_connections=20,
+                    max_keepalive_connections=10,
+                ),
+                timeout=_httpx.Timeout(30.0),
+            )
+        return self._httpx_client
 
     async def request(
         self,
@@ -607,6 +630,19 @@ class TLSHTTPClient:
 
     def close(self):
         self._pool.close()
+        # Close persistent httpx client if it exists
+        if self._httpx_client is not None and not self._httpx_client.is_closed:
+            try:
+                import asyncio
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # Schedule the close in the running loop
+                    asyncio.ensure_future(self._httpx_client.aclose())
+                else:
+                    loop.run_until_complete(self._httpx_client.aclose())
+            except Exception:
+                pass
+            self._httpx_client = None
 
     @property
     def available(self) -> bool:

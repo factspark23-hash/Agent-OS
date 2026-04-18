@@ -25,7 +25,13 @@ from connectors._tool_registry import TOOLS, get_command_map, get_mcp_tools
 
 # Configuration
 AGENT_OS_URL = os.environ.get("AGENT_OS_URL", "http://localhost:8001")
-AGENT_TOKEN = os.environ.get("AGENT_OS_TOKEN", "mcp-agent-default")
+AGENT_OS_TOKEN = os.environ.get("AGENT_OS_TOKEN")
+if not AGENT_OS_TOKEN:
+    # Generate a random token and print it
+    import secrets
+    AGENT_OS_TOKEN = secrets.token_urlsafe(32)
+    print(f"WARNING: AGENT_OS_TOKEN not set. Generated token: {AGENT_OS_TOKEN}")
+    print("Set this as AGENT_OS_TOKEN env var for persistent access.")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
 logger = logging.getLogger("agent-os-mcp")
@@ -68,7 +74,7 @@ logger.info(f"Loaded {len(TOOLS_LIST)} MCP tools from registry")
 
 async def agent_os_command(command: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
     """Send a command to Agent-OS server."""
-    payload = {"token": AGENT_TOKEN, "command": command}
+    payload = {"token": AGENT_OS_TOKEN, "command": command}
     if params:
         payload.update(params)
 
@@ -136,7 +142,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
 async def main():
     logger.info(f"Agent-OS MCP Server starting...")
     logger.info(f"Agent-OS URL: {AGENT_OS_URL}")
-    logger.info(f"Agent Token: {AGENT_TOKEN[:10]}...")
+    logger.info(f"Agent Token: {AGENT_OS_TOKEN[:10]}...")
     logger.info(f"Tools available: {len(TOOLS_LIST)}")
 
     async with stdio_server() as (read_stream, write_stream):

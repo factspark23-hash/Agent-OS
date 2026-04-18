@@ -44,6 +44,7 @@ class JWTHandler:
         self._user_tokens: Dict[str, set] = {}  # user_id → set of JTIs
         self._blacklist_file = Path(os.path.expanduser("~/.agent-os/jwt_blacklist.json"))
         self._last_cleanup = _time.time()
+        self._persistence_task: Optional[asyncio.Task] = None
         self._load_blacklist()
 
     def create_access_token(self, user_id: str, api_key_id: str = None,
@@ -250,3 +251,32 @@ class JWTHandler:
     def constant_time_compare(a: str, b: str) -> bool:
         """Constant-time string comparison to prevent timing attacks."""
         return hmac.compare_digest(a.encode(), b.encode())
+
+    async def start_persistence_loop(self):
+        """Start the periodic blacklist persistence loop."""
+        if self._persistence_task is None or self._persistence_task.done():
+            self._persistence_task = asyncio.create_task(self._blacklist_persistence_loop())
+
+    async def stop_persistence_loop(self):
+        """Stop the periodic blacklist persistence loop."""
+        if self._persistence_task and not self._persistence_task.done():
+            self._persistence_task.cancel()
+            try:
+                await self._persistence_task
+            except asyncio.CancelledError:
+                pass
+        # Final save before stopping
+        self._cleanup_blacklist()
+        await self._save_blacklist_async()
+
+    async def _blacklist_persistence_loop(self):
+        """Periodically save blacklist to disk."""
+        while True:
+            try:
+                await asyncio.sleep(60)
+                self._cleanup_blacklist()
+                await self._save_blacklist_async()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning(f"Blacklist persistence loop error: {e}")

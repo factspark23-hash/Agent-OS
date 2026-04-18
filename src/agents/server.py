@@ -17,6 +17,53 @@ logger = logging.getLogger("agent-os.server")
 
 AGENT_OS_VERSION = "3.2.0"
 
+# ─── Scope-to-Command Mapping ──────────────────────────────────
+COMMAND_SCOPES = {
+    # Browser commands require 'browser' scope
+    "navigate": ["browser"], "click": ["browser"], "type": ["browser"],
+    "screenshot": ["browser"], "get-content": ["browser"],
+    "smart-navigate": ["browser"], "back": ["browser"], "forward": ["browser"],
+    "reload": ["browser"], "fill-form": ["browser"], "hover": ["browser"],
+    "select": ["browser"], "upload": ["browser"], "wait": ["browser"],
+    "evaluate-js": ["browser"], "scroll": ["browser"], "right-click": ["browser"],
+    "context-action": ["browser"], "double-click": ["browser"], "press": ["browser"],
+    "clear-input": ["browser"], "checkbox": ["browser"], "drag-drop": ["browser"],
+    "drag-offset": ["browser"], "viewport": ["browser"], "tabs": ["browser"],
+    "get-dom": ["browser"], "get-links": ["browser"], "get-images": ["browser"],
+    "get-text": ["browser"], "get-attr": ["browser"], "console-logs": ["browser"],
+    "smart-find": ["browser"], "smart-find-all": ["browser"],
+    "smart-click": ["browser"], "smart-fill": ["browser"],
+    # Security commands require 'admin' scope
+    "scan-xss": ["admin"], "scan-sqli": ["admin"], "scan-sensitive": ["admin"],
+    # Workflow commands require 'workflows' scope
+    "workflow": ["workflows"], "workflow-save": ["workflows"],
+    "workflow-template": ["workflows"], "workflow-list": ["workflows"],
+    "workflow-status": ["workflows"], "workflow-json": ["workflows"],
+    # Session commands require 'browser' scope
+    "save-session": ["browser"], "restore-session": ["browser"],
+    "list-sessions": ["browser"], "delete-session": ["browser"],
+    "save-creds": ["browser"], "auto-login": ["browser"],
+    "get-cookies": ["browser"], "set-cookie": ["browser"],
+    # Proxy commands require 'browser' scope
+    "set-proxy": ["browser"], "get-proxy": ["browser"],
+    "emulate-device": ["browser"], "list-devices": ["browser"],
+    # Network capture requires 'browser' scope
+    "network-start": ["browser"], "network-stop": ["browser"],
+    "network-get": ["browser"], "network-apis": ["browser"],
+    "network-detail": ["browser"], "network-stats": ["browser"],
+    "network-export": ["browser"], "network-clear": ["browser"],
+    # Page analysis requires 'browser' scope
+    "page-summary": ["browser"], "page-tables": ["browser"],
+    "page-seo": ["browser"], "page-structured": ["browser"],
+    "page-emails": ["browser"], "page-phones": ["browser"],
+    "page-accessibility": ["browser"], "analyze": ["browser"],
+    "analyze-search": ["browser"],
+    # Scanning commands (route queries) require 'browser' scope
+    "route": ["browser"], "route-stats": ["browser"],
+    "fetch": ["browser"], "nav-stats": ["browser"],
+}
+DEFAULT_SCOPE = "browser"
+
 
 class AgentServer:
     """
@@ -1588,10 +1635,20 @@ class AgentServer:
     # ─── Command Processing ─────────────────────────────────
 
     async def _process_command(self, data: Dict, auth_context: Dict = None) -> Dict[str, Any]:
-        """Process any agent command with auth context, crash recovery, and timeout."""
+        """Process any agent command with auth context, scope enforcement, crash recovery, and timeout."""
         command = data.get("command", "").lower()
         if not command:
             return {"status": "error", "error": "Missing 'command'"}
+
+        # Scope enforcement: check if the authenticated user has the required scope
+        if auth_context:
+            required_scopes = COMMAND_SCOPES.get(command, [DEFAULT_SCOPE])
+            user_scopes = auth_context.get("scopes", ["browser"])
+            if not any(s in user_scopes for s in required_scopes):
+                return {
+                    "status": "error",
+                    "error": f"Insufficient scope. Required: {required_scopes}, Have: {user_scopes}",
+                }
 
         # Get or create session
         token = data.get("token", auth_context.get("user_id", "unknown") if auth_context else "unknown")

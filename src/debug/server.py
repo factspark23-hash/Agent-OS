@@ -93,9 +93,9 @@ class DebugServer:
         if path in ("/style.css", "/app.js"):
             return await handler(request)
 
-        # Allow handoff API without auth (for UI convenience)
-        if path.startswith("/api/handoff/"):
-            return await handler(request)
+        # Require token validation for handoff API endpoints too (security fix)
+        # Previously handoff paths were allowed without auth — now they require
+        # at least a simple token check to prevent unauthenticated access.
 
         # Extract token from header, query param, or cookie
         token = (

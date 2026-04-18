@@ -385,43 +385,25 @@ class ResponseCache:
         return intersection / union if union > 0 else 0.0
 
     def get(self, prompt: str, system: str = "", model: str = "", **kwargs) -> Optional[Dict[str, Any]]:
-        """Look up a cached response. Tries exact match first, then similarity.
+        """Look up a cached response by exact key match only.
+
+        Previous implementation used O(n) similarity search across all 1024
+        cache entries on every miss, which is too expensive for production.
+        Similarity search has been removed — exact matching is sufficient
+        and provides O(1) lookups.
 
         Returns the cached result dict or None.
         """
         key = self._hash_key(prompt, system, model, **kwargs)
 
         with self._lock:
-            # Exact match
+            # Exact match only — O(1) lookup
             if key in self._cache:
                 self._cache.move_to_end(key)
                 self.hits += 1
                 return self._cache[key]
 
-        # Similarity match (more expensive, done outside the main lock)
-        if len(prompt) >= 20:  # Only try similarity for substantive prompts
-            prompt_ngrams = self._ngram_set(prompt)
-            best_match = None
-            best_score = 0.0
-
-            with self._lock:
-                for cache_key, entry in self._cache.items():
-                    cached_prompt = entry.get("_prompt", "")
-                    if not cached_prompt:
-                        continue
-                    cached_ngrams = self._ngram_set(cached_prompt)
-                    score = self._jaccard_similarity(prompt_ngrams, cached_ngrams)
-                    if score > best_score:
-                        best_score = score
-                        best_match = (cache_key, entry)
-
-            if best_match and best_score >= self._similarity_threshold:
-                with self._lock:
-                    if best_match[0] in self._cache:
-                        self._cache.move_to_end(best_match[0])
-                self.similar_hits += 1
-                return best_match[1]
-
+        # Cache miss — skip expensive similarity search
         with self._lock:
             self.misses += 1
         return None
@@ -429,9 +411,9 @@ class ResponseCache:
     def put(self, prompt: str, result: Dict[str, Any], system: str = "", model: str = "", **kwargs):
         """Store a result in the cache."""
         key = self._hash_key(prompt, system, model, **kwargs)
-        # Store the original prompt for similarity matching
+        # Store result directly — no need for _prompt field since similarity
+        # search has been removed
         entry = dict(result)
-        entry["_prompt"] = prompt
 
         with self._lock:
             if key in self._cache:
