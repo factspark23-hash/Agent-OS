@@ -89,14 +89,15 @@
 - Human-like mouse movements (Bezier curves), typing rhythms, scroll behavior
 
 ### 🔌 Connectors — All 199 Tools in Every Connector
-| Connector | Tools | Use With |
-|-----------|-------|----------|
-| MCP Server | 199 | Claude Desktop, Claude Code, Codex, any MCP agent |
-| OpenAI | 199 | GPT-4, GPT-4o, any OpenAI-compatible API |
-| Claude API | 199 | Claude API (tool-use format) |
-| OpenClaw | 199 | OpenClaw agent framework |
-| CLI (Bash) | 198 | Any language (Python, Node, Go, Rust...) |
-| HTTP REST | 198 | Direct API calls |
+| Connector | Tools | Use With | API Key? |
+|-----------|-------|----------|----------|
+| **MCP Passthrough** ⭐ | 199 | Claude Desktop, Claude Code, Codex, any MCP agent | ❌ No |
+| MCP Server | 199 | Claude Desktop, Claude Code, Codex, any MCP agent | Optional |
+| OpenAI | 199 | GPT-4, GPT-4o, any OpenAI-compatible API | Yes |
+| Claude API | 199 | Claude API (tool-use format) | Yes |
+| OpenClaw | 199 | OpenClaw agent framework | Optional |
+| CLI (Bash) | 198 | Any language (Python, Node, Go, Rust...) | Token |
+| HTTP REST | 198 | Direct API calls | Token |
 
 ---
 
@@ -124,7 +125,40 @@ curl -sSL .../install.sh | bash -s -- --port 9000
 curl -sSL .../install.sh | bash -s -- --no-start
 ```
 
-### Option 2: Quickstart (Auto-Connect Everything)
+### Option 2: MCP Passthrough (Zero API Key — Recommended for Claude/GPT)
+
+```bash
+# Start Agent-OS server
+python3 main.py --agent-token "my-secret-token"
+
+# In another terminal, start MCP wrapper
+./run_mcp.sh --token "my-secret-token"
+```
+
+This starts both the Agent-OS server and the MCP passthrough wrapper.
+**No API key needed** — Claude Desktop/GPT handles reasoning, Agent-OS handles execution.
+87% token savings via SmartCompressor.
+
+**Claude Desktop config:**
+
+```json
+{
+  "mcpServers": {
+    "agent-os": {
+      "command": "python3",
+      "args": ["/absolute/path/to/Agent-OS/connectors/mcp_passthrough.py"],
+      "env": {
+        "AGENT_OS_URL": "http://localhost:8001",
+        "AGENT_OS_TOKEN": "my-secret-token"
+      }
+    }
+  }
+}
+```
+
+See [MCP_WRAPPER_README.md](MCP_WRAPPER_README.md) for full documentation.
+
+### Option 3: Quickstart (Auto-Connect Everything)
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/factspark23-hash/Agent-OS/main/quickstart.sh | bash
@@ -135,7 +169,7 @@ This does everything install.sh does PLUS:
 - Configures MCP connections automatically
 - Prints ready-to-use connection info
 
-### Option 3: Docker Compose
+### Option 4: Docker Compose
 
 ```bash
 git clone https://github.com/factspark23-hash/Agent-OS.git
@@ -147,7 +181,7 @@ curl http://localhost:8001/health
 
 Full stack: PostgreSQL + Redis + Agent-OS + Nginx reverse proxy.
 
-### Option 4: Manual Install
+### Option 5: Manual Install
 
 ```bash
 git clone https://github.com/factspark23-hash/Agent-OS.git
@@ -189,7 +223,43 @@ curl -X POST http://localhost:8001/command \
 
 ## AI Platform Connectors
 
-### 1. Claude Desktop / Claude Code / Codex
+### 1. MCP Passthrough (Zero API Key) ⭐ Recommended
+
+Drop-in MCP server that works **without any LLM API key**. The MCP client's LLM (Claude, GPT-4) handles reasoning — Agent-OS handles execution.
+
+```bash
+# Start server + wrapper
+./run_mcp.sh --token "my-secret-token"
+```
+
+**Claude Desktop config:**
+
+```json
+{
+  "mcpServers": {
+    "agent-os": {
+      "command": "python3",
+      "args": ["/absolute/path/to/Agent-OS/connectors/mcp_passthrough.py"],
+      "env": {
+        "AGENT_OS_URL": "http://localhost:8001",
+        "AGENT_OS_TOKEN": "my-secret-token",
+        "AGENT_OS_COMPRESS": "aggressive"
+      }
+    }
+  }
+}
+```
+
+**Features:**
+- 199 tools — 192 browser + 7 LLM (built-in rule-based, no API key)
+- SmartCompressor — 87% token savings on browser results
+- Configurable compression: `aggressive` / `normal` / `off`
+- Works standalone (LLM tools work without Agent-OS server)
+- Helpful error messages when server is down
+
+See [MCP_WRAPPER_README.md](MCP_WRAPPER_README.md) for full docs.
+
+### 2. MCP Server (Original)
 
 Add to your config file:
 
@@ -214,7 +284,7 @@ Add to your config file:
 
 Restart Claude Desktop / Claude Code — **199 browser tools** appear automatically.
 
-### 2. OpenAI / GPT-4
+### 3. OpenAI / GPT-4
 
 ```python
 from connectors.openai_connector import get_tools, call_tool
@@ -228,7 +298,7 @@ result = await call_tool("browser_screenshot", {})
 result = await call_tool("browser_smart_click", {"text": "Sign In"})
 ```
 
-### 3. Claude API (Tool-Use)
+### 4. Claude API (Tool-Use)
 
 ```python
 from connectors.openai_connector import get_tools, call_tool
@@ -237,7 +307,7 @@ from connectors.openai_connector import get_tools, call_tool
 tools = get_tools("claude")  # 199 tools
 ```
 
-### 4. OpenClaw
+### 5. OpenClaw
 
 ```python
 from connectors.openclaw_connector import get_manifest, execute_tool
@@ -246,7 +316,7 @@ manifest = get_manifest()  # 199 tools
 result = await execute_tool("browser_navigate", {"url": "https://example.com"})
 ```
 
-### 5. CLI / Bash / Any Language
+### 6. CLI / Bash / Any Language
 
 ```bash
 export AGENT_OS_TOKEN="your-token"
@@ -259,7 +329,7 @@ export AGENT_OS_TOKEN="your-token"
 
 Run without arguments to see all 198 commands.
 
-### 6. Direct REST API
+### 7. Direct REST API
 
 ```bash
 # WebSocket port: 8000
