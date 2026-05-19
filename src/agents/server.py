@@ -33,6 +33,8 @@ COMMAND_SCOPES = {
     "get-text": ["browser"], "get-attr": ["browser"], "console-logs": ["browser"],
     "smart-find": ["browser"], "smart-find-all": ["browser"],
     "smart-click": ["browser"], "smart-fill": ["browser"],
+    "adaptive-find": ["browser"], "adaptive-save": ["browser"],
+    "adaptive-stats": ["browser"], "adaptive-cleanup": ["browser"],
     # Security commands require 'admin' scope
     "scan-xss": ["admin"], "scan-sqli": ["admin"], "scan-sensitive": ["admin"],
     # Workflow commands require 'workflows' scope
@@ -123,6 +125,8 @@ class AgentServer:
         self._web_query_router_lock = asyncio.Lock()
         self._web_router_lock = asyncio.Lock()
         self._login_handoff_lock = asyncio.Lock()
+        self._adaptive_scraper = None
+        self._adaptive_scraper_lock = asyncio.Lock()
 
         # Agent Swarm (lazy init, thread-safe)
         self._swarm_router = None
@@ -1860,6 +1864,11 @@ class AgentServer:
             "proxy-disable": self._cmd_proxy_disable,
             "proxy-save": self._cmd_proxy_save,
             "proxy-load": self._cmd_proxy_load,
+            # Adaptive Scraper
+            "adaptive-find": self._cmd_adaptive_find,
+            "adaptive-save": self._cmd_adaptive_save,
+            "adaptive-stats": self._cmd_adaptive_stats,
+            "adaptive-cleanup": self._cmd_adaptive_cleanup,
             # Mobile Emulation
             "emulate-device": self._cmd_emulate_device,
             "list-devices": self._cmd_list_devices,
@@ -2084,6 +2093,17 @@ class AgentServer:
             from src.tools.web_query_router import WebQueryRouter
             self._web_query_router = WebQueryRouter()
             return self._web_query_router
+
+    async def _get_adaptive_scraper(self):
+        """Lazy-init AdaptiveScraper."""
+        if self._adaptive_scraper is not None:
+            return self._adaptive_scraper
+        async with self._adaptive_scraper_lock:
+            if self._adaptive_scraper is not None:
+                return self._adaptive_scraper
+            from src.tools.adaptive_scraper import AdaptiveScraper
+            self._adaptive_scraper = AdaptiveScraper(self.browser)
+            return self._adaptive_scraper
 
     async def _get_login_handoff(self):
         """Lazy-init LoginHandoffManager."""
@@ -3580,6 +3600,66 @@ class AgentServer:
     async def _cmd_proxy_load(self, data: Dict, session) -> Dict:
         return await (await self._get_proxy_manager()).load(filename=data.get("filename", "proxies.json"))
 
+    # ─── Adaptive Scraper Commands ───────────────────────────
+
+    async def _cmd_adaptive_find(self, data: Dict, session) -> Dict:
+        """Find an element adaptively — survives page structure changes.
+
+        First tries normal selector. If it fails, loads stored fingerprint
+        and uses similarity scoring to relocate the element.
+
+        Params:
+            selector: CSS/XPath selector (required)
+            identifier: Custom name for this element (optional, defaults to selector)
+            page_id: Browser tab ID (default: "main")
+            auto_save: Save fingerprints automatically (default: true)
+            threshold: Minimum similarity score 0-100 (default: 40)
+        """
+        selector = data.get("selector")
+        if not selector:
+            return {"status": "error", "error": "Missing 'selector'"}
+        scraper = await self._get_adaptive_scraper()
+        return await scraper.find_element(
+            selector=selector,
+            identifier=data.get("identifier"),
+            page_id=data.get("page_id", "main"),
+            auto_save=data.get("auto_save", True),
+            threshold=data.get("threshold", 40.0),
+        )
+
+    async def _cmd_adaptive_save(self, data: Dict, session) -> Dict:
+        """Save an element's fingerprint for future adaptive relocation.
+
+        Params:
+            selector: CSS/XPath selector (required)
+            identifier: Name to save under (required)
+            page_id: Browser tab ID (default: "main")
+        """
+        selector = data.get("selector")
+        identifier = data.get("identifier")
+        if not selector or not identifier:
+            return {"status": "error", "error": "Missing 'selector' or 'identifier'"}
+        scraper = await self._get_adaptive_scraper()
+        return await scraper.save_element(
+            selector=selector,
+            identifier=identifier,
+            page_id=data.get("page_id", "main"),
+        )
+
+    async def _cmd_adaptive_stats(self, data: Dict, session) -> Dict:
+        """Get adaptive scraper statistics — domains, fingerprints, storage."""
+        scraper = await self._get_adaptive_scraper()
+        return {"status": "success", **scraper.get_stats()}
+
+    async def _cmd_adaptive_cleanup(self, data: Dict, session) -> Dict:
+        """Clean up expired fingerprints older than max_age_days.
+
+        Params:
+            max_age_days: Max age in days (default: 30)
+        """
+        scraper = await self._get_adaptive_scraper()
+        return scraper.cleanup_expired(max_age_days=data.get("max_age_days", 30))
+
     # ─── Login Handoff Commands ───────────────────────────────
 
     async def _cmd_detect_login_page(self, data: Dict, session) -> Dict:
@@ -3871,6 +3951,10 @@ class AgentServer:
             "smart-click": {"params": {"text": "string"}, "description": "Click element by visible text"},
             "workflow": {"params": {"steps": "list"}, "description": "Execute multi-step workflow"},
             "tabs": {"params": {"action": "list|new|close|switch"}, "description": "Manage browser tabs"},
+            "adaptive-find": {"params": {"selector": "string", "identifier": "string", "threshold": "int"}, "description": "Find element adaptively — survives page structure changes"},
+            "adaptive-save": {"params": {"selector": "string", "identifier": "string"}, "description": "Save element fingerprint for future adaptive relocation"},
+            "adaptive-stats": {"params": {}, "description": "Get adaptive scraper statistics"},
+            "adaptive-cleanup": {"params": {"max_age_days": "int"}, "description": "Clean up expired fingerprints"},
             "detect-login-page": {"params": {"page_id": "string"}, "description": "Detect if current page is a login/signup page"},
             "login-handoff-start": {"params": {"url": "string", "page_id": "string", "timeout_seconds": "int"}, "description": "Start login handoff — pause AI, give browser control to user for login"},
             "login-handoff-status": {"params": {"handoff_id": "string"}, "description": "Get status of a login handoff session"},

@@ -382,6 +382,27 @@ TOOLS: List[ToolDef] = [
         "Get current active proxy details.", [], "proxy_rotation"),
 
     # ═══════════════════════════════════════════════════════════
+    # ADAPTIVE SCRAPER — Element fingerprinting + relocation
+    # ═══════════════════════════════════════════════════════════
+    ToolDef("adaptive-find", "adaptive_find", "adaptive_find", "adaptive_find",
+        "Find element adaptively — survives page structure changes. Tries normal selector first, then uses stored fingerprints with similarity scoring to relocate the element.",
+        [ToolParam("selector", "string", "CSS or XPath selector", True),
+         ToolParam("identifier", "string", "Custom name for this element (defaults to selector)"),
+         ToolParam("page_id", "string", "Browser tab ID"),
+         ToolParam("auto_save", "boolean", "Save fingerprints automatically (default: true)"),
+         ToolParam("threshold", "number", "Minimum similarity score 0-100 (default: 40)")], "adaptive"),
+    ToolDef("adaptive-save", "adaptive_save", "adaptive_save", "adaptive_save",
+        "Save an element's fingerprint for future adaptive relocation.",
+        [ToolParam("selector", "string", "CSS/XPath selector", True),
+         ToolParam("identifier", "string", "Name to save under", True),
+         ToolParam("page_id", "string", "Browser tab ID")], "adaptive"),
+    ToolDef("adaptive-stats", "adaptive_stats", "adaptive_stats", "adaptive_stats",
+        "Get adaptive scraper statistics — domains, fingerprints, storage.", [], "adaptive"),
+    ToolDef("adaptive-cleanup", "adaptive_cleanup", "adaptive_cleanup", "adaptive_cleanup",
+        "Clean up expired fingerprints.",
+        [ToolParam("max_age_days", "number", "Max age in days (default: 30)")], "adaptive"),
+
+    # ═══════════════════════════════════════════════════════════
     # SMART WAIT ENGINE
     # ═══════════════════════════════════════════════════════════
     ToolDef("smart-wait", "browser_smart_wait", "browser_smart_wait", "smart_wait",
