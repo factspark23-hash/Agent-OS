@@ -10,8 +10,9 @@
 
 <p align="center">
   Agent-OS is a production-grade stealth browser automation server that gives AI agents
-  199 browser tools — navigate, click, fill forms, extract data, handle CAPTCHAs, and more.
-  Works with Claude, GPT-4, Codex, OpenClaw, and any agent that can send an HTTP request.
+  203 browser tools — navigate, click, fill forms, extract data, handle CAPTCHAs, adapt to
+  page changes, and more. Works with Claude, GPT-4, Codex, OpenClaw, and any agent that
+  can send an HTTP request.
 </p>
 
 <p align="center">
@@ -24,7 +25,7 @@
   <a href="https://www.docker.com/">
     <img src="https://img.shields.io/badge/Docker-Ready-2496ED.svg" alt="Docker Ready" />
   </a>
-  <img src="https://img.shields.io/badge/tools-199-brightgreen.svg" alt="199 Tools" />
+  <img src="https://img.shields.io/badge/tools-203-brightgreen.svg" alt="203 Tools" />
   <img src="https://img.shields.io/badge/version-3.2.0-orange.svg" alt="Version 3.2.0" />
 </p>
 
@@ -51,7 +52,7 @@
 
 ## Key Features
 
-### 🌐 Browser Automation — 199 Tools
+### 🌐 Browser Automation — 203 Tools
 - **Navigation** — `navigate`, `back`, `forward`, `reload`, `smart-navigate` (auto HTTP/browser strategy)
 - **Interaction** — `click`, `double-click`, `right-click`, `hover`, `type`, `press`, `fill-form`, `drag-drop`, `scroll`, `select`, `upload`, `checkbox`
 - **Smart Finder** — `smart-click`, `smart-find`, `smart-fill` — find elements by visible text, no CSS selectors needed
@@ -66,13 +67,14 @@
 - **Transcription** — `transcribe` audio/video via Whisper
 
 ### 🔧 Advanced Engines
+- **Adaptive Scraper** ⭐ — Element fingerprinting + SQLite storage. When a selector fails due to page changes, uses similarity scoring to relocate the element automatically. Survives redesigns.
 - **Auto-Heal** — Self-healing selectors: if a CSS selector breaks, finds element by nearby text automatically
 - **Auto-Retry** — Circuit breaker pattern with intelligent error classification and exponential backoff
 - **Smart Wait** — 7 wait strategies: element, network idle, JS condition, DOM stable, page load, composed
 - **Session Recording** — Record browser actions, replay them, export as workflows
 - **Multi-Agent Hub** — Shared browser sessions, task queues, distributed locks, shared memory between agents
 - **Login Handoff** — Pause AI, let human log in, resume with cookies. AI never sees passwords.
-- **Proxy Rotation** — Pool management, health checks, geo-targeting, 6 rotation strategies
+- **Proxy Rotation** — Thread-safe rotator with 4 strategies (cyclic, weighted, random, sticky), health tracking, domain-based sticky sessions, automatic failover
 - **LLM Provider** — Built-in `llm-complete`, `llm-summarize`, `llm-classify`, `llm-extract`
 - **AI Content Extraction** — Structured data extraction with schema.org, forms, metadata
 - **Query Router** — Classify queries: does this need a browser? 3-tier routing (rules → LLM → conservative)
@@ -88,16 +90,16 @@
 - 15+ bot detection vendors blocked (DataDome, PerimeterX, Cloudflare, Akamai, Kasada...)
 - Human-like mouse movements (Bezier curves), typing rhythms, scroll behavior
 
-### 🔌 Connectors — All 199 Tools in Every Connector
+### 🔌 Connectors — All 203 Tools in Every Connector
 | Connector | Tools | Use With | API Key? |
 |-----------|-------|----------|----------|
-| **MCP Passthrough** ⭐ | 199 | Claude Desktop, Claude Code, Codex, any MCP agent | ❌ No |
-| MCP Server | 199 | Claude Desktop, Claude Code, Codex, any MCP agent | Optional |
-| OpenAI | 199 | GPT-4, GPT-4o, any OpenAI-compatible API | Yes |
-| Claude API | 199 | Claude API (tool-use format) | Yes |
-| OpenClaw | 199 | OpenClaw agent framework | Optional |
-| CLI (Bash) | 198 | Any language (Python, Node, Go, Rust...) | Token |
-| HTTP REST | 198 | Direct API calls | Token |
+| **MCP Passthrough** ⭐ | 203 | Claude Desktop, Claude Code, Codex, any MCP agent | ❌ No |
+| MCP Server | 203 | Claude Desktop, Claude Code, Codex, any MCP agent | Optional |
+| OpenAI | 203 | GPT-4, GPT-4o, any OpenAI-compatible API | Yes |
+| Claude API | 203 | Claude API (tool-use format) | Yes |
+| OpenClaw | 203 | OpenClaw agent framework | Optional |
+| CLI (Bash) | 202 | Any language (Python, Node, Go, Rust...) | Token |
+| HTTP REST | 202 | Direct API calls | Token |
 
 ---
 
@@ -251,7 +253,7 @@ Drop-in MCP server that works **without any LLM API key**. The MCP client's LLM 
 ```
 
 **Features:**
-- 199 tools — 192 browser + 7 LLM (built-in rule-based, no API key)
+- 203 tools — 196 browser + 7 LLM (built-in rule-based, no API key)
 - SmartCompressor — 87% token savings on browser results
 - Configurable compression: `aggressive` / `normal` / `off`
 - Works standalone (LLM tools work without Agent-OS server)
@@ -282,7 +284,7 @@ Add to your config file:
 }
 ```
 
-Restart Claude Desktop / Claude Code — **199 browser tools** appear automatically.
+Restart Claude Desktop / Claude Code — **203 browser tools** appear automatically.
 
 ### 3. OpenAI / GPT-4
 
@@ -290,7 +292,7 @@ Restart Claude Desktop / Claude Code — **199 browser tools** appear automatica
 from connectors.openai_connector import get_tools, call_tool
 
 # Get tool definitions
-tools = get_tools("openai")  # 199 tools
+tools = get_tools("openai")  # 203 tools
 
 # Use with OpenAI API
 result = await call_tool("browser_navigate", {"url": "https://github.com"})
@@ -304,7 +306,7 @@ result = await call_tool("browser_smart_click", {"text": "Sign In"})
 from connectors.openai_connector import get_tools, call_tool
 
 # Get tools in Claude format
-tools = get_tools("claude")  # 199 tools
+tools = get_tools("claude")  # 203 tools
 ```
 
 ### 5. OpenClaw
@@ -312,7 +314,7 @@ tools = get_tools("claude")  # 199 tools
 ```python
 from connectors.openclaw_connector import get_manifest, execute_tool
 
-manifest = get_manifest()  # 199 tools
+manifest = get_manifest()  # 203 tools
 result = await execute_tool("browser_navigate", {"url": "https://example.com"})
 ```
 
@@ -327,7 +329,7 @@ export AGENT_OS_TOKEN="your-token"
 ./connectors/agent-os-tool.sh status
 ```
 
-Run without arguments to see all 198 commands.
+Run without arguments to see all 202 commands.
 
 ### 7. Direct REST API
 
@@ -345,7 +347,7 @@ curl -X POST http://localhost:8001/command \
 
 ## Commands Reference
 
-All 198 server commands, organized by category:
+All 202 server commands, organized by category:
 
 | Category | Commands | Count |
 |----------|----------|-------|
@@ -361,6 +363,7 @@ All 198 server commands, organized by category:
 | **Tabs & Device** | `tabs`, `add-extension`, `emulate-device`, `list-devices` | 4 |
 | **Proxy** | `set-proxy`, `get-proxy` | 2 |
 | **Proxy Rotation** | `proxy-add/remove/list/check/check-all/rotate/stats/enable/disable/strategy/save/load/load-file/load-api/record/get` | 16 |
+| **Adaptive Scraper** | `adaptive-find`, `adaptive-save`, `adaptive-stats`, `adaptive-cleanup` | 4 |
 | **Smart Wait** | `smart-wait`, `smart-wait-element/network/js/dom/page/compose` | 7 |
 | **Auto-Heal** | `heal-click/fill/hover/double-click/wait/selector/stats/clear/fingerprint/fingerprint-page` | 10 |
 | **Auto-Retry** | `retry-navigate/click/fill/execute/api-call/stats/health/circuit-breakers/reset-circuit/reset-all-circuits` | 10 |
@@ -377,7 +380,7 @@ All 198 server commands, organized by category:
 | **Query Router** | `classify-query`, `needs-web`, `query-strategy`, `router-stats`, `nav-stats` | 5 |
 | **Transcription** | `transcribe` | 1 |
 | **Status** | `health` | 1 |
-| **Total** | | **198** |
+| **Total** | | **202** |
 
 ---
 
@@ -538,7 +541,7 @@ DataDome, PerimeterX, Imperva, Akamai, Cloudflare Bot Management, Cloudflare Tur
          │            │         │      │         │
          ▼            ▼         ▼      ▼         ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  Connectors (199 tools each)                                │
+│  Connectors (203 tools each)                                │
 │  MCP │ OpenAI │ Claude │ OpenClaw │ CLI │ REST+WebSocket   │
 └────────┬──────┴───┬─────┴────┬─────┴──┬──┴──────┬──────────┘
          │          │          │        │         │
@@ -635,6 +638,7 @@ Agent-OS/
 │   │   └── human_mimicry.py         #   Human behavior simulation
 │   │
 │   ├── tools/                       # Feature engines
+│   │   ├── adaptive_scraper.py      #   Adaptive element fingerprinting + relocation
 │   │   ├── smart_finder.py          #   Find by visible text
 │   │   ├── workflow.py              #   Multi-step workflows
 │   │   ├── network_capture.py       #   Network request capture
@@ -645,13 +649,14 @@ Agent-OS/
 │   │   ├── session_recording.py     #   Record & replay
 │   │   ├── multi_agent.py           #   Multi-agent hub
 │   │   ├── proxy_rotation.py        #   Proxy pool management
+│   │   ├── proxy_rotator.py         #   Thread-safe proxy rotation (4 strategies)
 │   │   ├── login_handoff.py         #   Human-in-the-loop login
 │   │   ├── ai_content.py            #   AI content extraction
 │   │   ├── web_query_router.py      #   Query classification
 │   │   └── transcriber.py           #   Audio/video transcription
 │   │
 │   ├── agents/
-│   │   └── server.py                # WebSocket + HTTP server (198 commands)
+│   │   └── server.py                # WebSocket + HTTP server (202 commands)
 │   │
 │   ├── agent_swarm/                 # Query routing system
 │   │   ├── router/                  #   3-tier router
@@ -667,11 +672,11 @@ Agent-OS/
 │       └── schemas.py               # Input validation (Pydantic v2)
 │
 ├── connectors/                      # AI Platform Connectors
-│   ├── _tool_registry.py            #   199 tool definitions (source of truth)
+│   ├── _tool_registry.py            #   203 tool definitions (source of truth)
 │   ├── mcp_server.py                #   MCP (Claude/Codex)
 │   ├── openai_connector.py          #   OpenAI function-calling
 │   ├── openclaw_connector.py        #   OpenClaw
-│   ├── agent-os-tool.sh             #   CLI (198 commands)
+│   ├── agent-os-tool.sh             #   CLI (202 commands)
 │   └── mcp_config.json              #   MCP config template
 │
 ├── web/                             # React Web UI
@@ -735,3 +740,9 @@ python3 -m pytest tests/ -v
 ## License
 
 [MIT License](LICENSE) — free for commercial and personal use.
+
+### Third-Party Code
+
+This project uses code from the following open-source projects:
+
+- **[Scrapling](https://github.com/D4Vinci/Scrapling)** by Karim Shoair — Adaptive scraping algorithm and proxy rotation engine. Used under [BSD 3-Clause License](THIRD_PARTY_LICENSES.md).
