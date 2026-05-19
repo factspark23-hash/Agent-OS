@@ -403,6 +403,23 @@ TOOLS: List[ToolDef] = [
         [ToolParam("max_age_days", "number", "Max age in days (default: 30)")], "adaptive"),
 
     # ═══════════════════════════════════════════════════════════
+    # DOM SNAPSHOT — Token-Efficient Page Representation
+    # ═══════════════════════════════════════════════════════════
+    ToolDef("snapshot", "browser_snapshot", "browser_snapshot", "snapshot",
+        "Get compact accessibility tree snapshot. Instead of raw HTML (50K+ chars), returns semantic tree (2-5K chars). Use @eN refs to interact with elements. 90%+ token savings.",
+        [ToolParam("compact", "boolean", "Remove empty structural elements (default: true)"),
+         ToolParam("depth", "number", "Limit tree depth"),
+         ToolParam("urls", "boolean", "Include href URLs for links")], "snapshot"),
+    ToolDef("snapshot-interactive", "browser_snapshot_interactive", "browser_snapshot_interactive", "snapshot_interactive",
+        "Get interactive elements only (buttons, links, inputs). Minimal tokens, all clickable things. Returns @eN refs for click/fill/type commands.",
+        [ToolParam("compact", "boolean", "Remove empty structural elements (default: true)"),
+         ToolParam("depth", "number", "Limit tree depth")], "snapshot"),
+    ToolDef("snapshot-selector", "browser_snapshot_selector", "browser_snapshot_selector", "snapshot_selector",
+        "Get snapshot scoped to a CSS selector. Useful for analyzing specific page regions.",
+        [ToolParam("selector", "string", "CSS selector to scope to", True),
+         ToolParam("compact", "boolean", "Remove empty structural elements (default: true)")], "snapshot"),
+
+    # ═══════════════════════════════════════════════════════════
     # SMART WAIT ENGINE
     # ═══════════════════════════════════════════════════════════
     ToolDef("smart-wait", "browser_smart_wait", "browser_smart_wait", "smart_wait",

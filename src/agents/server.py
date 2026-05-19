@@ -35,6 +35,8 @@ COMMAND_SCOPES = {
     "smart-click": ["browser"], "smart-fill": ["browser"],
     "adaptive-find": ["browser"], "adaptive-save": ["browser"],
     "adaptive-stats": ["browser"], "adaptive-cleanup": ["browser"],
+    "snapshot": ["browser"], "snapshot-interactive": ["browser"],
+    "snapshot-selector": ["browser"],
     # Security commands require 'admin' scope
     "scan-xss": ["admin"], "scan-sqli": ["admin"], "scan-sensitive": ["admin"],
     # Workflow commands require 'workflows' scope
@@ -1869,6 +1871,10 @@ class AgentServer:
             "adaptive-save": self._cmd_adaptive_save,
             "adaptive-stats": self._cmd_adaptive_stats,
             "adaptive-cleanup": self._cmd_adaptive_cleanup,
+            # DOM Snapshot (Token Saving)
+            "snapshot": self._cmd_snapshot,
+            "snapshot-interactive": self._cmd_snapshot_interactive,
+            "snapshot-selector": self._cmd_snapshot_selector,
             # Mobile Emulation
             "emulate-device": self._cmd_emulate_device,
             "list-devices": self._cmd_list_devices,
@@ -3659,6 +3665,115 @@ class AgentServer:
         """
         scraper = await self._get_adaptive_scraper()
         return scraper.cleanup_expired(max_age_days=data.get("max_age_days", 30))
+
+    # ─── DOM Snapshot (Token Saving) ─────────────────────────
+
+    async def _cmd_snapshot(self, data: Dict, session) -> Dict:
+        """Get a compact accessibility tree snapshot of the page.
+
+        Instead of raw HTML (50,000+ chars), returns a semantic tree
+        (2,000-5,000 chars) that captures page structure. Use @eN refs
+        to interact with elements in subsequent commands.
+
+        Params:
+            compact: Remove empty structural elements (default: true)
+            depth: Limit tree depth (optional)
+            urls: Include href URLs for links (default: false)
+        """
+        from src.tools.dom_snapshot import SnapshotOptions, take_snapshot, RefMap, estimate_token_savings
+        page = self.browser.page
+        if not page:
+            return {"status": "error", "error": "No active page"}
+
+        ref_map = RefMap()
+        options = SnapshotOptions(
+            compact=data.get("compact", True),
+            depth=data.get("depth"),
+            urls=data.get("urls", False),
+        )
+
+        try:
+            snapshot_text = await take_snapshot(page, options, ref_map)
+            html_len = len(await page.content())
+            savings = estimate_token_savings(html_len, len(snapshot_text))
+
+            return {
+                "status": "success",
+                "snapshot": snapshot_text,
+                "refs": ref_map.to_dict(),
+                "ref_count": len(ref_map._entries),
+                "token_savings": savings,
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def _cmd_snapshot_interactive(self, data: Dict, session) -> Dict:
+        """Get interactive elements only — buttons, links, inputs.
+
+        Best for LLM consumption: minimal tokens, all clickable things.
+        Returns @eN refs that can be used in click/fill/type commands.
+
+        Params:
+            compact: Remove empty structural elements (default: true)
+            depth: Limit tree depth (optional)
+        """
+        from src.tools.dom_snapshot import snapshot_interactive, estimate_token_savings
+        page = self.browser.page
+        if not page:
+            return {"status": "error", "error": "No active page"}
+
+        try:
+            snapshot_text, ref_map = await snapshot_interactive(
+                page,
+                compact=data.get("compact", True),
+                depth=data.get("depth"),
+            )
+            html_len = len(await page.content())
+            savings = estimate_token_savings(html_len, len(snapshot_text))
+
+            return {
+                "status": "success",
+                "snapshot": snapshot_text,
+                "refs": ref_map.to_dict(),
+                "ref_count": len(ref_map._entries),
+                "token_savings": savings,
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    async def _cmd_snapshot_selector(self, data: Dict, session) -> Dict:
+        """Get snapshot scoped to a CSS selector.
+
+        Params:
+            selector: CSS selector to scope to (required)
+            compact: Remove empty structural elements (default: true)
+        """
+        from src.tools.dom_snapshot import snapshot_selector, estimate_token_savings
+        selector = data.get("selector")
+        if not selector:
+            return {"status": "error", "error": "Missing 'selector'"}
+
+        page = self.browser.page
+        if not page:
+            return {"status": "error", "error": "No active page"}
+
+        try:
+            snapshot_text, ref_map = await snapshot_selector(
+                page, selector,
+                compact=data.get("compact", True),
+            )
+            html_len = len(await page.content())
+            savings = estimate_token_savings(html_len, len(snapshot_text))
+
+            return {
+                "status": "success",
+                "snapshot": snapshot_text,
+                "refs": ref_map.to_dict(),
+                "ref_count": len(ref_map._entries),
+                "token_savings": savings,
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
 
     # ─── Login Handoff Commands ───────────────────────────────
 
