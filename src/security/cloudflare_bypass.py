@@ -982,3 +982,5 @@ class CloudflareBypassEngine:
     def cleanup_expired(self) -> int:
         """Clean up expired clearance cookies."""
         return self.clearance_store.clear_expired()
+# Alias for backward compatibility
+CloudflareBypass = CloudflareBypassEngine

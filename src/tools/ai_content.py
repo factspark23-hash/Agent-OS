@@ -2323,18 +2323,47 @@ class CrossPageDeduplicator:
         self._conflicts: List[Conflict] = []
         self._normalizer = DataNormalizer()
 
-    def add_page(self, page_id: str, content: AIContent) -> Dict[str, Any]:
+    def add_page(self, page_id: str, content: Union[AIContent, Dict[str, Any]]) -> Dict[str, Any]:
         """
         Add a page's extracted content to the deduplicator.
 
         Args:
             page_id: Unique identifier for the page
-            content: Extracted AIContent from the page
+            content: Extracted AIContent from the page, or a plain dict
 
         Returns:
             Dict with status and number of pages tracked
         """
         try:
+            # Convert dict to AIContent if needed (same logic as AIStructuredOutput._to_ai_content)
+            if isinstance(content, dict):
+                content = AIContent(
+                    content_type=content.get("content_type", "unknown"),
+                    url=content.get("url", ""),
+                    title=content.get("title", ""),
+                    domain=content.get("domain", ""),
+                    language=content.get("language", ""),
+                    summary=content.get("summary", ""),
+                    main_text=content.get("main_text", content.get("text", "")),
+                    headings=content.get("headings", []),
+                    paragraphs=content.get("paragraphs", []),
+                    tables=content.get("tables", []),
+                    lists=content.get("lists", []),
+                    code_blocks=content.get("code_blocks", []),
+                    forms=content.get("forms", []),
+                    links=content.get("links", []),
+                    images=content.get("images", []),
+                    emails=content.get("emails", []),
+                    phones=content.get("phones", []),
+                    prices=content.get("prices", []),
+                    dates=content.get("dates", []),
+                    schema_org=content.get("schema_org", []),
+                    open_graph=content.get("open_graph", {}),
+                    meta=content.get("meta", {}),
+                    word_count=content.get("word_count", 0),
+                    confidence=content.get("confidence", 0.0),
+                    extraction_method=content.get("extraction_method", ""),
+                )
             self._pages[page_id] = copy.deepcopy(content)
             # Re-detect conflicts whenever a new page is added
             self._conflicts = self._detect_conflicts()

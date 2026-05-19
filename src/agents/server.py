@@ -2793,7 +2793,7 @@ class AgentServer:
             from src.security.captcha_preempt import CaptchaPreemptor
             from src.security.captcha_bypass import CaptchaBypass
             preemptor = CaptchaPreemptor(captcha_bypass=CaptchaBypass())
-            result = await preemptor.assess_url_risk(url)
+            result = preemptor.assess_url_risk(url)
             if hasattr(result, '__dict__'):
                 result = result.__dict__
             elif hasattr(result, '_asdict'):

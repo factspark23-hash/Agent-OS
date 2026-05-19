@@ -189,6 +189,9 @@ class TokenBudget:
             self.requests += 1
         return self.status
 
+    # Alias for backward compatibility
+    record_usage = record
+
     def can_spend(self, estimated_tokens: int) -> bool:
         """Check if we have budget for an estimated number of tokens."""
         with self._lock:
@@ -351,9 +354,9 @@ class ResponseCache:
     Thread-safe with OrderedDict-based LRU eviction.
     """
 
-    def __init__(self, maxsize: int = 1024, similarity_threshold: float = 0.85):
+    def __init__(self, maxsize: int = 1024, max_size: int = None, similarity_threshold: float = 0.85):
         self._cache: OrderedDict[str, Dict[str, Any]] = OrderedDict()
-        self._maxsize = maxsize
+        self._maxsize = max_size if max_size is not None else maxsize
         self._similarity_threshold = similarity_threshold
         self._lock = threading.Lock()
         self.hits = 0
@@ -471,6 +474,7 @@ class SmartTruncation:
         self,
         text: str,
         max_chars: int = 4000,
+        max_tokens: int = None,
         system: str = "",
         keywords: Optional[List[str]] = None,
     ) -> Tuple[str, int]:
@@ -479,12 +483,16 @@ class SmartTruncation:
         Args:
             text: The text to potentially truncate.
             max_chars: Maximum character budget for the text.
+            max_tokens: Alias for max_chars (approximate: 1 token ≈ 4 chars).
             system: System prompt (not counted against budget).
             keywords: Optional keywords to prioritize when truncating.
 
         Returns:
             (truncated_text, chars_saved)
         """
+        # max_tokens alias: approximate 1 token ≈ 4 chars
+        if max_tokens is not None:
+            max_chars = max_tokens * 4
         if len(text) <= max_chars:
             return text, 0
 
